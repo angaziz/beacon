@@ -1,0 +1,39 @@
+# ---- Secrets (never commit real credentials) ----
+secrets.h
+secret*.h
+wifi_config.h
+*.secret
+.env
+.env.*
+
+# ---- Node / tooling (Playwright lives here; huge) ----
+node_modules/
+design/tooling/node_modules/
+playwright-report/
+test-results/
+.playwright/
+
+# ---- Arduino / PlatformIO build artifacts ----
+build/
+.pio/
+*.bin
+*.elf
+*.hex
+*.map
+*.uf2
+# (the IDE compiles to ~/Library/Caches/arduino; these guard against in-tree builds)
+
+# ---- Vendored / cloned upstream (install locally, don't commit) ----
+# Waveshare example pack + Arduino libraries are cloned to ~/Documents, not here.
+
+# ---- OS / editor cruft ----
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+*.code-workspace
+
+# ---- Logs ----
+*.log
