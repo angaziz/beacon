@@ -1,31 +1,27 @@
 #include <Arduino.h>
-#include <Arduino_GFX_Library.h>
 #include "util/log.h"
-#include "config/layout.h"
 #include "hal/power.h"
 #include "hal/display.h"
-
-#define COL_CYAN 0x07FF
-#define COL_RED  0xF800
+#include "hal/touch.h"
+#include "ui/lvgl_port.h"
+#include "ui/test_screen.h"
 
 void setup() {
   Serial.begin(115200);
   delay(300);
   LOGI("boot — core=%s", ESP_ARDUINO_VERSION_STR);
+  enableLoopWDT();   // tech.md §6: watchdog on (arduino-esp32 leaves the loop WDT OFF by default)
 
-  if (!power_begin())   { LOGE("halt: power"); return; }
+  if (!power_begin())     { LOGE("halt: power");   return; }
   delay(120);
-  if (!display_begin()) { LOGE("halt: display"); return; }
-
-  Arduino_GFX* g = display_gfx();
-  // Outer cyan border: with the correct offset it should hug all 4 edges evenly.
-  g->drawRect(0, 0, SCREEN_W, SCREEN_H, COL_CYAN);
-  g->drawRect(1, 1, SCREEN_W - 2, SCREEN_H - 2, COL_CYAN);
-  // SAFE_INSET rectangle: nothing inside it may be clipped by a corner arc.
-  g->drawRect(SAFE_INSET, SAFE_INSET, SCREEN_W - 2 * SAFE_INSET, SCREEN_H - 2 * SAFE_INSET, COL_RED);
-  g->setTextColor(COL_CYAN); g->setTextSize(2);
-  g->setCursor(SAFE_INSET + 6, SAFE_INSET + 6); g->print("SAFE 40");
-  LOGI("cyan-border + safe-inset drawn; verify on panel");
+  if (!display_begin())   { LOGE("halt: display"); return; }
+  touch_begin();
+  if (!lvgl_port_begin()) { LOGE("halt: lvgl");    return; }
+  test_screen_show();
+  LOGI("setup done; boot-to-render %lu ms", (unsigned long)millis());
 }
 
-void loop() { delay(50); }
+void loop() {
+  lvgl_port_tick();
+  delay(5);
+}
