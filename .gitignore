@@ -8,7 +8,7 @@ wifi_config.h
 
 # ---- Node / tooling (Playwright lives here; huge) ----
 node_modules/
-design/tooling/node_modules/
+docs/design/tooling/node_modules/
 playwright-report/
 test-results/
 .playwright/

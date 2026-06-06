@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Beacon — Editorial theme, all 6 screens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{--page:#08080a;--page-muted:#6c727c;--frame-radius:104px}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--page);color:#e9edf2;font-family:'Space Grotesk',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  body{padding:56px 40px 96px;display:flex;flex-direction:column;align-items:center}
+  header.intro{max-width:1100px;text-align:center;margin-bottom:40px}
+  header.intro h1{font-family:'Space Grotesk';font-weight:600;font-size:28px;letter-spacing:.06em}
+  header.intro p{color:var(--page-muted);font-size:14px;font-weight:300;margin-top:8px}
+  .gallery{display:flex;flex-wrap:wrap;gap:40px 40px;justify-content:center;max-width:1100px}
+  .unit{display:flex;flex-direction:column;align-items:center;gap:12px}
+  .cap{font-family:'JetBrains Mono',monospace;font-size:11px;color:#565b64;letter-spacing:.12em;text-transform:uppercase}
+
+  .device{width:480px;height:480px;border-radius:var(--frame-radius);background:#000;position:relative;overflow:hidden;
+    box-shadow:0 0 0 2px #161821,0 0 0 13px #0c0d12,0 28px 70px -20px rgba(0,0,0,.9)}
+  .device::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;box-shadow:inset 0 0 70px 4px rgba(0,0,0,.6)}
+
+  /* ===== EDITORIAL THEME TOKENS ===== */
+  .edi{--ink:#f4f3ef;--dim:#74726c;--acc:#ff4a2b;--line:rgba(255,255,255,.14);--disp:'Space Grotesk',sans-serif;--mono:'JetBrains Mono',monospace}
+  .edi .screen{position:absolute;inset:0;border-radius:inherit;padding:42px 44px;display:flex;flex-direction:column;font-family:var(--disp);color:var(--ink)}
+  .edi .eyebrow{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase;z-index:2}
+  .edi .eyebrow .a{color:var(--acc)}
+  .edi .rule{height:1px;background:var(--line);margin:20px 0;z-index:2}
+
+  /* home */
+  .edi .time{font-weight:500;font-size:132px;letter-spacing:-.05em;line-height:.82;font-variant-numeric:tabular-nums;margin-top:auto}
+  .edi .dateline{font-family:var(--mono);font-size:14px;letter-spacing:.16em;margin-top:18px;text-transform:uppercase}
+  .edi .metarow{display:flex;gap:34px;margin-top:auto;align-items:flex-end}
+  .edi .metarow .m .v{font-weight:500;font-size:40px;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1}
+  .edi .metarow .m .k{font-family:var(--mono);font-size:11px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;margin-top:8px}
+  .edi .metarow .sky{margin-left:auto;text-align:right;font-family:var(--mono);font-size:12px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase;line-height:1.5}
+
+  /* usage — each provider shows BOTH 5h and 7d windows */
+  .edi .utitle{font-weight:700;font-size:21px;letter-spacing:.04em;text-transform:uppercase;z-index:2}
+  .edi .uprov .pn{font-family:var(--mono);font-size:13px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;margin-bottom:14px}
+  .edi .uwins{display:flex;gap:36px}
+  .edi .uwin{flex:1}
+  .edi .uwin .wl{display:flex;justify-content:space-between;align-items:baseline}
+  .edi .uwin .wl .w{font-family:var(--mono);font-size:12px;letter-spacing:.16em;color:var(--dim)}
+  .edi .uwin .wl .p{font-weight:500;font-size:42px;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:.9}
+  .edi .uwin .wl .p i{font-style:normal;color:var(--acc)}
+  .edi .uwin .track{height:3px;background:rgba(255,255,255,.1);margin-top:12px;position:relative}
+  .edi .uwin .track i{position:absolute;left:0;top:0;height:100%;background:var(--ink)}
+  .edi .uwin .rst{font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--dim);margin-top:9px}
+
+  /* finance */
+  .edi .fin{flex:1;display:flex;flex-direction:column;justify-content:center;margin-top:6px}
+  .edi .fin .row{display:flex;justify-content:space-between;align-items:baseline;padding:13px 0;border-bottom:1px solid var(--line)}
+  .edi .fin .row:last-child{border-bottom:0}
+  .edi .fin .sym{font-family:var(--mono);font-size:13px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
+  .edi .fin .right{display:flex;align-items:baseline;gap:18px}
+  .edi .fin .val{font-weight:500;font-size:29px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .edi .fin .chg{font-family:var(--mono);font-size:14px;width:92px;text-align:right}
+  .edi .fin .chg.up{color:var(--ink)}
+  .edi .fin .chg.down{color:var(--acc)}
+
+  /* coding buddy */
+  .edi .bstat{font-family:var(--mono);font-size:12px;letter-spacing:.1em;color:var(--dim);margin-top:14px;z-index:2;text-transform:uppercase}
+  .edi .alert{margin:auto 0;z-index:2}
+  .edi .alert .plabel{color:var(--acc);font-family:var(--mono);font-size:13px;letter-spacing:.28em;text-transform:uppercase}
+  .edi .alert .tool{font-weight:600;font-size:56px;letter-spacing:-.02em;margin-top:10px}
+  .edi .alert .hint{font-family:var(--mono);font-size:16px;color:var(--ink);margin-top:16px;padding:12px 14px;border:1px solid var(--line);overflow:hidden;white-space:nowrap}
+  .edi .actions{display:flex;border-top:1px solid var(--line);z-index:2}
+  .edi .actions .act{flex:1;padding-top:18px;font-family:var(--mono);font-size:14px;letter-spacing:.12em;text-transform:uppercase}
+  .edi .actions .act.deny{color:var(--dim)}
+  .edi .actions .act.approve{color:var(--acc);text-align:right;border-left:1px solid var(--line);padding-left:24px}
+  .edi .actions .act.deny{padding-right:24px}
+
+  /* now playing */
+  .edi .np-head{display:flex;justify-content:space-between}
+  .edi .np-body{display:flex;gap:24px;align-items:center;margin:auto 0}
+  .edi .art{width:124px;height:124px;border-radius:8px;flex-shrink:0;background:linear-gradient(140deg,#3a2018,#120a14 70%);border:1px solid var(--line);position:relative;overflow:hidden}
+  .edi .art::after{content:"";position:absolute;left:-20%;top:-30%;width:90px;height:90px;border-radius:50%;background:radial-gradient(circle,rgba(255,74,43,.6),transparent 70%)}
+  .edi .np-meta .title{font-weight:600;font-size:36px;letter-spacing:-.02em;line-height:1.02}
+  .edi .np-meta .artist{color:var(--dim);font-size:18px;margin-top:10px}
+  .edi .np-prog{margin-top:6px}
+  .edi .np-prog .bar{height:2px;background:var(--line);position:relative;margin-bottom:9px}
+  .edi .np-prog .bar i{position:absolute;left:0;top:0;height:100%;width:37%;background:var(--ink)}
+  .edi .np-prog .row{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;color:var(--dim);letter-spacing:.06em}
+  .edi .np-prog .row .state{color:var(--acc)}
+
+  /* settings */
+  .edi .set{flex:1;display:flex;flex-direction:column;justify-content:center}
+  .edi .set .row{display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)}
+  .edi .set .row:last-child{border-bottom:0}
+  .edi .set .k{font-weight:500;font-size:22px}
+  .edi .set .v{font-family:var(--mono);font-size:14px;color:var(--dim);letter-spacing:.04em}
+  .edi .set .row.sel .v{color:var(--acc)}
+</style>
+</head>
+<body>
+  <header class="intro"><h1>Beacon — Editorial theme, all 6 MVP screens</h1><p>Default theme realized across every screen. Same design tokens, six contexts.</p></header>
+  <div class="gallery edi">
+
+    <!-- HOME -->
+    <div class="unit"><div class="device" data-shot="edi-home"><div class="screen">
+      <div class="eyebrow"><span class="a">BEACON / HOME</span><span>W23 &middot; 05.06</span></div>
+      <div class="time">09:41</div>
+      <div class="dateline">Wed &mdash; 05 June 2026</div>
+      <div class="rule"></div>
+      <div class="metarow"><div class="m"><div class="v">31.8&deg;</div><div class="k">Temp</div></div><div class="m"><div class="v">57%</div><div class="k">Humidity</div></div><div class="sky">Partly<br>cloudy</div></div>
+    </div></div><div class="cap">1 &middot; Home</div></div>
+
+    <!-- FINANCE -->
+    <div class="unit"><div class="device" data-shot="edi-finance"><div class="screen">
+      <div class="eyebrow"><span class="a">BEACON / MARKETS</span><span>15:02 WIB</span></div>
+      <div class="fin">
+        <div class="row"><span class="sym">USD / IDR</span><span class="right"><span class="val">18,026</span><span class="chg up">&#9650; 0.12%</span></span></div>
+        <div class="row"><span class="sym">BTC / USD</span><span class="right"><span class="val">62,392</span><span class="chg up">&#9650; 2.14%</span></span></div>
+        <div class="row"><span class="sym">S&amp;P 500</span><span class="right"><span class="val">6,012</span><span class="chg up">&#9650; 0.41%</span></span></div>
+        <div class="row"><span class="sym">NASDAQ</span><span class="right"><span class="val">19,540</span><span class="chg up">&#9650; 0.63%</span></span></div>
+        <div class="row"><span class="sym">ARKK</span><span class="right"><span class="val">52.18</span><span class="chg down">&#9660; 0.88%</span></span></div>
+        <div class="row"><span class="sym">IHSG</span><span class="right"><span class="val">5,594</span><span class="chg down">&#9660; 0.34%</span></span></div>
+      </div>
+    </div></div><div class="cap">2 &middot; Finance</div></div>
+
+    <!-- AI USAGE -->
+    <div class="unit"><div class="device" data-shot="edi-usage"><div class="screen">
+      <div class="eyebrow"><span class="a">BEACON / LIMITS</span><span>POLL 30S</span></div>
+      <div class="utitle" style="margin-top:26px">AI Usage</div>
+      <div class="rule"></div>
+      <div class="uprov">
+        <div class="pn">Claude</div>
+        <div class="uwins">
+          <div class="uwin"><div class="wl"><span class="w">5H</span><span class="p">24<i>%</i></span></div><div class="track"><i style="width:24%"></i></div><div class="rst">resets 2h08</div></div>
+          <div class="uwin"><div class="wl"><span class="w">7D</span><span class="p">24<i>%</i></span></div><div class="track"><i style="width:24%"></i></div><div class="rst">resets Sun</div></div>
+        </div>
+      </div>
+      <div class="rule"></div>
+      <div class="uprov">
+        <div class="pn">Codex</div>
+        <div class="uwins">
+          <div class="uwin"><div class="wl"><span class="w">5H</span><span class="p">1<i>%</i></span></div><div class="track"><i style="width:1%"></i></div><div class="rst">resets 4h41</div></div>
+          <div class="uwin"><div class="wl"><span class="w">7D</span><span class="p">29<i>%</i></span></div><div class="track"><i style="width:29%"></i></div><div class="rst">resets Sun</div></div>
+        </div>
+      </div>
+      <div style="margin-top:auto"></div>
+    </div></div><div class="cap">3 &middot; AI Usage</div></div>
+
+    <!-- CODING BUDDY -->
+    <div class="unit"><div class="device" data-shot="edi-buddy"><div class="screen">
+      <div class="eyebrow"><span class="a">BEACON / CLAUDE</span><span>REQ a1b2</span></div>
+      <div class="bstat">2 RUNNING &middot; 1 WAITING &middot; 184K TOK &middot; CTX 42%</div>
+      <div class="alert">
+        <div class="plabel">Permission &mdash; approve?</div>
+        <div class="tool">Bash</div>
+        <div class="hint">rm -rf /tmp/build-cache</div>
+      </div>
+      <div class="actions"><div class="act deny">&#9664; Deny</div><div class="act approve">Approve &#9654;</div></div>
+    </div></div><div class="cap">4 &middot; Coding Buddy</div></div>
+
+    <!-- NOW PLAYING -->
+    <div class="unit"><div class="device" data-shot="edi-music"><div class="screen">
+      <div class="eyebrow np-head"><span class="a">BEACON / NOW PLAYING</span><span>&#9654; MACBOOK PRO</span></div>
+      <div class="np-body">
+        <div class="art"></div>
+        <div class="np-meta"><div class="title">Midnight City</div><div class="artist">M83</div></div>
+      </div>
+      <div class="np-prog"><div class="bar"><i></i></div><div class="row"><span>1:24</span><span class="state">&#9646;&#9646; PLAYING</span><span>3:48</span></div></div>
+    </div></div><div class="cap">5 &middot; Now-Playing</div></div>
+
+    <!-- SETTINGS -->
+    <div class="unit"><div class="device" data-shot="edi-settings"><div class="screen">
+      <div class="eyebrow"><span class="a">BEACON / SETTINGS</span><span>v0.1</span></div>
+      <div class="set">
+        <div class="row"><span class="k">Wi-Fi</span><span class="v">HomeNet 5G &#10003;</span></div>
+        <div class="row"><span class="k">Brightness</span><span class="v">80%</span></div>
+        <div class="row sel"><span class="k">Theme</span><span class="v">Editorial &#8250;</span></div>
+        <div class="row"><span class="k">Tickers</span><span class="v">10 assets &#8250;</span></div>
+        <div class="row"><span class="k">Sleep</span><span class="v">5 min</span></div>
+        <div class="row"><span class="k">About</span><span class="v">&#8250;</span></div>
+      </div>
+    </div></div><div class="cap">6 &middot; Settings</div></div>
+
+  </div>
+</body>
+</html>

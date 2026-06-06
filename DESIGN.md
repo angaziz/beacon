@@ -72,6 +72,10 @@ Editorial character: oversized tabular figures, hard hairline rules, strict left
 
 Outlier widgets needing bespoke code (not just tokens): Analog clock face/hands, Oscilloscope waveform trace. All others are token + gauge-style driven.
 
+**Canonical theme IDs** (NVS keys / filenames / `beacon_theme_t.id` in `tech.md`): `editorial` (default), `hud`, `calm`, `blueprint`, `led`, `oscilloscope`, `analog` — these map to the display names above (Editorial Index, Aerospace HUD, Calm Futurism, Blueprint, LED Matrix, Oscilloscope, Analog Neo).
+
+**Token authority:** this doc owns token *values* and the theme catalog; `tech.md` §6 owns the runtime contract (`beacon_theme_t` struct + `gauge_style_t` enum). Keep them in sync.
+
 ## Screens (MVP — 6)
 
 1. **Home** — clock, date, weather (temp + humidity + condition). [WiFi]
@@ -81,7 +85,19 @@ Outlier widgets needing bespoke code (not just tokens): Analog clock face/hands,
 5. **Now-Playing** — track / artist / progress / transport, target device. Controls an active Spotify Connect device (the device is a remote, not a player). [WiFi / Spotify]
 6. **Settings** — Wi-Fi, brightness, **Theme picker**, tickers, sleep, about. [local / NVS]
 
-Navigation: horizontal swipe = prev/next screen (carousel); swipe-down = quick brightness; long-press = screen context action; IMU raise/flick = wake; shake = dismiss overlay / exit a subview (the carousel itself has no back-stack). Minimum touch target ~64px (~3mm) given arm's-length use; primary actions get the largest hit areas.
+Navigation (with `prd.md` phase): horizontal **swipe** = prev/next screen (carousel) — **P0**; **long-press** = screen context action and **swipe-down** = quick brightness — **P3**; **IMU** raise/flick = wake, shake = dismiss overlay / exit a subview (no carousel back-stack) — **P3**. Minimum touch target ~64px (~3mm) given arm's-length use; primary actions get the largest hit areas.
+
+## Rounded display & safe area
+
+The panel is a **rounded-square** (466×466), not a true rectangle — the four corners are cut by an arc. Design to the panel minus those arcs.
+
+- **Assume corner radius ≈ 90 px (~20% of 466)** until measured on hardware (verify with the cyan-border test in the display-power spike).
+- **Edge safe margin ≥ 40 px** on every side for all content. At 40 px the content rectangle's corners fall inside a corner arc up to ~96 px radius, so nothing clips.
+- **Corner keep-out:** nothing critical or tappable inside the corner arcs. Edge-spanning rows (the `BEACON / SCREEN` eyebrow, finance/settings rows, the bottom meta row) keep their **end content ≥ 40 px from the side edges** so it isn't clipped at the top/bottom corners.
+- **Anchor primary info centrally**, where arcs never reach (clock, big % figures, now-playing). Corners hold only low-stakes labels (status, units), inset.
+- A **tap target clipped by a corner is unreachable** — keep every hit area fully inside the safe zone.
+
+The mockup device frames render the true rounded shape; [`docs/design/mockups/safe-area.html`](docs/design/mockups/safe-area.html) overlays the safe zone for verification, and the six current screens sit within it. Firmware: define `SAFE_INSET` once and lay every screen out inside the inset rounded-rect.
 
 ## Components
 
@@ -136,7 +152,9 @@ The device can approve tool execution, so the control path is security-sensitive
 
 ## Technical constraints & risks
 
-- **WiFi + BLE coexistence (top risk).** The ESP32-S3 shares one 2.4GHz radio between WiFi and BLE (time-division). Beacon needs both live (device-direct WiFi + hub BLE). Validate stability + heap headroom early; fallback = run buddy/usage over LAN WebSocket so the device is WiFi-only. Keep the hub transport abstract so this swap is cheap.
-- **Memory.** LVGL draw buffer in internal SRAM (partial render), framebuffer in PSRAM; NimBLE (not Bluedroid); one TLS socket at a time. One theme live at runtime.
+- **WiFi + BLE coexistence — proven for advertising + insecure TLS (spike 2026-06-06).** WiFi STA + TLS HTTPS + BLE **advertising** + display ran together with **~160 KB min free internal heap**, 8.3 MB PSRAM free, 0 crashes. **Still to verify at P2:** an *active bonded BLE link* + *cert-validated TLS* + the *full LVGL UI* (all use a bit more heap). Keep the `HubLink` transport abstract as insurance (LAN-WebSocket fallback). BLE stack = **Bluedroid** (built into arduino-esp32 3.x; NimBLE-Arduino 1.4.x crashes on this core). See `docs/spikes/wifi-ble-coexistence/` and `tech.md` §2.
+- **AXP2101 init is mandatory before display.** Enable ALDO1/2/3/4 @3.3V on boot (ALDO2 = DSI_PWR_EN for the 2.16). Skipping it leaves the panel dark after any PWR-button power cycle. Brightness via raw DCS `0x51` (no `Display_Brightness` in the GFX build).
+- **Panel is 466x466** in the working driver (not the advertised 480x480) — target layouts to 466.
+- **Memory.** LVGL buffers per `tech.md` §6 (two partial draw buffers; internal SRAM if the ≥60 KB free-heap floor holds, else PSRAM; no full framebuffer). **Bluedroid** BLE (not NimBLE); one TLS socket at a time; one theme live at runtime.
 - **Font / flash budget (not yet sized).** Each theme's display fonts (some 100px+) are glyph sets in flash. Subset large fonts to used glyphs (digits, `:`, `%`, `°`, A-Z as needed) and choose bpp deliberately. Produce a font/asset manifest + flash partition layout (incl. OTA slots) during the spike; "16MB is enough" must be proven against that budget, not assumed.
 - **Time.** NTP over WiFi with PCF85063 RTC for offline persistence; timezone/DST configurable in Settings; weather location ties to the same locality. Reset-window math (5h/7d) uses device time, so correct TZ matters.

@@ -18,11 +18,13 @@ shows it works beats a long argument.
 
 ## Repo areas
 
-- `firmware/` — Arduino (C++) for the ESP32-S3. Setup + flashing: `firmware/spike/SETUP.md`.
-- `design/mockups/` — HTML theme mockups. Iterate here, render with the Playwright helper
-  in `design/tooling/` (`node design/tooling/shoot.mjs <file.html> <out-dir>`), then eyeball
-  the PNGs. Keep new themes token-driven per `DESIGN.md`.
-- `docs/` — research and specs.
+- `docs/spikes/` — throwaway Arduino (C++) hardware spikes + setup/flashing guide
+  (`docs/spikes/SETUP.md`). The product firmware will live under a top-level `firmware/`
+  once the build phase starts.
+- `docs/design/mockups/` — HTML theme mockups. Iterate here, render with the Playwright helper
+  in `docs/design/tooling/` (`node docs/design/tooling/shoot.mjs <file.html> <out-dir>`), then
+  eyeball the PNGs. Keep new themes token-driven per `DESIGN.md`.
+- `docs/` — research, design, and spikes.
 
 ## Ground rules
 

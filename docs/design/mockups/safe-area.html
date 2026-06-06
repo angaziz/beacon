@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Beacon — Rounded display safe area</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#08080a;padding:60px;display:flex;gap:48px;align-items:flex-start;font-family:Inter,system-ui,sans-serif}
+  .col{display:flex;flex-direction:column;gap:14px;align-items:center}
+  .cap{font-family:'JetBrains Mono',monospace;font-size:12px;color:#7d828c;letter-spacing:.08em;text-align:center;max-width:466px;line-height:1.5}
+  .cap b{color:#cfd3da}
+
+  /* faithful rounded-square panel: 466x466, corner radius ~92 (~20%) */
+  .device{width:466px;height:466px;border-radius:92px;background:#000;position:relative;overflow:hidden;
+    box-shadow:0 0 0 2px #161821,0 0 0 12px #0c0d12,0 24px 60px -20px rgba(0,0,0,.9)}
+
+  /* corner keep-out: faint red where the arcs cut the square */
+  .keepout{position:absolute;inset:0;pointer-events:none;
+    background:
+      radial-gradient(120px 120px at 0 0,    rgba(255,74,43,.22), transparent 70%),
+      radial-gradient(120px 120px at 100% 0, rgba(255,74,43,.22), transparent 70%),
+      radial-gradient(120px 120px at 0 100%, rgba(255,74,43,.22), transparent 70%),
+      radial-gradient(120px 120px at 100% 100%, rgba(255,74,43,.22), transparent 70%);}
+
+  /* safe zone: 40px inset rounded-rect (radius 92-40=52) */
+  .safe{position:absolute;inset:40px;border:1.5px dashed rgba(70,226,255,.65);border-radius:52px}
+  .safe .tag{position:absolute;top:-10px;left:24px;background:#000;padding:0 8px;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;color:#46e2ff}
+
+  /* sample Editorial content, laid out INSIDE the safe zone */
+  .content{position:absolute;inset:40px;padding:8px 6px;display:flex;flex-direction:column;font-family:'Space Grotesk',sans-serif;color:#f4f3ef}
+  .eyebrow{display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.14em;color:#74726c;text-transform:uppercase}
+  .eyebrow .a{color:#ff4a2b}
+  .clock{margin:auto 0;font-weight:500;font-size:120px;letter-spacing:-.05em;line-height:.82;font-variant-numeric:tabular-nums;text-align:left}
+  .meta{display:flex;gap:30px;align-items:flex-end}
+  .meta .v{font-weight:500;font-size:34px}
+  .meta .k{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.16em;color:#74726c;text-transform:uppercase;margin-top:6px}
+  .meta .sky{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:11px;color:#74726c;text-transform:uppercase;text-align:right;line-height:1.5}
+</style>
+</head>
+<body>
+  <div class="col">
+    <div class="device" data-shot="safe-area">
+      <div class="keepout"></div>
+      <div class="safe"><span class="tag">SAFE 40PX</span></div>
+      <div class="content">
+        <div class="eyebrow"><span class="a">BEACON / HOME</span><span>W23</span></div>
+        <div class="clock">09:41</div>
+        <div class="meta"><div><div class="v">31.8&deg;</div><div class="k">Temp</div></div><div><div class="v">57%</div><div class="k">Humidity</div></div><div class="sky">Partly<br>cloudy</div></div>
+      </div>
+    </div>
+    <div class="cap">466&times;466 rounded-square. <b>Red</b> = corner keep-out (arcs cut the square). <b>Cyan dashed</b> = 40px safe zone. All content (eyebrow, clock, meta) sits inside it; corners hold nothing critical.</div>
+  </div>
+</body>
+</html>

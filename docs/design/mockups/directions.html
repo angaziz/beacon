@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Beacon — Visual Directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700;800&family=Doto:wght@400;600;800;900&family=Space+Grotesk:wght@300;400;500;600;700&family=Pixelify+Sans:wght@400;500;600;700&family=Inter:wght@200;300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{ --page:#08080a; --page-ink:#e9edf2; --page-muted:#6c727c; --frame-radius:104px; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--page);color:var(--page-ink);font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  body{padding:56px 40px 96px;display:flex;flex-direction:column;align-items:center;gap:8px}
+  header.intro{max-width:1100px;text-align:center;margin-bottom:28px}
+  header.intro h1{font-family:Rajdhani,sans-serif;font-weight:600;font-size:30px;letter-spacing:.14em;text-transform:uppercase}
+  header.intro p{color:var(--page-muted);font-size:14px;font-weight:300;margin-top:8px;line-height:1.6}
+  header.intro code{font-family:'JetBrains Mono',monospace;color:#9aa1ab;font-size:12.5px}
+  .lane{width:min(1100px,100%);margin-top:64px}
+  .lane-head{display:flex;align-items:baseline;gap:16px;margin-bottom:22px;flex-wrap:wrap}
+  .lane-num{font-family:'JetBrains Mono',monospace;font-size:13px;color:#4a4f59}
+  .lane-head h2{font-family:Rajdhani,sans-serif;font-weight:600;font-size:23px;letter-spacing:.1em;text-transform:uppercase}
+  .lane-head p{color:var(--page-muted);font-size:13.5px;font-weight:300;flex:1 1 320px;min-width:260px;line-height:1.55}
+  .frames{display:flex;gap:40px;flex-wrap:wrap}
+  .unit{display:flex;flex-direction:column;align-items:center;gap:12px}
+  .cap{font-family:'JetBrains Mono',monospace;font-size:11px;color:#565b64;letter-spacing:.12em;text-transform:uppercase}
+  .device{ width:480px;height:480px;border-radius:var(--frame-radius); background:#000;position:relative;overflow:hidden;
+    box-shadow:0 0 0 2px #161821, 0 0 0 13px #0c0d12, 0 28px 70px -20px rgba(0,0,0,.9); }
+  .device::after{ content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none; box-shadow:inset 0 0 70px 4px rgba(0,0,0,.65); }
+  .screen{position:absolute;inset:0;border-radius:inherit;padding:40px;display:flex;flex-direction:column}
+  .ring{position:relative;border-radius:50%}
+  .ring .hole{position:absolute;border-radius:50%;background:#000}
+  .ring .lbl{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1}
+
+  /* ===== 01 AEROSPACE HUD ===== */
+  .hud{--cy:#46e2ff;--am:#ffb33a;--ink:#dff4fb;--dim:#3d5a66;--line:rgba(70,226,255,.14)}
+  .hud .screen{font-family:Rajdhani,sans-serif;color:var(--ink)}
+  .hud .grid{position:absolute;inset:0;border-radius:inherit;background:repeating-linear-gradient(0deg,transparent 0 47px,var(--line) 47px 48px),repeating-linear-gradient(90deg,transparent 0 47px,var(--line) 47px 48px);-webkit-mask:radial-gradient(circle at 50% 50%,#000 62%,transparent 86%);mask:radial-gradient(circle at 50% 50%,#000 62%,transparent 86%);}
+  .hud .topbar{display:flex;justify-content:space-between;align-items:center;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.12em;color:var(--dim);z-index:2}
+  .hud .topbar .on{color:var(--cy)}
+  .hud .clock{margin-top:auto;margin-bottom:auto;text-align:center;z-index:2}
+  .hud .clock .t{font-weight:600;font-size:118px;letter-spacing:.02em;line-height:.9;font-variant-numeric:tabular-nums;text-shadow:0 0 22px rgba(70,226,255,.35)}
+  .hud .clock .t .sec{font-size:42px;color:var(--cy);vertical-align:super;margin-left:6px}
+  .hud .clock .d{margin-top:10px;font-family:'JetBrains Mono',monospace;font-size:14px;letter-spacing:.34em;color:var(--dim);text-transform:uppercase}
+  .hud .wx{display:flex;justify-content:center;gap:30px;align-items:center;z-index:2;margin-bottom:6px}
+  .hud .wx .v{font-weight:600;font-size:30px;font-variant-numeric:tabular-nums}
+  .hud .wx .v small{font-size:15px;color:var(--dim);font-weight:500;margin-left:3px}
+  .hud .wx .sep{width:1px;height:30px;background:var(--line)}
+  .hud .wx .am{color:var(--am)}
+  .hud .usagewrap{display:flex;flex-direction:column;height:100%;z-index:2}
+  .hud .utitle{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.28em;color:var(--dim);text-align:center;text-transform:uppercase}
+  .hud .rings{flex:1;display:flex;align-items:center;justify-content:center;gap:46px}
+  .hud .rcol{display:flex;flex-direction:column;align-items:center;gap:14px}
+  .hud .rname{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.2em;color:var(--dim)}
+  .hud .pct{font-weight:700;font-size:38px;font-variant-numeric:tabular-nums}
+  .hud .sub{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--dim);letter-spacing:.08em}
+
+  /* ===== 04 CALM FUTURISM ===== */
+  .calm{--ink:#ededf0;--dim:#5d6066;--accent:#ff3b30}
+  .calm .device{background:#000}
+  .calm .screen{font-family:'Doto',monospace;color:var(--ink);padding:46px;font-weight:600}
+  .calm .top{display:flex;justify-content:space-between;font-family:Inter;font-weight:300;font-size:12px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase;z-index:2}
+  .calm .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block;box-shadow:0 0 8px var(--accent);vertical-align:middle}
+  .calm .clock{margin:auto 0;text-align:center;z-index:2}
+  .calm .clock .t{font-family:'Doto';font-weight:800;font-size:120px;line-height:.86;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+  .calm .clock .d{font-family:Inter;font-weight:300;font-size:13px;letter-spacing:.42em;color:var(--dim);margin-top:18px;text-transform:uppercase}
+  .calm .wx{display:flex;justify-content:center;gap:40px;z-index:2;text-align:center}
+  .calm .wx .v{font-family:'Doto';font-weight:800;font-size:34px}
+  .calm .wx .c{font-family:Inter;font-weight:300;font-size:11px;letter-spacing:.2em;color:var(--dim);margin-top:6px;text-transform:uppercase}
+  .calm .utitle{font-family:Inter;font-weight:300;font-size:12px;letter-spacing:.3em;color:var(--dim);text-transform:uppercase;text-align:center;z-index:2}
+  .calm .ucol{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:40px;z-index:2}
+  .calm .urow{text-align:center}
+  .calm .urow .nm{font-family:Inter;font-weight:300;font-size:12px;letter-spacing:.28em;color:var(--dim);text-transform:uppercase;margin-bottom:10px}
+  .calm .urow .big{font-family:'Doto';font-weight:800;font-size:58px;line-height:.9}
+  .calm .urow .dots{margin-top:14px;letter-spacing:6px;font-size:18px;color:var(--dim)}
+  .calm .urow .dots b{color:var(--ink);font-weight:800}
+
+  /* ===== 05 EDITORIAL INDEX ===== */
+  .edi{--ink:#f4f3ef;--dim:#74726c;--acc:#ff4a2b;--rule:rgba(255,255,255,.14)}
+  .edi .device{background:#000}
+  .edi .screen{font-family:'Space Grotesk',sans-serif;color:var(--ink);padding:42px 44px}
+  .edi .eyebrow{display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase;z-index:2}
+  .edi .eyebrow .a{color:var(--acc)}
+  .edi .time{font-weight:500;font-size:132px;letter-spacing:-.05em;line-height:.82;font-variant-numeric:tabular-nums;margin-top:auto}
+  .edi .dateline{font-family:'JetBrains Mono',monospace;font-size:14px;letter-spacing:.16em;color:var(--ink);margin-top:18px;text-transform:uppercase}
+  .edi .rule{height:1px;background:var(--rule);margin:22px 0;z-index:2}
+  .edi .metarow{display:flex;gap:34px;margin-top:auto;align-items:flex-end;z-index:2}
+  .edi .metarow .m .v{font-weight:500;font-size:40px;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1}
+  .edi .metarow .m .k{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;margin-top:8px}
+  .edi .metarow .sky{margin-left:auto;text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase;line-height:1.5}
+  .edi .utitle{font-weight:700;font-size:21px;letter-spacing:.04em;z-index:2;text-transform:uppercase}
+  .edi .ustat{z-index:2}
+  .edi .ustat .line{display:flex;justify-content:space-between;align-items:baseline}
+  .edi .ustat .nm{font-family:'JetBrains Mono',monospace;font-size:13px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase}
+  .edi .ustat .big{font-weight:500;font-size:62px;letter-spacing:-.04em;font-variant-numeric:tabular-nums;line-height:.9}
+  .edi .ustat .big i{font-style:normal;color:var(--acc)}
+  .edi .ustat .det{font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.1em;color:var(--dim);margin-top:8px}
+  .edi .track{height:3px;background:rgba(255,255,255,.1);margin-top:14px;position:relative}
+  .edi .track i{position:absolute;left:0;top:0;height:100%;background:var(--ink)}
+  .edi .track.acc i{background:var(--acc)}
+
+  /* ===== 07 BLUEPRINT / SCHEMATIC ===== */
+  .blu{--ln:#7cb9ff;--ink:#d4e6ff;--dim:#456589;--grid:rgba(124,185,255,.06)}
+  .blu .device{background:#02050b}
+  .blu .screen{font-family:'Chakra Petch',sans-serif;color:var(--ink);padding:40px}
+  .blu .bgrid{position:absolute;inset:0;border-radius:inherit;background:repeating-linear-gradient(0deg,transparent 0 23px,var(--grid) 23px 24px),repeating-linear-gradient(90deg,transparent 0 23px,var(--grid) 23px 24px)}
+  .blu .reg{position:absolute;width:18px;height:18px;border:1.5px solid rgba(124,185,255,.5);z-index:3}
+  .blu .reg.tl{top:30px;left:30px;border-right:0;border-bottom:0}
+  .blu .reg.tr{top:30px;right:30px;border-left:0;border-bottom:0}
+  .blu .reg.bl{bottom:30px;left:30px;border-right:0;border-top:0}
+  .blu .reg.br{bottom:30px;right:30px;border-left:0;border-top:0}
+  .blu .hl{display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;color:var(--dim);z-index:2;text-transform:uppercase}
+  .blu .center{margin:auto 0;position:relative;z-index:2;text-align:center}
+  .blu .cross{position:absolute;left:50%;top:50%;width:340px;height:1px;background:rgba(124,185,255,.3);transform:translate(-50%,-50%);z-index:1}
+  .blu .cross.v{width:1px;height:200px}
+  .blu .t{font-weight:600;font-size:104px;letter-spacing:.01em;line-height:1;font-variant-numeric:tabular-nums;position:relative;z-index:2;text-shadow:0 0 18px rgba(124,185,255,.3)}
+  .blu .dim{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:20px;color:var(--dim);font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.14em;z-index:2}
+  .blu .dim::before,.blu .dim::after{content:"";height:1px;width:46px;background:rgba(124,185,255,.4)}
+  .blu .annorow{display:flex;justify-content:space-between;z-index:2;font-family:'JetBrains Mono',monospace}
+  .blu .anno{font-size:12px;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
+  .blu .anno b{display:block;font-family:'Chakra Petch';font-weight:600;font-size:26px;color:var(--ink);letter-spacing:0;margin-top:4px;text-transform:none}
+  .blu .anno .tick{color:var(--ln)}
+  /* usage measures */
+  .blu .utitle{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.2em;color:var(--dim);z-index:2;text-transform:uppercase}
+  .blu .measures{margin:auto 0;display:flex;flex-direction:column;gap:40px;z-index:2}
+  .blu .meas .top{display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.12em;color:var(--dim);margin-bottom:10px;text-transform:uppercase}
+  .blu .meas .top b{color:var(--ink);font-family:'Chakra Petch';font-weight:600;font-size:24px}
+  .blu .axis{height:24px;position:relative;border-left:1px solid rgba(124,185,255,.4);border-right:1px solid rgba(124,185,255,.4)}
+  .blu .axis .base{position:absolute;left:0;right:0;top:50%;height:1px;background:rgba(124,185,255,.25)}
+  .blu .axis .fillline{position:absolute;left:0;top:50%;height:1px;background:var(--ln);box-shadow:0 0 8px var(--ln)}
+  .blu .axis .marker{position:absolute;top:0;width:1px;height:100%;background:var(--ln);box-shadow:0 0 8px var(--ln)}
+  .blu .axis .marker::after{content:"";position:absolute;top:-4px;left:-3px;width:7px;height:7px;border:1px solid var(--ln);transform:rotate(45deg);background:#02050b}
+
+  /* ===== 08 LED MATRIX ===== */
+  .led{--amb:#ffc24d;--dim:#4a3a14}
+  .led .device{background:#040300}
+  .led .dots{position:absolute;inset:0;border-radius:inherit;background:radial-gradient(circle, rgba(255,194,77,.11) 1.1px, transparent 1.7px);background-size:13px 13px}
+  .led .screen{font-family:'Pixelify Sans',monospace;color:var(--amb);padding:42px}
+  .led .top{display:flex;justify-content:space-between;font-size:15px;letter-spacing:.05em;color:#8a6a22;z-index:2;text-transform:uppercase}
+  .led .clock{margin:auto 0;text-align:center;z-index:2}
+  .led .t{font-weight:700;font-size:128px;line-height:.9;letter-spacing:.03em;text-shadow:0 0 18px rgba(255,194,77,.55)}
+  .led .d{font-size:18px;letter-spacing:.12em;color:#a98322;margin-top:14px;text-transform:uppercase}
+  .led .wx{display:flex;justify-content:center;gap:40px;z-index:2;text-align:center;font-size:30px;text-shadow:0 0 14px rgba(255,194,77,.5)}
+  .led .wx span{display:block;font-size:13px;color:#8a6a22;margin-top:6px}
+  .led .utitle{font-size:16px;letter-spacing:.1em;color:#a98322;z-index:2;text-transform:uppercase}
+  .led .meters{margin:auto 0;display:flex;flex-direction:column;gap:46px;z-index:2}
+  .led .meter .row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px}
+  .led .meter .row .nm{font-size:18px;color:#a98322;text-transform:uppercase;letter-spacing:.06em}
+  .led .meter .row .pc{font-size:40px;text-shadow:0 0 16px rgba(255,194,77,.6)}
+  .led .cells{height:26px;background:repeating-linear-gradient(90deg, var(--dim) 0 16px, transparent 16px 21px)}
+  .led .cells i{display:block;height:100%;background:repeating-linear-gradient(90deg, var(--amb) 0 16px, transparent 16px 21px);box-shadow:0 0 14px rgba(255,194,77,.5)}
+
+  /* ===== 09 OSCILLOSCOPE / SIGNAL ===== */
+  .osc{--ph:#4dffb0;--dim:#1f6b4c;--grat:rgba(77,255,176,.09)}
+  .osc .device{background:#00070a}
+  .osc .screen{font-family:'JetBrains Mono',monospace;color:var(--ph);padding:40px}
+  .osc .grat{position:absolute;inset:0;border-radius:inherit;background:repeating-linear-gradient(0deg,transparent 0 41px,var(--grat) 41px 42px),repeating-linear-gradient(90deg,transparent 0 41px,var(--grat) 41px 42px)}
+  .osc .axis{position:absolute;left:0;right:0;top:50%;height:1px;background:rgba(77,255,176,.18);z-index:1}
+  .osc .top{display:flex;justify-content:space-between;font-size:12px;letter-spacing:.08em;color:var(--dim);z-index:2;text-transform:uppercase}
+  .osc .clock{margin-top:16px;text-align:center;z-index:2}
+  .osc .t{font-weight:800;font-size:92px;letter-spacing:.01em;line-height:1;font-variant-numeric:tabular-nums;text-shadow:0 0 22px rgba(77,255,176,.6)}
+  .osc .d{font-size:13px;letter-spacing:.22em;color:var(--dim);margin-top:10px;text-transform:uppercase}
+  .osc .wave{flex:1;display:flex;align-items:center;z-index:1}
+  .osc .read{display:flex;justify-content:space-between;z-index:2;font-size:12px;color:var(--dim);text-transform:uppercase}
+  .osc .read b{display:block;font-size:22px;color:var(--ph);margin-top:4px;text-shadow:0 0 12px rgba(77,255,176,.5)}
+  .osc .chs{margin:auto 0;display:flex;flex-direction:column;gap:34px;z-index:2}
+  .osc .ch .lab{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;color:var(--dim);text-transform:uppercase;margin-bottom:10px}
+  .osc .ch .lab b{font-size:26px;color:var(--ph);text-shadow:0 0 12px rgba(77,255,176,.5)}
+  .osc .ch .scope{height:64px;position:relative;border:1px solid rgba(77,255,176,.18);background:repeating-linear-gradient(90deg,transparent 0 27px,var(--grat) 27px 28px)}
+  .osc .ch .lvl{position:absolute;left:0;bottom:0;width:100%;border-top:2px solid var(--ph);box-shadow:0 0 12px var(--ph);background:linear-gradient(rgba(77,255,176,.2),transparent)}
+
+  /* ===== 10 ANALOG NEO ===== */
+  .ana{--ink:#eef1f5;--dim:#5a5f66;--acc:#5ad7ff}
+  .ana .device{background:#000}
+  .ana .screen{font-family:Inter,sans-serif;color:var(--ink);padding:40px;align-items:center}
+  .ana .top{align-self:stretch;display:flex;justify-content:space-between;font-weight:300;font-size:12px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase;z-index:2}
+  .ana .dial{position:relative;width:300px;height:300px;margin:auto 0;z-index:2}
+  .ana .ticks{position:absolute;inset:0;border-radius:50%;background:repeating-conic-gradient(from -0.4deg, rgba(255,255,255,.5) 0 0.8deg, transparent 0.8deg 30deg);-webkit-mask:radial-gradient(circle, transparent 0 44%, #000 45% 49.5%, transparent 50%);mask:radial-gradient(circle, transparent 0 44%, #000 45% 49.5%, transparent 50%)}
+  .ana .ticks.min{background:repeating-conic-gradient(from -0.2deg, rgba(255,255,255,.16) 0 0.4deg, transparent 0.4deg 6deg);-webkit-mask:radial-gradient(circle, transparent 0 47%, #000 47.5% 49.5%, transparent 50%);mask:radial-gradient(circle, transparent 0 47%, #000 47.5% 49.5%, transparent 50%)}
+  .ana .hand{position:absolute;left:50%;bottom:50%;transform-origin:bottom center;border-radius:4px;z-index:2}
+  .ana .hand.h{width:6px;height:80px;margin-left:-3px;background:var(--ink);transform:rotate(291deg)}
+  .ana .hand.m{width:4px;height:118px;margin-left:-2px;background:var(--ink);transform:rotate(246deg)}
+  .ana .hand.s{width:2px;height:126px;margin-left:-1px;background:var(--acc);box-shadow:0 0 10px var(--acc);transform:rotate(132deg)}
+  .ana .hub{position:absolute;left:50%;top:50%;width:14px;height:14px;border-radius:50%;background:var(--acc);transform:translate(-50%,-50%);box-shadow:0 0 12px var(--acc);z-index:3}
+  .ana .twelve{position:absolute;top:12px;left:50%;transform:translateX(-50%);font-weight:600;font-size:15px;color:var(--dim);letter-spacing:.1em;z-index:2}
+  .ana .digi{align-self:stretch;display:flex;justify-content:center;gap:36px;z-index:2;text-align:center}
+  .ana .digi .v{font-weight:300;font-size:26px}
+  .ana .digi .c{font-weight:300;font-size:10px;letter-spacing:.2em;color:var(--dim);margin-top:5px;text-transform:uppercase}
+  .ana .subs{margin:auto 0;display:flex;gap:48px;z-index:2}
+  .ana .sub{display:flex;flex-direction:column;align-items:center;gap:16px}
+  .ana .subdial{width:132px;height:132px;border-radius:50%;position:relative;background:conic-gradient(var(--acc) 0 24%, rgba(255,255,255,.07) 24% 100%)}
+  .ana .subdial.codex{background:conic-gradient(var(--acc) 0 29%, rgba(255,255,255,.07) 29% 100%)}
+  .ana .subdial .hole{position:absolute;inset:8px;border-radius:50%;background:#000;display:flex;align-items:center;justify-content:center}
+  .ana .subdial .p{font-weight:300;font-size:34px}
+  .ana .sub .nm{font-weight:300;font-size:12px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase}
+</style>
+</head>
+<body>
+  <header class="intro">
+    <h1>Beacon — Visual Directions</h1>
+    <p>Seven refined aesthetics on pure black, identical data, true 480&times;480 rounded-square AMOLED. Each row: a <strong>Home</strong> screen and an <strong>AI&nbsp;Usage</strong> screen.<br>
+    09:41 &middot; Wed 5 Jun &middot; 31.8&deg; / 57% &middot; Claude 24% &middot; Codex 29%. &nbsp; <code>black = pixels off</code></p>
+  </header>
+
+  <!-- 01 AEROSPACE HUD -->
+  <section class="lane hud">
+    <div class="lane-head"><span class="lane-num">01</span><h2>Aerospace HUD / Telemetry</h2><p>Cockpit-instrument precision: concentric rings, arc gauges, hairline grid, condensed type, cyan + amber.</p></div>
+    <div class="frames">
+      <div class="unit"><div class="device"><div class="screen">
+        <div class="grid"></div>
+        <div class="topbar"><span>SYS &middot; <span class="on">ONLINE</span></span><span>WIFI &middot; BLE</span></div>
+        <div class="clock"><div class="t">09:41<span class="sec">22</span></div><div class="d">WED &middot; 05 JUN</div></div>
+        <div class="wx"><div class="v am">31.8<small>&deg;C</small></div><div class="sep"></div><div class="v">57<small>%RH</small></div><div class="sep"></div><div class="v" style="font-size:20px;color:#3d5a66">PARTLY<br>CLOUDY</div></div>
+      </div></div><div class="cap">Home</div></div>
+      <div class="unit"><div class="device"><div class="screen">
+        <div class="grid"></div>
+        <div class="usagewrap"><div class="utitle">// AI LIMITS</div>
+          <div class="rings">
+            <div class="rcol"><div class="ring" style="width:148px;height:148px;background:conic-gradient(var(--cy) 0 24%, rgba(70,226,255,.12) 24% 100%)"><div class="hole" style="inset:13px"></div><div class="lbl"><span class="pct">24<small style="font-size:16px">%</small></span><span class="sub">5H</span></div></div><div class="rname">CLAUDE</div><div class="sub">wk 24% &middot; rst 2h08</div></div>
+            <div class="rcol"><div class="ring" style="width:148px;height:148px;background:conic-gradient(var(--am) 0 1%, rgba(255,179,58,.12) 1% 100%)"><div class="hole" style="inset:13px"></div><div class="lbl"><span class="pct" style="color:var(--am)">1<small style="font-size:16px">%</small></span><span class="sub">5H</span></div></div><div class="rname">CODEX</div><div class="sub">wk 29% &middot; rst 4h41</div></div>
+          </div>
+        </div>
+      </div></div><div class="cap">AI Usage</div></div>
+    </div>
+  </section>
+
+  <!-- 04 CALM FUTURISM -->
+  <section class="lane calm">
+    <div class="lane-head"><span class="lane-num">04</span><h2>Calm Futurism (Nothing-esque)</h2><p>Restrained dot-matrix glyphs, mostly white on black, one faint accent, generous negative space.</p></div>
+    <div class="frames">
+      <div class="unit"><div class="device"><div class="screen">
+        <div class="top"><span><span class="dot"></span> beacon</span><span>wed 05</span></div>
+        <div class="clock"><div class="t">09:41</div><div class="d">wednesday 5 june</div></div>
+        <div class="wx"><div><div class="v">31.8&deg;</div><div class="c">temp</div></div><div><div class="v">57%</div><div class="c">humidity</div></div></div>
+      </div></div><div class="cap">Home</div></div>
+      <div class="unit"><div class="device"><div class="screen">
+        <div class="top"><span><span class="dot"></span> usage</span><span>live</span></div>
+        <div class="ucol">
+          <div class="urow"><div class="nm">claude</div><div class="big">24%</div><div class="dots">resets in <b>2h</b></div></div>
+          <div class="urow"><div class="nm">codex</div><div class="big">29%</div><div class="dots">resets <b>sun</b></div></div>
+        </div>
+      </div></div><div class="cap">AI Usage</div></div>
+    </div>
+  </section>
+
+  <!-- 05 EDITORIAL INDEX -->
+  <section class="lane edi">
+    <div class="lane-head"><span class="lane-num">05</span><h2>Editorial Index (Swiss-typographic)</h2><p>Type is the interface: oversized tabular figures, hard hairline rules, strict grid, one signal accent.</p></div>
+    <div class="frames">
+      <div class="unit"><div class="device"><div class="screen">
+        <div class="eyebrow"><span class="a">BEACON / HOME</span><span>W23 &middot; 05.06</span></div>
+        <div class="time">09:41</div>
+        <div class="dateline">Wed &mdash; 05 June 2026</div>
+        <div class="rule"></div>
+        <div class="metarow"><div class="m"><div class="v">31.8&deg;</div><div class="k">Temp</div></div><div class="m"><div class="v">57%</div><div class="k">Humidity</div></div><div class="sky">Partly<br>cloudy</div></div>
+      </div></div><div class="cap">Home</div></div>
+      <div class="unit"><div class="device"><div class="screen">
+        <div class="eyebrow"><span class="a">BEACON / LIMITS</span><span>POLL 30S</span></div>
+        <div class="utitle" style="margin-top:30px">AI Usage</div>
+        <div class="rule"></div>
+        <div class="ustat"><div class="line"><span class="nm">Claude</span><span class="big">24<i>%</i></span></div><div class="det">5H 24 &middot; 7D 24 &middot; RESETS 2H08</div><div class="track acc"><i style="width:24%"></i></div></div>
+        <div class="rule"></div>
+        <div class="ustat"><div class="line"><span class="nm">Codex</span><span class="big">29<i>%</i></span></div><div class="det">5H 01 &middot; 7D 29 &middot; RESETS SUN</div><div class="track"><i style="width:29%"></i></div></div>
+        <div style="margin-top:auto"></div>
+      </div></div><div class="cap">AI Usage</div></div>
+    </div>
+  </section>
+
+  <!-- 07 BLUEPRINT -->
+  <section class="lane blu">
+    <div class="lane-head"><span class="lane-num">07</span><h2>Blueprint / Schematic</h2><p>Draftsman engineering drawing: hairline strokes, crosshair reticles, dimension callouts, corner registration marks, blueprint-blue.</p></div>
+    <div class="frames">
+      <div class="unit"><div class="device"><div class="screen">
+        <div class="bgrid"></div>
+        <div class="reg tl"></div><div class="reg tr"></div><div class="reg bl"></div><div class="reg br"></div>
+        <div class="hl"><span>DWG. BEACON-001 / HOME</span><span>SCALE 1:1</span></div>
+        <div class="center"><div class="cross"></div><div class="cross v"></div><div class="t">09:41</div><div class="dim">WED 05 JUN 2026</div></div>
+        <div class="annorow"><div class="anno"><span class="tick">+ TEMP</span><b>31.8&deg;C</b></div><div class="anno" style="text-align:right"><span class="tick">RH +</span><b>57%</b></div></div>
+      </div></div><div class="cap">Home</div></div>
+      <div class="unit"><div class="device"><div class="screen">
+        <div class="bgrid"></div>
+        <div class="reg tl"></div><div class="reg tr"></div><div class="reg bl"></div><div class="reg br"></div>
+        <div class="hl"><span>DWG. BEACON-002 / LIMITS</span><span>POLL 30S</span></div>
+        <div class="measures">
+          <div class="meas"><div class="top"><span>CLAUDE &middot; 5H</span><b>24%</b></div><div class="axis"><div class="base"></div><div class="fillline" style="width:24%"></div><div class="marker" style="left:24%"></div></div></div>
+          <div class="meas"><div class="top"><span>CODEX &middot; 7D</span><b>29%</b></div><div class="axis"><div class="base"></div><div class="fillline" style="width:29%"></div><div class="marker" style="left:29%"></div></div></div>
+        </div>
+        <div class="utitle" style="text-align:center">0 &mdash;&mdash;&mdash; 50 &mdash;&mdash;&mdash; 100 %</div>
+      </div></div><div class="cap">AI Usage</div></div>
+    </div>
+  </section>
+
+  <!-- 08 LED MATRIX -->
+  <section class="lane led">
+    <div class="lane-head"><span class="lane-num">08</span><h2>LED Matrix</h2><p>A hardware dot-panel: faint unlit-dot grid with lit amber pixels forming digits, cell-based meter bars. Retro-future device feel.</p></div>
+    <div class="frames">
+      <div class="unit"><div class="device"><div class="screen">
+        <div class="dots"></div>
+        <div class="top"><span>BEACON</span><span>WED 05</span></div>
+        <div class="clock"><div class="t">09:41</div><div class="d">WEDNESDAY 5 JUN</div></div>
+        <div class="wx"><div>31.8&deg;<span>TEMP</span></div><div>57%<span>HUMID</span></div></div>
+      </div></div><div class="cap">Home</div></div>
+      <div class="unit"><div class="device"><div class="screen">
+        <div class="dots"></div>
+        <div class="top"><span>USAGE</span><span>LIVE</span></div>
+        <div class="meters">
+          <div class="meter"><div class="row"><span class="nm">CLAUDE 5H</span><span class="pc">24%</span></div><div class="cells"><i style="width:24%"></i></div></div>
+          <div class="meter"><div class="row"><span class="nm">CODEX 7D</span><span class="pc">29%</span></div><div class="cells"><i style="width:29%"></i></div></div>
+        </div>
+      </div></div><div class="cap">AI Usage</div></div>
+    </div>
+  </section>
+
+  <!-- 09 OSCILLOSCOPE -->
+  <section class="lane osc">
+    <div class="lane-head"><span class="lane-num">09</span><h2>Oscilloscope / Signal</h2><p>Scientific signal instrument: glowing phosphor trace on a graticule grid, scope-style corner readouts. Data as live waveforms.</p></div>
+    <div class="frames">
+      <div class="unit"><div class="device"><div class="screen">
+        <div class="grat"></div><div class="axis"></div>
+        <div class="top"><span>CH1 &middot; 50ms/DIV</span><span>TRIG &#9658; AUTO</span></div>
+        <div class="clock"><div class="t">09:41</div><div class="d">WED 05 JUN 2026</div></div>
+        <div class="wave"><svg viewBox="0 0 400 100" preserveAspectRatio="none" width="100%" height="120" style="filter:drop-shadow(0 0 6px rgba(77,255,176,.7))"><path d="M0,50 Q25,6 50,50 T100,50 T150,50 T200,50 T250,50 T300,50 T350,50 T400,50" fill="none" stroke="#4dffb0" stroke-width="2.5"/></svg></div>
+        <div class="read"><span>TEMP<b>31.8&deg;</b></span><span>HUMID<b>57%</b></span><span style="text-align:right">SKY<b>P.CLD</b></span></div>
+      </div></div><div class="cap">Home</div></div>
+      <div class="unit"><div class="device"><div class="screen">
+        <div class="grat"></div>
+        <div class="top"><span>AI USAGE &middot; LIVE</span><span>POLL 30S</span></div>
+        <div class="chs">
+          <div class="ch"><div class="lab"><span>CLAUDE &middot; 5H</span><b>24%</b></div><div class="scope"><div class="lvl" style="height:24%"></div></div></div>
+          <div class="ch"><div class="lab"><span>CODEX &middot; 7D</span><b>29%</b></div><div class="scope"><div class="lvl" style="height:29%"></div></div></div>
+        </div>
+      </div></div><div class="cap">AI Usage</div></div>
+    </div>
+  </section>
+
+  <!-- 10 ANALOG NEO -->
+  <section class="lane ana">
+    <div class="lane-head"><span class="lane-num">10</span><h2>Analog Neo</h2><p>Abstract flat analog face: thin geometric hands, minimal tick ring, one ice-blue accent, small digital readouts. The only non-digital direction.</p></div>
+    <div class="frames">
+      <div class="unit"><div class="device"><div class="screen">
+        <div class="top"><span>beacon</span><span>wed 05 jun</span></div>
+        <div class="dial">
+          <div class="ticks min"></div><div class="ticks"></div>
+          <div class="twelve">12</div>
+          <div class="hand h"></div><div class="hand m"></div><div class="hand s"></div>
+          <div class="hub"></div>
+        </div>
+        <div class="digi"><div><div class="v">31.8&deg;</div><div class="c">temp</div></div><div><div class="v">57%</div><div class="c">humidity</div></div></div>
+      </div></div><div class="cap">Home</div></div>
+      <div class="unit"><div class="device"><div class="screen">
+        <div class="top"><span>usage</span><span>live</span></div>
+        <div class="subs">
+          <div class="sub"><div class="subdial"><div class="hole"><div class="p">24%</div></div></div><div class="nm">claude</div></div>
+          <div class="sub"><div class="subdial codex"><div class="hole"><div class="p">29%</div></div></div><div class="nm">codex</div></div>
+        </div>
+      </div></div><div class="cap">AI Usage</div></div>
+    </div>
+  </section>
+
+</body>
+</html>
