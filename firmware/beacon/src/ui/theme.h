@@ -29,8 +29,13 @@ typedef struct {
 // Easing is a single shared ease-out (no per-theme easing). Reduced-motion is a chunk-D
 // Settings flag the motion helpers consult to crossfade/instant instead of animate.
 
-// API. theme_set() rebuilds the active screen in the new theme (no reboot, FR-THEME-3),
-// freeing the prior theme's lv_style_t first (one-theme-resident, tech.md §6).
-void theme_set(uint8_t idx);                 // idx < THEME_COUNT
+// The active screen registers a rebuild hook; theme_set() invokes it after updating tokens so the
+// screen tears down + rebuilds from the new theme (no reboot, FR-THEME-3). The screen's hook is
+// responsible for the frozen teardown order: clear objects + remove styles, reset its lv_style_t,
+// rebuild from the passed tokens (one-theme-resident, tech.md §6).
+typedef void (*theme_apply_cb)(const beacon_theme_t*);
+void theme_on_apply(theme_apply_cb cb);
+
+void theme_set(uint8_t idx);                 // idx < THEME_COUNT; updates tokens + calls the apply hook
 const beacon_theme_t* theme_active(void);    // current theme tokens (NULL before first theme_set)
 uint8_t theme_index(void);                   // current index

@@ -407,7 +407,7 @@
 #define LV_FONT_FMT_TXT_LARGE 0
 
 /*Enables/disables support for compressed fonts.*/
-#define LV_USE_FONT_COMPRESSED 0
+#define LV_USE_FONT_COMPRESSED 1   /*lv_font_conv emits compressed glyphs (.bitmap_format=1); LVGL must decode them*/
 
 /*Enable subpixel rendering*/
 #define LV_USE_FONT_SUBPX 0
