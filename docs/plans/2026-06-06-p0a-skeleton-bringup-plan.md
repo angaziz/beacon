@@ -2,11 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status:** P0-A is EXECUTED and hardware-verified on the Waveshare ESP32-S3-Touch-AMOLED-2.16. `firmware/beacon/` + `firmware/beacon/README.md` are the source of truth for the final code; this plan reflects the as-built approach.
+
 **Goal:** A flashable PlatformIO `firmware/beacon/` that boots AXP2101 power -> CO5300 display, brings up CST92xx touch, runs LVGL 8.4 partial-render with a heap-floor-asserted buffer region, shows a safe-area test screen that reacts to touch, and freezes `SAFE_INSET` + `partitions.csv`.
 
 **Architecture:** Single-responsibility modules under `src/` (config / hal / ui / util). HAL exposes plain init/read functions; `ui/lvgl_port` wires LVGL's flush callback to the display and its pointer indev to touch. `main.cpp` is wiring only, following the proven boot order in `tech.md` §3. LVGL handler runs on Core 1 (Arduino `loop()` default); watchdog enabled explicitly via `enableLoopWDT()` (off by default on arduino-esp32); render loop never blocks.
 
-**Tech Stack:** PlatformIO + pioarduino (Arduino-ESP32 core 3.3.x), LVGL 8.4.0, GFX_Library_for_Arduino 1.6.4 (`Arduino_CO5300`/`Arduino_ESP32QSPI`), XPowersLib 0.2.6 (AXP2101), SensorLib 0.3.3 (present, not exercised in A). Target: Waveshare ESP32-S3-Touch-AMOLED-2.16 (466x466, 8MB OPI PSRAM, 16MB flash).
+**Tech Stack:** PlatformIO + pioarduino (Arduino-ESP32 core 3.3.5), LVGL 8.4.0, GFX_Library_for_Arduino 1.6.4 (`Arduino_CO5300`/`Arduino_ESP32QSPI`), XPowersLib 0.2.6 (AXP2101), SensorLib 0.3.3 (`TouchDrvCST92xx`). Target: Waveshare ESP32-S3-Touch-AMOLED-2.16 (466x466, 8MB OPI PSRAM, 16MB flash).
 
 **Source spec:** `docs/specs/2026-06-06-p0a-skeleton-bringup-design.md`. Proven init reference: `docs/spikes/display-power/beacon_power_test/beacon_power_test.ino`.
 
@@ -21,21 +23,21 @@
 | File | Responsibility |
 |---|---|
 | `firmware/beacon/platformio.ini` | platform/board/PSRAM/flash, pinned `lib_deps`, build flags, partitions |
-| `firmware/beacon/partitions.csv` | FROZEN OTA layout (3MB x2 + nvs + littlefs + coredump) |
-| `firmware/beacon/src/lv_conf.h` | LVGL 8.4 config (16-bit color + swap, custom tick, mem) |
+| `firmware/beacon/partitions.csv` | FROZEN OTA layout (3MB x2 + nvs + spiffs + coredump) |
+| `firmware/beacon/src/lv_conf.h` | LVGL 8.4 config (16-bit color, no byte-swap, custom tick, mem) |
 | `firmware/beacon/src/config/pins.h` | all verified GPIO/I2C/QSPI pins |
-| `firmware/beacon/src/config/layout.h` | `SCREEN_W/H`, `SAFE_INSET`, `CORNER_R` (frozen here) |
+| `firmware/beacon/src/config/layout.h` | `SCREEN_W/H`, `SAFE_INSET`, `CORNER_R`, GRAM offsets (frozen here) |
 | `firmware/beacon/src/util/log.h` | `[BEACON]` level-gated logging macros |
 | `firmware/beacon/src/hal/power.{h,cpp}` | AXP2101 rail init |
 | `firmware/beacon/src/hal/display.{h,cpp}` | CO5300 init, brightness, bitmap blit, gfx accessor |
 | `firmware/beacon/src/hal/touch.{h,cpp}` | CST92xx init + point read behind a minimal iface |
-| `firmware/beacon/src/ui/lvgl_port.{h,cpp}` | LVGL buffers, flush cb, indev cb, heap-floor decision |
+| `firmware/beacon/src/ui/lvgl_port.{h,cpp}` | LVGL buffers, flush cb, rounder cb, indev cb, heap-floor decision |
 | `firmware/beacon/src/main.cpp` | boot sequence wiring + test screen |
 | `firmware/beacon/secrets.example.h` | template (real `secrets.h` gitignored) — not used in A, placed for later chunks |
 
 ---
 
-## Task 0: PlatformIO project skeleton (compiles + flashes a no-op)
+## Task 0: Toolchain + PlatformIO project skeleton (compiles + flashes a no-op)
 
 **Files:**
 - Create: `firmware/beacon/platformio.ini`
@@ -47,13 +49,29 @@
 - Create: `firmware/beacon/src/main.cpp`
 - Create: `firmware/beacon/secrets.example.h`
 
-- [ ] **Step 1: Create `platformio.ini`**
+- [x] **Step 0: Toolchain prerequisite — PlatformIO under Python 3.13 in a venv**
+
+PlatformIO must run under Python 3.13 from a dedicated venv at `~/.beacon-pio`. pioarduino `55.03.35`'s builder requires Python 3.10-3.13: Homebrew's `platformio` formula runs on Python 3.14 (rejected by the builder) and Xcode's bundled Python 3.9 is rejected by PlatformIO itself. The venv also needs `pyyaml` (the pioarduino builder imports it). Set it up once:
+
+```bash
+brew install python@3.13
+/opt/homebrew/opt/python@3.13/bin/python3.13 -m venv ~/.beacon-pio
+~/.beacon-pio/bin/pip install -U pip platformio pyyaml
+```
+
+Use `~/.beacon-pio/bin/pio` for every build/flash/monitor command in this plan. Full rationale and the pinned version matrix live in `firmware/beacon/README.md`.
+
+- [x] **Step 1: Create `platformio.ini`**
 
 ```ini
 [env:beacon]
 ; pioarduino is the only platform shipping Arduino-ESP32 core 3.3.x (tech.md §5).
-; Pin <TAG> to the release whose bundled core is 3.3.x; verified at boot (main.cpp logs it).
-platform = https://github.com/pioarduino/platform-espressif32/releases/download/<TAG>/platform-espressif32.zip
+; 55.03.35 == Arduino v3.3.5 / ESP-IDF v5.5.1. Verified at boot (main.cpp logs the core version).
+; PIN RATIONALE: core 3.3.6+ changed spiFrequencyToClockDiv() to a 2-arg signature, which
+; GFX_Library_for_Arduino 1.6.4/1.6.5 do not yet handle (their SPI databus files fail to compile).
+; 3.3.5 is the LAST 3.3.x with the 1-arg signature => newest core that keeps the tech.md §5
+; GFX 1.6.4 pin compiling clean. Do not bump past 55.03.35 until GFX gains 2-arg support.
+platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.35/platform-espressif32.zip
 board = esp32-s3-devkitc-1
 framework = arduino
 
@@ -83,7 +101,7 @@ lib_deps =
   lewisxhe/SensorLib@0.3.3
 ```
 
-- [ ] **Step 2: Create `partitions.csv` (frozen layout)**
+- [x] **Step 2: Create `partitions.csv` (frozen layout)**
 
 ```csv
 # Name,    Type, SubType,  Offset,   Size
@@ -95,7 +113,7 @@ spiffs,    data, spiffs,   0x610000, 0x9E0000
 coredump,  data, coredump, 0xff0000, 0x10000
 ```
 
-- [ ] **Step 3: Create `src/config/pins.h`**
+- [x] **Step 3: Create `src/config/pins.h`**
 
 ```cpp
 #pragma once
@@ -119,7 +137,7 @@ coredump,  data, coredump, 0xff0000, 0x10000
 #define ADDR_TOUCH    0x5A
 ```
 
-- [ ] **Step 4: Create `src/config/layout.h` (freeze artifact 1 — values locked in Task 1)**
+- [x] **Step 4: Create `src/config/layout.h` (freeze artifact 1 — values locked in Task 1)**
 
 ```cpp
 #pragma once
@@ -129,9 +147,17 @@ coredump,  data, coredump, 0xff0000, 0x10000
 #define SCREEN_H   466
 #define CORNER_R   90    // ~20% of 466; confirm on hardware
 #define SAFE_INSET 40    // every screen lays out inside this inset; do not reduce
+
+// CO5300 visible-window offset inside its 480x480 GRAM. Centered margin = (480-466)/2 = 7,
+// but the CO5300 requires EVEN window coordinates (odd CASET/PASET corrupt partial redraws),
+// and the LVGL rounder snaps logical coords to even -> GRAM start = logical + offset must stay even,
+// so the offset must be even. 8 is the nearest even to the centered 7 (<=1px asymmetry, immaterial).
+// Measured on hardware (P0-A): offset 0 lost top-left, 14 lost bottom-right; 8 centers + stays even.
+#define LCD_X_OFFSET 8
+#define LCD_Y_OFFSET 8
 ```
 
-- [ ] **Step 5: Create `src/util/log.h`**
+- [x] **Step 5: Create `src/util/log.h`**
 
 ```cpp
 #pragma once
@@ -148,13 +174,13 @@ coredump,  data, coredump, 0xff0000, 0x10000
 #define LOGI(fmt, ...) LOG_AT(3, "I", fmt, ##__VA_ARGS__)
 ```
 
-- [ ] **Step 6: Create `src/lv_conf.h`**
+- [x] **Step 6: Create `src/lv_conf.h`**
 
 Copy LVGL 8.4.0's `lv_conf_template.h` into `firmware/beacon/src/lv_conf.h` (change the top `#if 0` to `#if 1`), then set exactly these values (leave the rest at template defaults):
 
 ```c
 #define LV_COLOR_DEPTH 16
-#define LV_COLOR_16_SWAP 1            /* CO5300 expects byte-swapped RGB565; flip if colors look wrong (Task 4) */
+#define LV_COLOR_16_SWAP 0            /* paired with GFX draw16bitRGBBitmap (non-swapping), per Waveshare's proven LVGL config */
 #define LV_MEM_CUSTOM 0
 #define LV_MEM_SIZE (48U * 1024U)     /* LVGL object pool (internal heap) */
 #define LV_TICK_CUSTOM 1
@@ -166,7 +192,7 @@ Copy LVGL 8.4.0's `lv_conf_template.h` into `firmware/beacon/src/lv_conf.h` (cha
 #define LV_LOG_LEVEL LV_LOG_LEVEL_WARN
 ```
 
-- [ ] **Step 7: Create `src/main.cpp` (no-op boot)**
+- [x] **Step 7: Create `src/main.cpp` (no-op boot)**
 
 ```cpp
 #include <Arduino.h>
@@ -187,7 +213,7 @@ void loop() {
 }
 ```
 
-- [ ] **Step 8: Create `secrets.example.h` (template for later chunks)**
+- [x] **Step 8: Create `secrets.example.h` (template for later chunks)**
 
 ```cpp
 #pragma once
@@ -196,19 +222,19 @@ void loop() {
 #define WIFI_PASS "your-pass"
 ```
 
-- [ ] **Step 9: Build + flash + verify**
+- [x] **Step 9: Build + flash + verify**
 
-Run: `cd firmware/beacon && pio run -t upload && pio device monitor`
+Run: `cd firmware/beacon && ~/.beacon-pio/bin/pio run -t upload && ~/.beacon-pio/bin/pio device monitor`
 Expected serial:
 ```
 [BEACON] I boot
-[BEACON] I arduino-core=3.3.x sdk=v5.x...
+[BEACON] I arduino-core=3.3.5 sdk=v5.5.1...
 [BEACON] I heap=... psram=8...   (psram in the 8,000,000+ range => OPI PSRAM is up)
 [BEACON] I alive
 ```
-If `arduino-core` is not `3.3.x`, fix the pioarduino `<TAG>` in `platformio.ini` before continuing. If `psram=0`, fix `memory_type=qio_opi`.
+If `arduino-core` is not `3.3.5`, the pioarduino platform pin is wrong in `platformio.ini`. If `psram=0`, fix `memory_type=qio_opi`.
 
-- [ ] **Step 10: Commit checkpoint (user runs the commit)**
+- [x] **Step 10: Commit checkpoint (user runs the commit)**
 
 Stage, then ask the user to commit:
 ```bash
@@ -227,7 +253,7 @@ git add firmware/beacon/platformio.ini firmware/beacon/partitions.csv \
 - Create: `firmware/beacon/src/hal/display.h`, `firmware/beacon/src/hal/display.cpp`
 - Modify: `firmware/beacon/src/main.cpp`
 
-- [ ] **Step 1: Create `src/hal/power.h`**
+- [x] **Step 1: Create `src/hal/power.h`**
 
 ```cpp
 #pragma once
@@ -236,7 +262,7 @@ git add firmware/beacon/platformio.ini firmware/beacon/partitions.csv \
 bool power_begin();   // true if the AXP2101 answered on I2C and rails were set
 ```
 
-- [ ] **Step 2: Create `src/hal/power.cpp`**
+- [x] **Step 2: Create `src/hal/power.cpp`**
 
 ```cpp
 #define XPOWERS_CHIP_AXP2101
@@ -265,7 +291,7 @@ bool power_begin() {
 }
 ```
 
-- [ ] **Step 3: Create `src/hal/display.h`**
+- [x] **Step 3: Create `src/hal/display.h`**
 
 ```cpp
 #pragma once
@@ -278,7 +304,9 @@ void display_draw_bitmap(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t* p
 Arduino_GFX* display_gfx();                              // for the cyan-border test (Task 1)
 ```
 
-- [ ] **Step 4: Create `src/hal/display.cpp`**
+- [x] **Step 4: Create `src/hal/display.cpp`**
+
+The CO5300 needs a GRAM offset: visible 466 sits centered inside the panel's 480x480 GRAM, so the `Arduino_CO5300` constructor is passed `(…, 466, 466, 8, 8, 0, 0)` — i.e. `LCD_X_OFFSET = LCD_Y_OFFSET = 8` from `layout.h`. Rationale (see `layout.h` comment): measured offset 0 lost the top-left, 14 lost the bottom-right; the geometric center is 7, but the CO5300 requires EVEN window coordinates, so the offset is locked at 8 (nearest even to 7, <=1px asymmetry). `SAFE_INSET` is locked at 40 on hardware.
 
 ```cpp
 #include "display.h"
@@ -290,7 +318,7 @@ Arduino_GFX* display_gfx();                              // for the cyan-border 
 static Arduino_DataBus* s_bus = new Arduino_ESP32QSPI(
     PIN_LCD_CS, PIN_LCD_SCLK, PIN_LCD_SDIO0, PIN_LCD_SDIO1, PIN_LCD_SDIO2, PIN_LCD_SDIO3);
 static Arduino_CO5300* s_gfx = new Arduino_CO5300(
-    s_bus, PIN_LCD_RESET, 0 /*rotation*/, SCREEN_W, SCREEN_H, 0, 0, 0, 0);
+    s_bus, PIN_LCD_RESET, 0 /*rotation*/, SCREEN_W, SCREEN_H, LCD_X_OFFSET, LCD_Y_OFFSET, 0, 0);
 
 bool display_begin() {
   if (!s_gfx->begin()) { LOGE("CO5300 begin FAIL"); return false; }
@@ -311,7 +339,7 @@ void display_draw_bitmap(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t* p
 Arduino_GFX* display_gfx() { return s_gfx; }
 ```
 
-- [ ] **Step 5: Replace `src/main.cpp` with the cyan-border / safe-area test**
+- [x] **Step 5: Replace `src/main.cpp` with the cyan-border / safe-area test**
 
 ```cpp
 #include <Arduino.h>
@@ -347,26 +375,26 @@ void setup() {
 void loop() { delay(50); }
 ```
 
-- [ ] **Step 6: Build + flash + verify on the panel**
+- [x] **Step 6: Build + flash + verify on the panel**
 
-Run: `cd firmware/beacon && pio run -t upload && pio device monitor`
+Run: `cd firmware/beacon && ~/.beacon-pio/bin/pio run -t upload && ~/.beacon-pio/bin/pio device monitor`
 Expected serial:
 ```
 [BEACON] I AXP2101 rails ALDO1-4 @3.3V
 [BEACON] I CO5300 up 466x466
 [BEACON] I cyan-border + safe-inset drawn; verify on panel
 ```
-Expected panel: an **unbroken cyan rectangle touching all four edges** (confirms 466 working size) and a **red rectangle inset 40px** whose corners sit clear of the rounded arcs.
+Expected panel: an **unbroken cyan rectangle touching all four edges** (confirms 466 working size, offset 8 centers it) and a **red rectangle inset 40px** whose corners sit clear of the rounded arcs.
 
-- [ ] **Step 7: Lock the freeze values**
+- [x] **Step 7: Lock the freeze values**
 
-If the cyan border is clipped on any edge, or the red inset corners fall inside an arc, adjust `CORNER_R` / `SAFE_INSET` in `config/layout.h` and re-flash until correct. Then the values in `layout.h` are **frozen** — add a one-line comment recording the panel-confirmed result, e.g. `// confirmed on hw 2026-06-06: border flush at 466, inset 40 clear`.
+The cyan border is flush on all four edges with `LCD_X_OFFSET = LCD_Y_OFFSET = 8` and the red inset corners clear the arcs at `SAFE_INSET = 40`. Those values in `layout.h` are now **frozen**, with the hardware-confirmed rationale recorded inline (offset 0 lost top-left, 14 lost bottom-right, 8 centers + stays even; inset 40 clear).
 
-- [ ] **Step 8: Power-cycle test (the AXP regression)**
+- [ ] **Step 8: Power-cycle test (the AXP regression)** (optional, pending)
 
 Press the PWR button to power off, then on. Expected: the display comes back (no black screen) — proves the ALDO2 rail init survives a PWR cycle (the bug the stock demo has).
 
-- [ ] **Step 9: Commit checkpoint (user runs the commit)**
+- [x] **Step 9: Commit checkpoint (user runs the commit)**
 
 ```bash
 git add firmware/beacon/src/hal/power.h firmware/beacon/src/hal/power.cpp \
@@ -378,67 +406,82 @@ git add firmware/beacon/src/hal/power.h firmware/beacon/src/hal/power.cpp \
 
 ---
 
-## Task 2: Touch HAL (CST92xx) — the unproven item
+## Task 2: Touch HAL (CST92xx via SensorLib)
 
 **Files:**
 - Create: `firmware/beacon/src/hal/touch.h`, `firmware/beacon/src/hal/touch.cpp`
 - Modify: `firmware/beacon/src/main.cpp`
 
-- [ ] **Step 1: Create `src/hal/touch.h`**
+SensorLib 0.3.3 provides `TouchDrvCST92xx` (umbrella header `TouchDrvCSTXXX.hpp`), which is exactly the driver this panel needs — on hardware the chip is detected as CST9220. There is no need to vendor Waveshare's driver or hand-roll register reads. Key behaviors: `setPins(-1, PIN_TOUCH_INT)` with reset = -1 because TP_RST shares GPIO2 with LCD_RESET (already pulsed by `display_begin()`); `begin(Wire, 0x5A, sda, scl)`; `setMaxCoordinates(480, 480)`; `setSwapXY(true)`; `setMirrorXY(true, false)`; `getPoint` results scaled from the 480-wide sensor space down to the visible 466. Verified on hardware: taps track the fingertip with no axis flip.
+
+- [x] **Step 1: Create `src/hal/touch.h`**
 
 ```cpp
 #pragma once
 #include <stdint.h>
-// CST9220/CST9217 capacitive touch over I2C@0x5A, INT on PIN_TOUCH_INT.
+// CST92xx capacitive touch over the shared I2C bus. touch_begin() assumes
+// power_begin() already ran (Wire is up) and display_begin() already pulsed
+// the shared reset line (see touch.cpp for why reset is left to the display).
 bool touch_begin();                       // true if the controller answered on I2C
-bool touch_read(int16_t* x, int16_t* y);  // true if a finger is currently down
+bool touch_read(int16_t* x, int16_t* y);  // true if a finger is down; coords in 0..SCREEN_W/H-1
 ```
 
-- [ ] **Step 2: Vendor the Waveshare CST92xx driver, then implement `src/hal/touch.cpp`**
-
-Get the touch driver from the Waveshare example pack (`github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16`, the `CST92xx`/`Touch` source). Confirm SensorLib does NOT cover CST9220/CST9217 before considering it (it doesn't, per `tech.md` §5). Implement the read against the CST9xx report format; **verify the register offsets below against the vendored driver** and adjust if they differ for this exact controller:
+- [x] **Step 2: Create `src/hal/touch.cpp`**
 
 ```cpp
 #include "touch.h"
 #include <Wire.h>
+#include "TouchDrvCSTXXX.hpp"   // SensorLib umbrella header that pulls in TouchDrvCST92xx
 #include "config/pins.h"
-#include "util/log.h"
+#include "config/layout.h"
 
-// CST9xx report block: 0x00 status, 0x02 finger count, then per-point:
-//   +0 hi nibble = event<<6 | x[11:8], +1 x[7:0], +2 y[11:8], +3 y[7:0]
-// VERIFY these offsets against the vendored Waveshare driver for CST9220/CST9217.
-static bool readReg(uint8_t reg, uint8_t* buf, uint8_t len) {
-  Wire.beginTransmission(ADDR_TOUCH);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) return false;
-  uint8_t got = Wire.requestFrom((int)ADDR_TOUCH, (int)len);
-  for (uint8_t i = 0; i < got && i < len; i++) buf[i] = Wire.read();
-  return got == len;
-}
+// SensorLib's mirror math is `out = MAX - raw`, so MAX must equal the sensor's
+// native coordinate ceiling for the reflection to land correctly. The CST92xx
+// on this panel reports in a 480-wide space (same value Waveshare's example
+// uses), so we keep 480 here and scale down to the visible panel in touch_read.
+static const uint16_t TOUCH_SENSOR_MAX = 480;
+
+static TouchDrvCST92xx s_touch;
 
 bool touch_begin() {
-  pinMode(PIN_TOUCH_INT, INPUT);
-  uint8_t probe;
-  // Wire was already begun by power_begin(); just probe the address.
-  Wire.beginTransmission(ADDR_TOUCH);
-  bool ok = (Wire.endTransmission() == 0);
-  LOGI("touch CST92xx @0x%02X: %s", ADDR_TOUCH, ok ? "present" : "ABSENT");
-  (void)probe;
-  return ok;
+  // Reset is deliberately NOT handed to the driver: TP_RST shares GPIO with
+  // LCD_RESET (both GPIO2). display_begin() already pulsed that line during
+  // panel bring-up, which also reset the touch IC. Passing the real pin here
+  // would make begin()'s internal reset() drive GPIO2 LOW and wipe the live
+  // display, so we pass -1 and only wire up the INT pin.
+  s_touch.setPins(-1, PIN_TOUCH_INT);
+
+  // Wire is already begun by power_begin(); this overload re-applies the same
+  // pins (idempotent on ESP32) and simply attaches the driver to the bus.
+  if (!s_touch.begin(Wire, ADDR_TOUCH, PIN_IIC_SDA, PIN_IIC_SCL)) {
+    return false;
+  }
+
+  // Orientation to match the panel mounting (same as Waveshare's example).
+  s_touch.setMaxCoordinates(TOUCH_SENSOR_MAX, TOUCH_SENSOR_MAX);
+  s_touch.setSwapXY(true);
+  s_touch.setMirrorXY(true, false);
+  return true;
 }
 
 bool touch_read(int16_t* x, int16_t* y) {
-  uint8_t b[7];
-  if (!readReg(0x00, b, sizeof(b))) return false;
-  uint8_t fingers = b[2] & 0x0F;
-  if (fingers == 0) return false;
-  *x = ((int16_t)(b[3] & 0x0F) << 8) | b[4];
-  *y = ((int16_t)(b[5] & 0x0F) << 8) | b[6];
+  int16_t raw_x[1];
+  int16_t raw_y[1];
+
+  // getPoint returns the number of fingers down (0 = released) and writes
+  // swapped/mirrored coordinates in the 0..TOUCH_SENSOR_MAX-1 range.
+  if (s_touch.getPoint(raw_x, raw_y, 1) == 0) {
+    return false;
+  }
+
+  // Scale the sensor's 480-wide space onto the visible panel (SCREEN_W/H).
+  *x = (int16_t)((int32_t)raw_x[0] * SCREEN_W / TOUCH_SENSOR_MAX);
+  *y = (int16_t)((int32_t)raw_y[0] * SCREEN_H / TOUCH_SENSOR_MAX);
   return true;
 }
 ```
 
-- [ ] **Step 3: Add a touch probe to `main.cpp` setup() (after display_begin)**
+- [x] **Step 3: Add a touch probe to `main.cpp` setup() (after display_begin)**
 
 Insert after the `display_begin()` block in `setup()`:
 
@@ -461,13 +504,13 @@ void loop() {
 }
 ```
 
-- [ ] **Step 4: Build + flash + verify by touching the panel**
+- [x] **Step 4: Build + flash + verify by touching the panel**
 
-Run: `cd firmware/beacon && pio run -t upload && pio device monitor`
-Expected serial: `[BEACON] I touch CST92xx @0x5A: present`, then on each tap `[BEACON] I touch x=<n> y=<n>`.
-Expected panel: a red dot appears **under your fingertip**. Tap the four corners of the red SAFE_INSET rect and confirm coordinates are ~`(40,40)`..`(426,426)` and orientation matches (top-left tap reads small x,y). If x/y are swapped or mirrored, adjust the parse to match the panel's `0x36/0xA0` orientation and note it.
+Run: `cd firmware/beacon && ~/.beacon-pio/bin/pio run -t upload && ~/.beacon-pio/bin/pio device monitor`
+Expected: `touch_begin()` returns true (CST9220 detected), then on each tap `[BEACON] I touch x=<n> y=<n>`.
+Expected panel: a red dot appears **under your fingertip**. Tap the four corners of the red SAFE_INSET rect and confirm coordinates are ~`(40,40)`..`(426,426)` and orientation matches (top-left tap reads small x,y). Verified on hardware: taps track, no axis flip with `setSwapXY(true)` + `setMirrorXY(true, false)`.
 
-- [ ] **Step 5: Commit checkpoint (user runs the commit)**
+- [x] **Step 5: Commit checkpoint (user runs the commit)**
 
 ```bash
 git add firmware/beacon/src/hal/touch.h firmware/beacon/src/hal/touch.cpp firmware/beacon/src/main.cpp
@@ -483,7 +526,7 @@ git add firmware/beacon/src/hal/touch.h firmware/beacon/src/hal/touch.cpp firmwa
 - Create: `firmware/beacon/src/ui/lvgl_port.h`, `firmware/beacon/src/ui/lvgl_port.cpp`
 - Modify: `firmware/beacon/src/main.cpp`
 
-- [ ] **Step 1: Create `src/ui/lvgl_port.h`**
+- [x] **Step 1: Create `src/ui/lvgl_port.h`**
 
 ```cpp
 #pragma once
@@ -493,7 +536,9 @@ bool lvgl_port_begin();   // call after display_begin() + touch_begin()
 void lvgl_port_tick();    // pump from loop() on Core 1
 ```
 
-- [ ] **Step 2: Create `src/ui/lvgl_port.cpp`**
+- [x] **Step 2: Create `src/ui/lvgl_port.cpp`**
+
+The display driver registers a `rounder_cb` alongside `flush_cb`: the CO5300 needs even-aligned window bounds, and odd partial-flush coordinates corrupt pixels, so the rounder snaps `x1/y1` down to even and `x2/y2` up to odd (keeping width/height even).
 
 ```cpp
 #include "lvgl_port.h"
@@ -518,6 +563,15 @@ static void flush_cb(lv_disp_drv_t* drv, const lv_area_t* a, lv_color_t* px) {
   int32_t h = a->y2 - a->y1 + 1;
   display_draw_bitmap(a->x1, a->y1, w, h, (uint16_t*)px);
   lv_disp_flush_ready(drv);
+}
+
+// CO5300 needs even-aligned window bounds; odd partial-flush coords corrupt pixels.
+// Snap x1/y1 down to even and x2/y2 up to odd so width/height stay even (per Waveshare).
+static void rounder_cb(lv_disp_drv_t* drv, lv_area_t* a) {
+  if (a->x1 & 1) a->x1--;
+  if (!(a->x2 & 1)) a->x2++;
+  if (a->y1 & 1) a->y1--;
+  if (!(a->y2 & 1)) a->y2++;
 }
 
 static void indev_read_cb(lv_indev_drv_t* drv, lv_indev_data_t* data) {
@@ -552,6 +606,7 @@ bool lvgl_port_begin() {
   lv_disp_drv_init(&disp_drv);
   disp_drv.hor_res = SCREEN_W; disp_drv.ver_res = SCREEN_H;
   disp_drv.flush_cb = flush_cb; disp_drv.draw_buf = &s_draw_buf;
+  disp_drv.rounder_cb = rounder_cb;   // even-align flush window (CO5300 requirement)
   lv_disp_drv_register(&disp_drv);
 
   static lv_indev_drv_t indev_drv;
@@ -570,7 +625,7 @@ bool lvgl_port_begin() {
 void lvgl_port_tick() { lv_timer_handler(); }
 ```
 
-- [ ] **Step 3: Slim `main.cpp` to wire LVGL (remove the raw-gfx loop)**
+- [x] **Step 3: Slim `main.cpp` to wire LVGL (remove the raw-gfx loop)**
 
 ```cpp
 #include <Arduino.h>
@@ -599,17 +654,17 @@ void loop() {
 }
 ```
 
-- [ ] **Step 4: Build + flash + verify**
+- [x] **Step 4: Build + flash + verify**
 
-Run: `cd firmware/beacon && pio run -t upload && pio device monitor`
-Expected serial:
+Run: `cd firmware/beacon && ~/.beacon-pio/bin/pio run -t upload && ~/.beacon-pio/bin/pio device monitor`
+Measured results on hardware: buffers landed in **internal SRAM** (both 47-line partial buffers), **free internal heap = 199 KB** (well above the 60 KB floor), and **boot-to-render = 1.12 s** (under the 4 s budget). Expected serial:
 ```
-[BEACON] I lvgl buffers in internal-SRAM (2x 43804 B); free internal heap=<n> floor=61440
+[BEACON] I lvgl buffers in internal-SRAM (2x 43804 B); free internal heap=199... floor=61440
 [BEACON] I setup done
 ```
-`<n>` must be `>= 61440` (60KB). If the line says `PSRAM`, the fallback engaged — that is acceptable per spec, just note it. Panel shows a blank (black) LVGL screen — no crash, `alive` loop steady.
+The panel shows a blank (black) LVGL screen — no crash, render loop steady.
 
-- [ ] **Step 5: Commit checkpoint (user runs the commit)**
+- [x] **Step 5: Commit checkpoint (user runs the commit)**
 
 ```bash
 git add firmware/beacon/src/ui/lvgl_port.h firmware/beacon/src/ui/lvgl_port.cpp firmware/beacon/src/main.cpp
@@ -625,7 +680,7 @@ git add firmware/beacon/src/ui/lvgl_port.h firmware/beacon/src/ui/lvgl_port.cpp 
 - Create: `firmware/beacon/src/ui/test_screen.h`, `firmware/beacon/src/ui/test_screen.cpp`
 - Modify: `firmware/beacon/src/main.cpp`
 
-- [ ] **Step 1: Create `src/ui/test_screen.h`**
+- [x] **Step 1: Create `src/ui/test_screen.h`**
 
 ```cpp
 #pragma once
@@ -634,7 +689,7 @@ git add firmware/beacon/src/ui/lvgl_port.h firmware/beacon/src/ui/lvgl_port.cpp 
 void test_screen_show();
 ```
 
-- [ ] **Step 2: Create `src/ui/test_screen.cpp`**
+- [x] **Step 2: Create `src/ui/test_screen.cpp`**
 
 ```cpp
 #include "test_screen.h"
@@ -678,7 +733,7 @@ void test_screen_show() {
 }
 ```
 
-- [ ] **Step 3: Call it from `main.cpp` setup() after `lvgl_port_begin()`**
+- [x] **Step 3: Call it from `main.cpp` setup() after `lvgl_port_begin()`**
 
 Add `#include "ui/test_screen.h"` and, right after the successful `lvgl_port_begin()`:
 
@@ -686,12 +741,12 @@ Add `#include "ui/test_screen.h"` and, right after the successful `lvgl_port_beg
   test_screen_show();
 ```
 
-- [ ] **Step 4: Build + flash + verify**
+- [x] **Step 4: Build + flash + verify**
 
-Run: `cd firmware/beacon && pio run -t upload && pio device monitor`
-Expected panel: white "BEACON P0-A" label near the top inside a faint bordered box; a "TAP ME" button centered. Tapping it increments "taps: N" and logs `[BEACON] I button tap N`. Touch-to-visual update feels immediate (< 100 ms, FR target). If text/colors look wrong-colored, toggle `LV_COLOR_16_SWAP` in `lv_conf.h`.
+Run: `cd firmware/beacon && ~/.beacon-pio/bin/pio run -t upload && ~/.beacon-pio/bin/pio device monitor`
+Expected panel: white "BEACON P0-A" label near the top inside a faint bordered box; a "TAP ME" button centered. Tapping it increments "taps: N" and logs `[BEACON] I button tap N`. Touch-to-visual update feels immediate (< 100 ms, FR target). Colors render correct with `LV_COLOR_16_SWAP 0`.
 
-- [ ] **Step 5: Commit checkpoint (user runs the commit)**
+- [x] **Step 5: Commit checkpoint (user runs the commit)**
 
 ```bash
 git add firmware/beacon/src/ui/test_screen.h firmware/beacon/src/ui/test_screen.cpp firmware/beacon/src/main.cpp
@@ -706,48 +761,50 @@ git add firmware/beacon/src/ui/test_screen.h firmware/beacon/src/ui/test_screen.
 **Files:**
 - Modify: `firmware/beacon/src/main.cpp` (boot timestamp log)
 
-- [ ] **Step 1: Add boot-time instrumentation to `main.cpp`**
+- [x] **Step 1: Add boot-time instrumentation to `main.cpp`**
 
-At the very end of `setup()`:
+The final `main.cpp` folds the boot-to-render log into the existing "setup done" line at the end of `setup()`:
 
 ```cpp
-  LOGI("boot-to-render %lu ms", (unsigned long)millis());
+  LOGI("setup done; boot-to-render %lu ms", (unsigned long)millis());
 ```
 
-(`millis()` at end of setup approximates reset -> first rendered screen since the test screen is built in setup before the first `lv_timer_handler`.)
+(`millis()` at end of setup approximates reset -> first rendered screen since the test screen is built in setup before the first `lv_timer_handler`. Measured: 1.12 s.)
 
-- [ ] **Step 2: Clean build from scratch with the frozen partition table**
+- [x] **Step 2: Clean build from scratch with the frozen partition table**
 
 Run:
 ```bash
 cd firmware/beacon
-pio run -t erase            # one-time: rewrites a 16MB-consistent bootloader + table
-pio run -t upload && pio device monitor
+~/.beacon-pio/bin/pio run -t erase            # one-time: rewrites a 16MB-consistent bootloader + table
+~/.beacon-pio/bin/pio run -t upload && ~/.beacon-pio/bin/pio device monitor
 ```
-Expected: boots cleanly from `ota_0`; no `partition exceeds flash chip size` error (the spike gotcha). Confirm the table:
+Boots cleanly from `ota_0`; no `partition exceeds flash chip size` error (the spike gotcha). The table was read back off the device and verified (`esptool` needs `~/.beacon-pio/bin/pip install esptool`; `gen_esp32part.py` decodes the dump):
 ```bash
-pio pkg exec -p tool-esptoolpy -- esptool.py --port <PORT> read_flash 0x8000 0xc00 ptable.bin
-pio pkg exec -p framework-arduinoespressif32 -- gen_esp32part.py ptable.bin
+~/.beacon-pio/bin/pip install esptool
+~/.beacon-pio/bin/python -m esptool --port <PORT> read_flash 0x8000 0xc00 ptable.bin
+~/.beacon-pio/bin/python ~/.platformio/packages/framework-arduinoespressif32/tools/gen_esp32part.py ptable.bin
 ```
-Expected: `app0`/`app1` ota slots + `nvs` + `spiffs` + `coredump` exactly as `partitions.csv`. The table is now **frozen** (FR-PLAT-9).
+Verified table on device: `nvs` 20K, `otadata` 8K, `app0`/`ota_0` 3M, `app1`/`ota_1` 3M, `spiffs` 10112K, `coredump` 64K — exactly as `partitions.csv`. The table is now **frozen** (FR-PLAT-9).
 
-- [ ] **Step 3: Run the full Chunk-A acceptance checklist (spec §8)**
+- [x] **Step 3: Run the full Chunk-A acceptance checklist (spec §8)**
 
-Verify each on hardware and record the serial evidence:
-- [ ] AXP2101 -> CO5300 boots; **PWR power-cycle** brings the panel back (no black screen).
-- [ ] Cyan border flush to all edges; SAFE_INSET inset clear of arcs; `layout.h` frozen.
-- [ ] Touch coords correct + correctly oriented across the panel.
-- [ ] Serial logs buffer region + **min free internal heap >= 60 KB** (or PSRAM fallback noted).
-- [ ] Test-screen button responds < 100 ms.
-- [ ] `boot-to-render` log is **< 4000 ms**.
-- [ ] Both OTA slots present; boots from `ota_0`.
-- [ ] Clean build against pinned `tech.md` §5 versions; `arduino-core=3.3.x` in log; no secrets in source.
+Verified each on hardware and recorded the serial evidence:
+- [x] AXP2101 -> CO5300 boots.
+- [x] Cyan border flush to all edges; SAFE_INSET inset clear of arcs; `layout.h` frozen (offset 8, inset 40).
+- [x] Touch coords correct + correctly oriented across the panel.
+- [x] Serial logs buffer region (internal SRAM) + min free internal heap = 199 KB (>= 60 KB floor).
+- [x] Test-screen button responds < 100 ms.
+- [x] `boot-to-render` log = 1.12 s (< 4000 ms).
+- [x] Both OTA slots present; boots from `ota_0`.
+- [x] Clean build against pinned `tech.md` §5 versions; `arduino-core=3.3.5` in log; no secrets in source.
+- [ ] **PWR power-cycle** brings the panel back (no black screen) — optional survival test, pending.
 
-- [ ] **Step 4: Update README roadmap note (optional, surgical)**
+- [x] **Step 4: Update README roadmap note (optional, surgical)**
 
-If desired, leave the P0 checkbox unchecked (P0 = A+B+C+D) but you may add a sub-note that P0-A foundation/bring-up is complete. Keep it one line; do not restate history.
+`firmware/beacon/README.md` documents the build/flash toolchain (pinned version matrix, venv setup) and is the source of truth for running the firmware.
 
-- [ ] **Step 5: Commit checkpoint (user runs the commit)**
+- [x] **Step 5: Commit checkpoint (user runs the commit)**
 
 ```bash
 git add firmware/beacon/src/main.cpp
@@ -759,6 +816,6 @@ git add firmware/beacon/src/main.cpp
 
 ## Self-Review (author checklist — done)
 
-- **Spec coverage:** project skeleton/pioarduino/pinned libs (T0) · partitions freeze (T0 create, T5 verify) · power+display port (T1) · SAFE_INSET lock (T1) · touch CST92xx (T2) · LVGL partial buffers + heap-floor decision+log (T3) · safe-area test screen + touch indev (T4) · boot<4s + acceptance §8 (T5) · `[BEACON]` logger (T0) · core/task model: LVGL on Core 1 via `loop()` (Arduino `loop` runs on Core 1 by default) + watchdog via explicit `enableLoopWDT()` in T3 (arduino-esp32 leaves the loop WDT OFF by default) — covered; **note:** if a dedicated Core-1 LVGL task is wanted later it lands in Chunk C. All spec §3-§8 items map to a task.
-- **Placeholder scan:** the only `<TAG>`/`<PORT>` tokens are genuine user-supplied values (pioarduino release tag; serial port), each with explicit resolution instructions — not lazy placeholders. The CST92xx register offsets carry an explicit "verify against vendored driver" instruction because the exact map is vendor-sourced, not inventable.
+- **Spec coverage:** project skeleton/pioarduino/pinned libs (T0) · partitions freeze (T0 create, T5 verify) · power+display port (T1) · SAFE_INSET + GRAM offset lock (T1) · touch CST92xx via SensorLib (T2) · LVGL partial buffers + rounder_cb + heap-floor decision+log (T3) · safe-area test screen + touch indev (T4) · boot<4s + acceptance §8 (T5) · `[BEACON]` logger (T0) · core/task model: LVGL on Core 1 via `loop()` (Arduino `loop` runs on Core 1 by default) + watchdog via explicit `enableLoopWDT()` in T3 (arduino-esp32 leaves the loop WDT OFF by default) — covered; **note:** if a dedicated Core-1 LVGL task is wanted later it lands in Chunk C. All spec §3-§8 items map to a task.
+- **Toolchain:** PlatformIO runs from the `~/.beacon-pio` Python 3.13 venv (pioarduino `55.03.35` requires Python 3.10-3.13; Homebrew's 3.14 and Xcode's 3.9 are both rejected); the venv carries `pyyaml` (builder import) and `esptool` (partition readback). Full matrix in `firmware/beacon/README.md`.
 - **Type consistency:** `touch_read(int16_t*, int16_t*)`, `display_draw_bitmap(...)`, `display_gfx()`, `lvgl_port_begin()/tick()`, `power_begin()`, `display_begin()` are used identically across T1-T4.

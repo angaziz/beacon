@@ -1,0 +1,90 @@
+#pragma once
+#include <stdint.h>
+#include <stdbool.h>
+#include "core/screen_state.h"
+
+// String field rule (frozen): every char[] is a fixed-capacity, NUL-terminated buffer;
+// writers MUST truncate to fit (never overflow). Capacities are named so consumers can size buffers.
+#define FIN_ID_LEN      16
+#define BUDDY_ID_LEN    24
+#define BUDDY_TOOL_LEN  24
+#define BUDDY_HINT_LEN  80
+#define BUDDY_ENTRY_LEN 40
+#define BUDDY_ENTRIES    3
+#define NP_TITLE_LEN    64
+#define NP_ARTIST_LEN   64
+#define NP_DEVICE_LEN   32
+#define NP_ART_REF_LEN 160
+
+typedef struct {
+  uint32_t       last_updated;  // epoch seconds of last successful update; 0 = never
+  screen_state_t state;
+  data_err_t     err;           // cause when state == ST_ERROR; else ERR_NONE
+} record_hdr_t;
+
+// Age in seconds since last successful update; UINT32_MAX if never updated.
+static inline uint32_t record_age_s(const record_hdr_t* h, uint32_t now) {
+  return h->last_updated ? (now - h->last_updated) : UINT32_MAX;
+}
+
+// --- Weather (FR-HOME, device-plane) ---
+typedef struct {
+  record_hdr_t hdr;
+  float    temp_c;
+  float    humidity_pct;
+  uint16_t wmo_code;            // condition; label/icon via WMO_MAP (location.h)
+} weather_rec_t;
+
+// --- Finance (FR-FIN, device-plane) — array; each slot independently stateful ---
+typedef struct {
+  record_hdr_t hdr;            // per-instrument state/age (one may be stale while others live)
+  char    id[FIN_ID_LEN];      // stable key, matches ticker_cfg_t.id
+  double  value;
+  double  change;              // signed absolute change
+  double  change_pct;          // signed percent
+} finance_rec_t;
+
+// --- AI usage (FR-USAGE, hub-plane) — mirrors tech.md §7.1/§7.2 BLE JSON ---
+typedef struct {
+  int16_t  pct;                // 0..100; -1 = null/unavailable (JSON null)
+  uint32_t reset;              // epoch seconds; 0 = unknown
+} usage_window_t;
+typedef struct { usage_window_t h5, d7; } usage_provider_t;
+typedef struct {
+  record_hdr_t     hdr;        // ST_HUB_OFFLINE when the hub link drops
+  usage_provider_t claude, codex;
+} usage_rec_t;
+
+// --- Coding buddy (FR-BUDDY, hub-plane) ---
+typedef struct {
+  bool present;                // a tool-permission prompt is pending (absence => idle)
+  char id[BUDDY_ID_LEN];       // prompt id (echoed back on decide)
+  char tool[BUDDY_TOOL_LEN];   // tool name
+  char hint[BUDDY_HINT_LEN];   // command hint
+} buddy_prompt_t;
+typedef struct {
+  record_hdr_t  hdr;           // ST_HUB_OFFLINE when the hub link drops
+  uint8_t       running, waiting;
+  uint32_t      tokens;
+  uint8_t       context_pct;
+  char          entries[BUDDY_ENTRIES][BUDDY_ENTRY_LEN]; // recent activity (newest first)
+  uint8_t       entry_count;
+  buddy_prompt_t prompt;
+} buddy_rec_t;
+
+// --- Now-playing (FR-NOW, device-plane) — frozen now so P4 builds against it ---
+typedef struct {
+  record_hdr_t hdr;
+  bool     has_device;         // an active Spotify Connect device exists
+  bool     playing;
+  char     title[NP_TITLE_LEN];
+  char     artist[NP_ARTIST_LEN];
+  char     device[NP_DEVICE_LEN];
+  uint32_t progress_ms;
+  uint32_t duration_ms;
+  // Album art is carried as a REFERENCE, not pixels. has_art=false => none. art_ref is a stable
+  // key (Spotify art URL or its hash) the UI uses to look up a decoded image from a P4-owned art
+  // cache; the fetch/decode/cache mechanism is P4's, but the record surface is fixed here.
+  bool     has_art;
+  char     art_ref[NP_ART_REF_LEN];
+} nowplaying_rec_t;
