@@ -14,6 +14,17 @@ static inline void age_str(char* buf, size_t n, uint32_t age_s) {
   else                          snprintf(buf, n, "%ud", (unsigned)(age_s / 86400));
 }
 
+// Countdown to a reset epoch (usage windows): "2h08"/"45m"/"30s"/"--". reset==0 or past => "--".
+// In dev the seed reset shares the millis/1000 base with `now`; P0-D swaps in real epoch time.
+static inline void reset_str(char* buf, size_t n, uint32_t reset, uint32_t now) {
+  if (reset == 0 || reset <= now) { snprintf(buf, n, "--"); return; }
+  uint32_t s = reset - now;
+  if (s < 60)          snprintf(buf, n, "%us", (unsigned)s);
+  else if (s < 3600)   snprintf(buf, n, "%um", (unsigned)(s / 60));
+  else if (s < 86400)  snprintf(buf, n, "%uh%02u", (unsigned)(s / 3600), (unsigned)((s % 3600) / 60));
+  else                 snprintf(buf, n, "%ud", (unsigned)(s / 86400));
+}
+
 // Status-slot text for a record's state. Returns true if a non-live chip should show
 // (caller swaps the live right-header for `buf`); false => LIVE, show the normal header.
 static inline bool sv_status(char* buf, size_t n, const record_hdr_t* h, uint32_t now) {

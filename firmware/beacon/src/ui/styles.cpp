@@ -3,7 +3,7 @@
 
 app_styles_t S;
 
-static void styles_apply(const beacon_theme_t* t) {
+void styles_rebuild(const beacon_theme_t* t) {
   lv_style_set_bg_color(&S.screen, t->bg);
   lv_style_set_bg_opa(&S.screen, LV_OPA_COVER);
 
@@ -40,5 +40,4 @@ void styles_init(void) {
   lv_style_init(&S.display); lv_style_init(&S.hero);    lv_style_init(&S.body);
   lv_style_init(&S.up);      lv_style_init(&S.down);    lv_style_init(&S.accent);
   lv_style_init(&S.hairline);lv_style_init(&S.dim);
-  theme_on_apply(styles_apply);   // theme_set(idx) will call styles_apply
 }

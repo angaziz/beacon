@@ -35,7 +35,19 @@ static void show(int idx) {
   if (MODULES[idx]->update) MODULES[idx]->update();
 }
 
-// Detect a deliberate overscroll past either edge => arm a circular wrap to the opposite end.
+// Theme hook: per-theme LAYOUTS differ, so a theme switch rebuilds every page (clear + chrome +
+// the new theme's view), not just a restyle. Cheap enough with the LVGL pool in PSRAM.
+static void on_theme(const beacon_theme_t* t) {
+  styles_rebuild(t);
+  for (int i = 0; i < COUNT; i++) {
+    lv_obj_clean(s_pages[i]);
+    chrome_attach(s_pages[i]);
+    MODULES[i]->build(s_pages[i]);
+  }
+  set_dots(s_current);
+  if (MODULES[s_current]->update) MODULES[s_current]->update();
+}
+
 static void scroll_cb(lv_event_t*) {
   int x = lv_obj_get_scroll_x(s_pager);
   int maxx = (COUNT - 1) * SCREEN_W;
@@ -57,11 +69,11 @@ static void scrollend_cb(lv_event_t*) {
 
 static void tick_cb(lv_timer_t*) {
   if (MODULES[s_current]->update) MODULES[s_current]->update();
-  set_dots(s_current);   // cheap; also picks up the new accent after a theme switch
+  set_dots(s_current);
 }
 
 void carousel_init(void) {
-  lv_obj_set_style_bg_color(lv_scr_act(), lv_color_black(), 0);   // default theme is off
+  lv_obj_set_style_bg_color(lv_scr_act(), lv_color_black(), 0);
   lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_COVER, 0);
 
   s_pager = lv_obj_create(lv_scr_act());
@@ -85,9 +97,7 @@ void carousel_init(void) {
     lv_obj_add_flag(page, LV_OBJ_FLAG_SNAPPABLE);
     lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_all(page, 0, 0);
-    s_pages[i] = page;
-    chrome_attach(page);        // background chrome (child 0, behind content)
-    MODULES[i]->build(page);
+    s_pages[i] = page;   // content built by on_theme() below
   }
 
   // Dot indicator on the top layer (does not scroll with pages), bottom arc-free band.
@@ -107,7 +117,8 @@ void carousel_init(void) {
     s_dots[i] = d;
   }
 
-  theme_set(0);             // populate styles + first restyle (Editorial)
+  theme_on_apply(on_theme);
+  theme_set(0);             // Editorial: builds all pages via on_theme
   show(0);
   lv_timer_create(tick_cb, 500, NULL);
 }

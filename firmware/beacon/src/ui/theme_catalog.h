@@ -30,7 +30,7 @@ static const theme_catalog_t THEME_CATALOG[THEME_COUNT] = {
     {0,0,0}, {224,247,250}, {96,125,139}, {20,40,46}, {0,229,255}, {255,179,0},
     {0,229,255}, {255,82,82}, {255,179,0}, GAUGE_RING, 40, 2, 1, 2 },
   // Calm Futurism — faint red, sparse white-on-black, big figures
-  { "calm",
+  { "dotmatrix",
     {0,0,0}, {238,238,238}, {120,120,120}, {30,30,30}, {224,86,74}, {224,86,74},
     {238,238,238}, {224,86,74}, {224,86,74}, GAUGE_BIGFIG, 10, 8, 1, 2 },
   // Blueprint — draftsman blue, dimension lines

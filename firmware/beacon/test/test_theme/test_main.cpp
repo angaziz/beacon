@@ -12,7 +12,7 @@ static void test_catalog_count(void) {
 // ids match the DESIGN.md canonical set, in order, unique.
 static void test_catalog_ids(void) {
   const char* expect[THEME_COUNT] = {
-    "editorial", "hud", "calm", "blueprint", "led", "oscilloscope", "analog"
+    "editorial", "hud", "dotmatrix", "blueprint", "led", "oscilloscope", "analog"
   };
   for (int i = 0; i < THEME_COUNT; i++) {
     TEST_ASSERT_NOT_NULL(THEME_CATALOG[i].id);

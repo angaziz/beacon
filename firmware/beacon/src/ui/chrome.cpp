@@ -61,12 +61,9 @@ static void draw_cb(lv_event_t* e) {
       break;
     }
 
-    case CH_GRATICULE: {
-      grid(ctx, &a, t->line, 42, LV_OPA_50);
-      lv_draw_line_dsc_t d; lv_draw_line_dsc_init(&d); d.color = t->accent; d.width = 1; d.opa = LV_OPA_60;
-      line(ctx, &d, a.x1, cy, a.x2, cy);   // bright center axis
+    case CH_GRATICULE:
+      grid(ctx, &a, t->line, 42, LV_OPA_50);   // graticule only; no bright center axis
       break;
-    }
 
     default: break;
   }

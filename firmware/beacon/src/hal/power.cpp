@@ -19,6 +19,16 @@ bool power_begin() {
   s_pmu.enableALDO2();
   s_pmu.enableALDO3();           // display rail
   s_pmu.enableALDO4();
+  s_pmu.enableBattDetection();      // fuel gauge for battery percent
+  s_pmu.enableBattVoltageMeasure();
   LOGI("AXP2101 rails ALDO1-4 @3.3V");
   return true;
 }
+
+int power_battery_pct() {
+  if (!s_pmu.isBatteryConnect()) return -1;
+  int p = s_pmu.getBatteryPercent();
+  return (p < 0) ? -1 : (p > 100 ? 100 : p);
+}
+
+bool power_charging() { return s_pmu.isCharging(); }

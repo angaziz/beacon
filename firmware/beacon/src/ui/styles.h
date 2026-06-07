@@ -1,5 +1,6 @@
 #pragma once
 #include <lvgl.h>
+#include "ui/theme.h"   // beacon_theme_t
 
 // Theme-owned shared styles. Screens attach these via lv_obj_add_style ONLY (no per-object
 // color/font setters), so a theme switch restyles every screen by mutating these + reporting.
@@ -19,4 +20,5 @@ typedef struct {
 
 extern app_styles_t S;
 
-void styles_init(void);   // lv_style_init all + register theme apply hook (call once, before building screens)
+void styles_init(void);                         // lv_style_init all (call once, before first rebuild)
+void styles_rebuild(const beacon_theme_t* t);   // refresh shared styles from a theme (carousel's theme hook calls this)

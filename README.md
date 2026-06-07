@@ -5,16 +5,21 @@ A dark, futuristic desk command-center on a 2.16" AMOLED touch device — built 
 shows your Claude Code / Codex usage, live markets, weather, music, and a Claude coding
 "buddy" you can approve tool-prompts on — without breaking focus on your Mac.
 
-> **Status: early / prototype.** The design system and the on-device hardware bring-up
-> (display + power + WiFi/BLE coexistence) are proven, and the specs (functional PRD +
-> technical constitution) are written. The firmware build (P0) is next. Expect things to
-> move. See [Roadmap](#roadmap).
+> **Status: early / prototype.** Hardware bring-up (display + power + touch + WiFi/BLE
+> coexistence) is proven, the specs are written, and **P0 foundation is largely built**: the
+> swipe carousel + all six screens render on-device in **7 bespoke themes**, on the frozen
+> DataStore + theme engine. Persistence (NVS), WiFi provisioning, and the time service (P0-D)
+> are next; live data fetchers come in P1/P2/P4. Expect things to move. See [Roadmap](#roadmap).
 
 <p>
   <img src="docs/design/mockups/shots/editorial/edi-home.png" width="32%" alt="Home screen" />
   <img src="docs/design/mockups/shots/editorial/edi-usage.png" width="32%" alt="AI usage screen" />
   <img src="docs/design/mockups/shots/editorial/edi-buddy.png" width="32%" alt="Coding buddy screen" />
 </p>
+
+<sub>Design renders of the **Editorial** theme (1 of 7). On device, each theme renders these screens
+in its own visual language — see the full gallery in
+[`docs/design/mockups/directions.html`](docs/design/mockups/directions.html).</sub>
 
 ## What it does
 
@@ -47,11 +52,12 @@ working when the Mac is asleep.
 
 ## Themes
 
-The UI is fully themeable — **7 themes** built from shared design tokens (color / type /
-gauge-style), default **Editorial Index**. See the full gallery at
+The UI is fully themeable — **7 themes**, each a **bespoke per-screen experience** (its own layout
+in a distinct visual language) composed from shared design tokens (color / type / gauge-style) +
+per-theme background chrome; default **Editorial Index**. The seven: Editorial Index, Aerospace HUD,
+Dot-Matrix, Blueprint, LED Matrix, Oscilloscope, Analog Neo. See the full gallery at
 [`docs/design/mockups/directions.html`](docs/design/mockups/directions.html) (open in a browser) or the
-rendered previews under [`docs/design/mockups/shots/`](docs/design/mockups/shots/): Aerospace HUD, Calm
-Futurism, Editorial, Blueprint, LED Matrix, Oscilloscope, Analog Neo.
+rendered previews under [`docs/design/mockups/shots/`](docs/design/mockups/shots/).
 
 ## Repo layout
 
