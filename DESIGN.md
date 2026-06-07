@@ -1,6 +1,6 @@
 # Design
 
-Visual system for Beacon. The UI is **themeable**: every screen is built from design tokens + a small set of components. A theme is a token set (plus a few widget choices). Default theme is **Editorial Index**. Firmware maps each token group to LVGL primitives (`lv_style_t`, `lv_font_t`, and a `gauge_style` enum), so adding a theme is data, not new screen code — except for the few outlier widgets noted below.
+Visual system for Beacon. The UI is **themeable**, and each theme is a **bespoke experience**: it renders the six screens in its own visual language (HUD concentric rings, Analog clock face + sub-dials, LED cell-meters, Oscilloscope graticule + traces, Blueprint dimension axes, Dot-Matrix figures, Editorial type-grid) — not just a recolor. Themes share a common foundation — design tokens, a small set of components (styles, the gauge component, the screen-state helpers), and per-theme background "chrome" — but each theme owns its per-screen layout. Default theme is **Editorial Index**. Firmware maps token groups to LVGL primitives (`lv_style_t`, `lv_font_t`, a `gauge_style` enum); switching theme rebuilds the active screen from that theme's view (one theme resident at a time).
 
 ## Theme Model (tokens)
 
@@ -31,7 +31,7 @@ Hierarchy via scale + weight (>=1.25 step). Tabular numerals everywhere figures 
 ### Gauge style
 One token selects how levels/usage render, so structurally-similar themes share screen code:
 
-`bar` (Editorial) · `ring` (HUD) · `cell` (LED) · `waveform` (Oscilloscope) · `measure` (Blueprint) · `bigfig` (Calm) · `subdial` (Analog)
+`bar` (Editorial) · `ring` (HUD) · `cell` (LED) · `waveform` (Oscilloscope) · `measure` (Blueprint) · `bigfig` (Dot-Matrix) · `subdial` (Analog)
 
 ### Other tokens
 `radius` (frame + element), `stroke` (hairline/medium widths), `space` (4/8/12/16/24/32 rhythm), `glow` (accent glow amount; 0 for flat themes).
@@ -64,15 +64,15 @@ Editorial character: oversized tabular figures, hard hairline rules, strict left
 |---|---|---|---|---|---|
 | **Editorial** (default) | black | signal orange | Space Grotesk | bar | type-led, hairline rules |
 | **Aerospace HUD** | black | cyan + amber | Rajdhani | ring | concentric gauges, hairline grid |
-| **Calm Futurism** | black | faint red | Doto (dot-matrix) | bigfig | sparse, white-on-black |
+| **Dot-Matrix** | black | faint red | Doto (dot-matrix) | bigfig | sparse Nothing-esque dot figures |
 | **Blueprint** | black | blueprint blue | Chakra Petch | measure | draftsman line-art, dimensions |
 | **LED Matrix** | black | amber | Pixelify Sans | cell | dot panel, lit-pixel digits |
 | **Oscilloscope** | black | phosphor green | JetBrains Mono | waveform | graticule + signal trace |
 | **Analog Neo** | black | ice blue | Inter (light) | subdial | analog hands; usage sub-dials |
 
-Outlier widgets needing bespoke code (not just tokens): Analog clock face/hands, Oscilloscope waveform trace. All others are token + gauge-style driven.
+Every theme has bespoke per-screen layouts (each composed from the shared tokens + components), plus per-theme background chrome (grids, dot-matrix, graticule, blueprint marks). Custom-drawn widgets include the Analog clock face/hands + sub-dials, the Oscilloscope waveform trace, and the chrome backgrounds; the rest is composed from the gauge component + tokens.
 
-**Canonical theme IDs** (NVS keys / filenames / `beacon_theme_t.id` in `tech.md`): `editorial` (default), `hud`, `calm`, `blueprint`, `led`, `oscilloscope`, `analog` — these map to the display names above (Editorial Index, Aerospace HUD, Calm Futurism, Blueprint, LED Matrix, Oscilloscope, Analog Neo).
+**Canonical theme IDs** (NVS keys / filenames / `beacon_theme_t.id` in `tech.md`): `editorial` (default), `hud`, `dotmatrix`, `blueprint`, `led`, `oscilloscope`, `analog` — these map to the display names above (Editorial Index, Aerospace HUD, Dot-Matrix, Blueprint, LED Matrix, Oscilloscope, Analog Neo).
 
 **Token authority:** this doc owns token *values* and the theme catalog; `tech.md` §6 owns the runtime contract (`beacon_theme_t` struct + `gauge_style_t` enum). Keep them in sync.
 
@@ -83,7 +83,7 @@ Outlier widgets needing bespoke code (not just tokens): Analog clock face/hands,
 3. **AI Usage** — Claude and Codex, each showing **both** a 5-hour and a 7-day window (utilization % + reset). All four values, not one per provider. [BLE / Mac hub]
 4. **Coding Buddy** — idle state (session count, tokens, context %, recent activity) and prompt state (tool-permission prompt with Approve/Deny). See Coding Buddy contract. [BLE / Mac hub]
 5. **Now-Playing** — track / artist / progress / transport, target device. Controls an active Spotify Connect device (the device is a remote, not a player). [WiFi / Spotify]
-6. **Settings** — Wi-Fi, brightness, **Theme picker**, tickers, sleep, about. [local / NVS]
+6. **Settings** — battery %, Wi-Fi, brightness, **Theme picker**, tickers, sleep, about. (Battery shows level + charging, color-coded; low = `down` color.) [local / NVS]
 
 Navigation (with `prd.md` phase): horizontal **swipe** = prev/next screen (carousel) — **P0**; **long-press** = screen context action and **swipe-down** = quick brightness — **P3**; **IMU** raise/flick = wake, shake = dismiss overlay / exit a subview (no carousel back-stack) — **P3**. Minimum touch target ~64px (~3mm) given arm's-length use; primary actions get the largest hit areas.
 

@@ -87,9 +87,12 @@ typedef enum { GAUGE_BAR, GAUGE_RING, GAUGE_CELL, GAUGE_WAVEFORM, GAUGE_MEASURE,
 typedef struct {
   const char* id;                 // canonical theme id (see DESIGN theme catalog)
   lv_color_t  bg, ink, ink_dim, line, accent, accent2, up, down, alert;
-  const lv_font_t *f_display, *f_body, *f_mono;
+  const lv_font_t *f_hero;        // oversized figures (clock, big %): digit/symbol subset
+  const lv_font_t *f_display, *f_body, *f_mono; // display=titles/figures; body/mono per role
   gauge_style_t gauge;
   uint8_t glow;                   // 0..255
+  uint8_t radius;                 // corner-radius token
+  uint8_t stroke_hair, stroke_med;// line weights
 } beacon_theme_t;
 ```
 Switching theme rebuilds the active screen (no reboot). Fonts are flash-resident, glyph-subset to used characters. Screens read tokens only — no hardcoded colors/fonts.
@@ -98,10 +101,11 @@ Switching theme rebuilds the active screen (no reboot). Fonts are flash-resident
 
 **DataStore + screen-state (P0 shared contract — every later screen depends on it).**
 ```c
-typedef enum { ST_LOADING, ST_LIVE, ST_STALE, ST_OFFLINE, ST_ERROR, ST_HUB_OFFLINE } screen_state_t;
-typedef struct { /* value union per source */ uint32_t last_updated; screen_state_t state; } record_t;
+typedef enum { ST_LOADING, ST_LIVE, ST_STALE, ST_OFFLINE, ST_ERROR, ST_HUB_OFFLINE, ST_RECONNECTING } screen_state_t;
+typedef enum { ERR_NONE, ERR_TIMEOUT, ERR_HTTP, ERR_RATE_LIMITED, ERR_PARSE, ERR_NO_ROUTE } data_err_t;
+typedef struct { uint32_t last_updated; screen_state_t state; data_err_t err; } record_hdr_t;
 ```
-Fetchers run on timers with backoff and write `{value, last_updated, state}`. Mark `ST_STALE` at ~2× the source cadence; show age once stale. The `DataStore` schema + `screen_state_t` are frozen in P0 so P1/P2/P4 build against a stable contract.
+Each domain has its own typed record (`weather_rec_t`, `finance_rec_t` (array), `usage_rec_t`, `buddy_rec_t`, `nowplaying_rec_t`) embedding `record_hdr_t` as its first member; all string fields are fixed-capacity NUL-terminated buffers (named `*_LEN`), and writers truncate. Fetchers run on timers with backoff and write `{value, last_updated, state}`. Mark `ST_STALE` at the source's `stale_s`; show age once stale. The staleness sweep may only promote `ST_LIVE => ST_STALE` — it never overwrites `ST_OFFLINE`/`ST_ERROR`/`ST_HUB_OFFLINE`. The full record schema + `screen_state_t` are frozen in P0 (`src/core/records.h`, `screen_state.h`) so P1/P2/P4 build against a stable contract.
 
 **Config schemas (NVS + compiled defaults).**
 - **Tickers** (`config/tickers.h` defaults; editable in Settings): array of
@@ -250,7 +254,7 @@ hub/                        # macOS Swift app (P2) + CONTRACT.md fixtures
 
 - **Coexistence** proven only for advertising + insecure TLS (§2) — **re-measure under active bonded BLE + cert-validated TLS + LVGL at P2.** Keep `HubLink` abstract.
 - **Touch is unproven.** Neither spike exercised the CST92xx controller (both are draw-only). Swipe nav (FR-PLAT-2) + wake-on-touch (FR-PLAT-7) are core P0, so touch read/init is the **main unproven-hardware item in P0** — bring it up first; driver via SensorLib / the Waveshare example pack (`docs/research/`).
-- **Fonts/outlier widgets not started.** The 7 theme fonts must be sourced, glyph-subset, and budgeted (§11), and the Analog face + Oscilloscope trace are bespoke widgets (`DESIGN.md`) — all are P0 sub-tasks with no in-repo starting material.
+- **Outlier widgets not started.** The 7 theme fonts are sourced, glyph-subset, budgeted, and on-device-verified (P0-B; `src/ui/fonts/`). The Analog face + Oscilloscope trace remain bespoke widgets (`DESIGN.md`) — currently `gauge.cpp` placeholders (`GAUGE_SUBDIAL`/`GAUGE_WAVEFORM`), deferred past P0.
 - **BLE stack:** Bluedroid (canonical); NimBLE-Arduino 1.4.x crashes on core 3.x.
 - **Unofficial endpoints:** Claude/Codex usage + Yahoo finance — isolate behind adapters (hub for usage), expect breakage, have fallbacks (`docs/research/`).
 - **Spotify:** Premium + active Connect device; control-only; OAuth storage undecided (§9, P4).

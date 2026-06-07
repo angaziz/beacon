@@ -31,7 +31,7 @@ Dark, futuristic, efficient. A calm precision instrument, not a toy and not a bi
 
 1. **Glanceable first.** The primary value reads from ~0.5-1m without leaning in. Hierarchy is brutal: one or two things are big, everything else recedes.
 2. **Black is the canvas.** Pure black backgrounds — on AMOLED those pixels are physically off, so black is both the aesthetic and the power strategy. Color is spent sparingly.
-3. **One instrument, many faces.** The UI is themeable. Default is Editorial; the same data renders through any installed theme. Themes are a token swap, not a rewrite.
+3. **One instrument, many faces.** The UI is themeable. Default is Editorial; the same data renders through any theme. Each theme is a **bespoke experience** — its own per-screen layout in a distinct visual language (rings, an analog face, dot-matrix, a scope trace…), composed from shared tokens + components, not just a recolor. One theme is resident at a time; switching rebuilds the active screen.
 4. **Earned motion.** Motion is purposeful and subtle (state changes, reveals), never decorative. Reduced-motion always has a calm alternative.
 5. **Honest data.** Show real state and real reset windows; no invented precision, no fake gauges. If a value is stale or unknown, say so.
 6. **Efficient density.** Information-forward without clutter. Add data only when it earns the space; prefer typography and hairlines over boxes and cards.

@@ -76,9 +76,9 @@ Priority = MUST / SHOULD / COULD. Phase per §7.
 | ID | Priority | Phase | Requirement |
 |---|---|---|---|
 | FR-THEME-1 | MUST | P0 | Render the active theme from design tokens; default **Editorial**. |
-| FR-THEME-2 | MUST | P0 | Provide all 7 themes selectable at runtime; selection persists. Canonical IDs (`editorial`,`hud`,`calm`,`blueprint`,`led`,`oscilloscope`,`analog`) + display names: see `DESIGN.md` theme catalog. |
-| FR-THEME-3 | MUST | P0 | A theme switch re-renders the active screen with no reboot and no visual corruption. |
-| FR-THEME-4 | SHOULD | P0 | New screens consume tokens + the `gauge-style` selector — adding a theme is data, not per-screen code (except documented outlier widgets). |
+| FR-THEME-2 | MUST | P0 | Provide all 7 themes selectable at runtime; selection persists. Canonical IDs (`editorial`,`hud`,`dotmatrix`,`blueprint`,`led`,`oscilloscope`,`analog`) + display names: see `DESIGN.md` theme catalog. |
+| FR-THEME-3 | MUST | P0 | A theme switch re-renders the active screen with no reboot and no visual corruption (each theme has bespoke per-screen layouts, so a switch rebuilds the screen from that theme's view). |
+| FR-THEME-4 | SHOULD | P0 | Each theme is a bespoke per-screen experience composed from shared tokens + components (styles, the `gauge-style` component, screen-state helpers, per-theme chrome) — distinct layouts, not a recolor. |
 
 **Acceptance:** every screen renders correctly in all 7 themes; switching themes in Settings updates the live UI and survives reboot.
 
@@ -145,6 +145,7 @@ Priority = MUST / SHOULD / COULD. Phase per §7.
 | FR-SET-4 | SHOULD | P1 | Edit the finance ticker list and the weather location/timezone. |
 | FR-SET-5 | SHOULD | P0 | Idle/sleep timeout; screen enable/reorder. |
 | FR-SET-6 | COULD | later | OTA firmware update; "About" (version, device id). |
+| FR-SET-7 | SHOULD | P0 | Show battery level + charging state on Settings (color-coded; low battery flagged). |
 
 **Acceptance:** a user can join WiFi, set brightness, pick a theme, and configure tickers from the device; all persist.
 
