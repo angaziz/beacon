@@ -18,8 +18,8 @@ static Cell make_cell(lv_obj_t* page, int dx, int dy, const char* tag) {
   return c;
 }
 
-static void set_cell(Cell& c, const usage_window_t& w, const beacon_theme_t* th, uint32_t now) {
-  if (w.pct < 0) { lv_label_set_text(c.pct, "--"); lv_obj_add_flag(c.bar, LV_OBJ_FLAG_HIDDEN); }
+static void set_cell(Cell& c, const usage_window_t& w, const beacon_theme_t* th, uint32_t now, bool ph) {
+  if (ph || w.pct < 0) { lv_label_set_text(c.pct, "--"); lv_obj_add_flag(c.bar, LV_OBJ_FLAG_HIDDEN); }
   else {
     lv_label_set_text_fmt(c.pct, "%d%%", w.pct);
     lv_obj_clear_flag(c.bar, LV_OBJ_FLAG_HIDDEN);
@@ -29,7 +29,7 @@ static void set_cell(Cell& c, const usage_window_t& w, const beacon_theme_t* th,
     lv_obj_set_style_bg_color(c.bar, th->line, LV_PART_MAIN);
     lv_obj_set_style_bg_color(c.bar, th->accent, LV_PART_INDICATOR);
   }
-  char rb[12]; reset_str(rb, sizeof(rb), w.reset, now);
+  char rb[12]; reset_str(rb, sizeof(rb), ph ? 0 : w.reset, now);
   lv_label_set_text_fmt(c.resets, "rst %s", rb);
 }
 
@@ -49,9 +49,10 @@ static void build(lv_obj_t* page) {
 
 static void update(void) {
   usage_rec_t u = ds_get_usage(); const beacon_theme_t* th = theme_active(); uint32_t now = now_s();
+  bool ph = sv_placeholder(u.hdr.state);
   slot_set(s_slot, "POLL 30S", &u.hdr, now);
-  set_cell(s_c5, u.claude.h5, th, now); set_cell(s_c7, u.claude.d7, th, now);
-  set_cell(s_x5, u.codex.h5, th, now);  set_cell(s_x7, u.codex.d7, th, now);
+  set_cell(s_c5, u.claude.h5, th, now, ph); set_cell(s_c7, u.claude.d7, th, now, ph);
+  set_cell(s_x5, u.codex.h5, th, now, ph);  set_cell(s_x7, u.codex.d7, th, now, ph);
 }
 
 extern const screen_view_t usage_editorial_view = { build, update };

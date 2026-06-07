@@ -54,6 +54,7 @@ static void scroll_cb(lv_event_t*) {
   int thr = SCREEN_W / 4;
   if (x > maxx + thr)      s_wrap_target = 0;          // past last => first
   else if (x < -thr)       s_wrap_target = COUNT - 1;  // past first => last
+  else                     s_wrap_target = -1;         // back in bounds => cancel pending wrap
 }
 
 static void scrollend_cb(lv_event_t*) {

@@ -104,8 +104,8 @@ static void update(void) {
     lv_obj_set_style_text_color(s_device, t->ink_dim, 0);
   }
 
-  if (!np.has_device || sv_placeholder(np.hdr.state)) {
-    lv_label_set_text(s_title, "no active device");
+  if (sv_placeholder(np.hdr.state) || !np.has_device) {
+    lv_label_set_text(s_title, sv_placeholder(np.hdr.state) ? "--" : "no active device");
     lv_label_set_text(s_artist, "--");
     lv_bar_set_value(s_bar, 0, LV_ANIM_OFF);
     lv_label_set_text(s_elapsed, "0:00");

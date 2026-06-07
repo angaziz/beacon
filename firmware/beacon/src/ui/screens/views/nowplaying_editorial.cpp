@@ -32,7 +32,8 @@ static void show_player(bool on) {
 static void update(void) {
   nowplaying_rec_t n = ds_get_nowplaying(); uint32_t now = now_s();
   slot_set(s_slot, "NOW", &n.hdr, now);
-  if (!n.has_device || sv_placeholder(n.hdr.state)) { show_player(false); return; }
+  if (sv_placeholder(n.hdr.state)) { show_player(false); lv_label_set_text(s_none, "--"); return; }
+  if (!n.has_device) { show_player(false); lv_label_set_text(s_none, "no active device"); return; }
   show_player(true);
   const beacon_theme_t* th = theme_active();
   lv_obj_set_style_bg_opa(s_prog, LV_OPA_COVER, LV_PART_MAIN);

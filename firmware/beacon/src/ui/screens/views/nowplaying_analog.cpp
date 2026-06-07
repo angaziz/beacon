@@ -114,6 +114,7 @@ static void update(void) {
     lv_obj_set_style_text_color(s_status, t->ink_dim, 0);
   }
 
+  if (sv_placeholder(n.hdr.state)) { show_track(false); return; }   // loading: status chip shows it
   if (!n.has_device) { show_track(false); return; }
   show_track(true);
 
