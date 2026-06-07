@@ -39,14 +39,15 @@
 | `firmware/beacon/src/core/datastore.h` | DataStore get/set/sweep API (spec §3.3) |
 | `firmware/beacon/src/core/datastore.cpp` | DataStore impl: LVGL/Arduino-free; staleness sweep + state-priority + finance-count contract |
 | `firmware/beacon/src/core/stale.h` | Per-source `stale_s` constants (weather/usage/buddy/nowplaying) + finance lookup helper |
-| `firmware/beacon/src/ui/theme.h` | `gauge_style_t`, `beacon_theme_t`, global space/motion `#define`s, theme API decls (spec §4.1/§4.2) |
-| `firmware/beacon/src/ui/theme_catalog.h` | LVGL-free catalog data surface: ids + colors as host-shimmable `bt_rgb_t`; `THEME_COUNT`, id array |
-| `firmware/beacon/src/ui/theme.cpp` | `theme_set()` (frozen teardown order), `theme_active()`, `THEMES[7]`, style building (device-side) |
-| `firmware/beacon/src/ui/gauge.h` | `gauge_render()` decl + `gauge_val_t` params |
+| `firmware/beacon/src/ui/gauge_style.h` | FROZEN: `gauge_style_t` enum (LVGL-free; shared by catalog + gauge) |
+| `firmware/beacon/src/ui/theme.h` | `beacon_theme_t`, global space/motion `#define`s, theme API decls incl. the apply hook (spec §4.1/§4.2) |
+| `firmware/beacon/src/ui/theme_catalog.h` | LVGL-free catalog data surface: ids + colors as host-shimmable `bt_rgb_t`; `THEME_COUNT` |
+| `firmware/beacon/src/ui/theme.cpp` | `theme_set()` (updates tokens + calls apply hook), `theme_active()`, `theme_index()`, `THEMES[7]` (device-side) |
+| `firmware/beacon/src/ui/gauge.h` | `gauge_render(parent, theme, pct)` decl |
 | `firmware/beacon/src/ui/gauge.cpp` | `gauge_render()`: bar/ring/cell/measure/bigfig full; waveform/subdial deferred stub (device-side) |
-| `firmware/beacon/src/ui/fonts/` | generated LVGL C-array font subsets (7 display + body + mono) + `MANIFEST.md` |
-| `firmware/beacon/src/ui/demo_screen.{h,cpp}` | throwaway theme-switch demo + DataStore smoke task (device-side) |
-| `firmware/beacon/test/test_native/` | native-env Unity table-driven tests (one file per unit) |
+| `firmware/beacon/src/ui/fonts/` | generated LVGL C-array font subsets (7 hero + 7 display + 5 body + 1 mono) + `MANIFEST.md` |
+| `firmware/beacon/src/ui/demo_screen.{h,cpp}` | throwaway theme-switch demo (device-side) |
+| `firmware/beacon/test/test_<unit>/test_main.cpp` | native-env Unity table-driven tests (flat: one folder per unit) |
 
 ---
 
@@ -56,45 +57,48 @@ Prove `pio test -e native` runs before writing any contract logic.
 
 **Files:**
 - Modify: `firmware/beacon/platformio.ini`
-- Create: `firmware/beacon/test/test_native/test_smoke.cpp`
+- Create: `firmware/beacon/test/test_smoke/test_main.cpp`
+
+Before running host tests the first time, install the `native` platform once: `~/.beacon-pio/bin/pio platform install native`.
 
 - [ ] **Step 0.1: Add `[env:native]` to platformio.ini (do NOT touch `[env:beacon]`)**
 
-Append below the existing `[env:beacon]` block. PlatformIO's `native` platform builds host binaries with the system compiler; the bundled Unity framework is selected with `test_framework = unity`. `test_filter` scopes each env to its own test folder so the device env never tries to compile native tests and vice-versa.
+Append below the existing `[env:beacon]` block. PlatformIO's `native` platform builds host binaries with the system compiler; the bundled Unity framework is selected with `test_framework = unity`. The host tests live in flat `test/test_<unit>/` folders (each is its own program with its own `main()`); the native env runs them all (no `test_filter`), and `[env:beacon]` opts out of host tests entirely via `test_ignore = *` (Step 0.2).
 
 ```ini
 
 [env:native]
 ; Host-only env for pure-logic unit tests (records / screen_state / datastore /
-; config validation / theme catalog). NO Arduino, NO LVGL — those are stubbed or
-; kept out of native translation units. Does not affect [env:beacon] above.
+; config validation / theme catalog). NO Arduino, NO LVGL — kept out of native
+; translation units via -DBEACON_NATIVE. Does not affect [env:beacon] above.
 platform = native
 test_framework = unity
-test_filter = test_native/*
+test_build_src = yes   ; compile project src/ (filtered below) into test binaries, not just test/ files
+; runs every test/test_<unit>/ folder (each is its own program with its own main()).
 build_flags =
   -DBEACON_NATIVE=1        ; guards Arduino/LVGL-coupled code out of host builds
   -I src
-  ; NOTE: do NOT add -std=gnu++17 here — build_flags hit Unity's C sources too and clang
+  ; do NOT add -std=gnu++17 here: build_flags also hit Unity's C sources and clang
   ; rejects a C++ standard on .c files. Apple clang defaults to C++17 for .cpp (std::mutex OK).
-build_src_filter =
-  +<core/datastore.cpp>    ; the only product .cpp that is LVGL/Arduino-free
+; only datastore.cpp is LVGL/Arduino-free; everything else stays out of the host build
+build_src_filter = -<*> +<core/datastore.cpp>
 ```
 
-`-DBEACON_NATIVE=1` is the single guard symbol; product code uses `#ifndef BEACON_NATIVE` to fence off Arduino/LVGL includes. `build_src_filter` compiles ONLY `datastore.cpp` into the host test binary (theme.cpp/gauge.cpp/demo_screen.cpp pull in LVGL and must never reach native). Also pin `[env:beacon]` to its own folder so it never grabs native tests:
+`-DBEACON_NATIVE=1` is the single guard symbol; product code uses `#ifndef BEACON_NATIVE` to fence off Arduino/LVGL includes. `test_build_src = yes` makes the filtered src/ compile into the test binaries. `build_src_filter` MUST stay a SINGLE line — an inline `;` comment breaks the multiline form — and compiles ONLY `datastore.cpp` into the host test binary (theme.cpp/gauge.cpp/demo_screen.cpp pull in LVGL and must never reach native).
 
-- [ ] **Step 0.2: Scope the device env's tests too**
+- [ ] **Step 0.2: Keep the device env out of host tests**
 
 Add this one line inside the existing `[env:beacon]` block (surgical — append after `monitor_filters`):
 
 ```ini
-test_filter = test_embedded/*
+test_ignore = *   ; [env:beacon] runs no host unit tests; on-device checks use `pio run -t upload`
 ```
 
-(There is no `test_embedded/` folder yet; this simply prevents `[env:beacon]` from ever picking up `test_native/`. On-device checks in this plan run via `pio run -t upload`, not `pio test`.)
+(This prevents `[env:beacon]` from ever picking up the `test/test_<unit>/` host folders. On-device checks in this plan run via `pio run -t upload`, not `pio test`.)
 
 - [ ] **Step 0.3: Write the Unity smoke test (proves the harness runs)**
 
-`firmware/beacon/test/test_native/test_smoke.cpp`:
+`firmware/beacon/test/test_smoke/test_main.cpp`:
 
 ```cpp
 #include <unity.h>
@@ -132,7 +136,7 @@ Expected: P0-A firmware still links clean (Flash/RAM summary printed). No native
 - [ ] **Step 0.6: Commit checkpoint** — stage and ask the USER to commit:
 
 ```bash
-git add firmware/beacon/platformio.ini firmware/beacon/test/test_native/test_smoke.cpp
+git add firmware/beacon/platformio.ini firmware/beacon/test/test_smoke/test_main.cpp
 ```
 
 Suggested message: `test(p0b): add native Unity env + smoke test`
@@ -146,7 +150,7 @@ Copy spec §3.1 + §3.2 VERBATIM. Test `record_age_s` (incl. `last_updated==0 =>
 **Files:**
 - Create: `firmware/beacon/src/core/screen_state.h`
 - Create: `firmware/beacon/src/core/records.h`
-- Create: `firmware/beacon/test/test_native/test_records.cpp`
+- Create: `firmware/beacon/test/test_records/test_main.cpp`
 
 - [ ] **Step 1.1: Write `screen_state.h` (VERBATIM from spec §3.1)**
 
@@ -271,7 +275,7 @@ typedef struct {
 
 (`#include <stdbool.h>` is added so the headers compile as C and under the native C++ compiler; `bool`/`true`/`false` are used by the buddy/nowplaying records. Everything between the `#define` block and the last struct is the spec text unchanged.)
 
-- [ ] **Step 1.3: Write the FAILING test FIRST (`test_records.cpp`)**
+- [ ] **Step 1.3: Write the FAILING test FIRST (`test_records/test_main.cpp`)**
 
 Run `pio test -e native` after this step and BEFORE Step 1.1/1.2 exist — it must FAIL to compile (headers absent), proving the test drives the code. (If executing top-to-bottom, create this file, comment the headers out, confirm FAIL, then add headers and uncomment.)
 
@@ -332,12 +336,12 @@ int main(int, char**) {
 }
 ```
 
-- [ ] **Step 1.4: Verify (host)** — `cd firmware/beacon && ~/.beacon-pio/bin/pio test -e native`. Expected: both `test_records.cpp` tests PASS plus the prior smoke test (`3 Tests 0 Failures`).
+- [ ] **Step 1.4: Verify (host)** — `cd firmware/beacon && ~/.beacon-pio/bin/pio test -e native`. Expected: both `test_records` tests PASS plus the prior smoke test (`3 Tests 0 Failures`).
 
 - [ ] **Step 1.5: Commit checkpoint** —
 
 ```bash
-git add firmware/beacon/src/core/screen_state.h firmware/beacon/src/core/records.h firmware/beacon/test/test_native/test_records.cpp
+git add firmware/beacon/src/core/screen_state.h firmware/beacon/src/core/records.h firmware/beacon/test/test_records/test_main.cpp
 ```
 
 Suggested message: `feat(p0b): freeze screen_state + records contracts (FR-STATE-0)`
@@ -351,7 +355,7 @@ VERBATIM from spec §3.5. Fill `WMO_MAP[]` (spec leaves it as a comment; populat
 **Files:**
 - Create: `firmware/beacon/src/config/tickers.h`
 - Create: `firmware/beacon/src/config/location.h`
-- Create: `firmware/beacon/test/test_native/test_config.cpp`
+- Create: `firmware/beacon/test/test_config/test_main.cpp`
 
 - [ ] **Step 2.1: Write `tickers.h` (VERBATIM from spec §3.5)**
 
@@ -445,7 +449,7 @@ static const wmo_entry_t WMO_MAP[] = {
 #define WMO_MAP_COUNT (sizeof(WMO_MAP) / sizeof(WMO_MAP[0]))
 ```
 
-- [ ] **Step 2.3: Write the FAILING test FIRST (`test_config.cpp`, table-driven)**
+- [ ] **Step 2.3: Write the FAILING test FIRST (`test_config/test_main.cpp`, table-driven)**
 
 ```cpp
 #include <unity.h>
@@ -507,14 +511,14 @@ int main(int, char**) {
 }
 ```
 
-`test_config.cpp` includes `config/tickers.h` for `FIN_ID_LEN`? No — `FIN_ID_LEN` lives in `records.h`. Add `#include "core/records.h"` at the top of the test (the id-width assertion needs it). Make that include explicit.
+`test_config/test_main.cpp` includes `config/tickers.h` for `FIN_ID_LEN`? No — `FIN_ID_LEN` lives in `records.h`. Add `#include "core/records.h"` at the top of the test (the id-width assertion needs it). Make that include explicit.
 
 - [ ] **Step 2.4: Verify (host)** — `cd firmware/beacon && ~/.beacon-pio/bin/pio test -e native`. Expected: all config tests PASS.
 
 - [ ] **Step 2.5: Commit checkpoint** —
 
 ```bash
-git add firmware/beacon/src/config/tickers.h firmware/beacon/src/config/location.h firmware/beacon/test/test_native/test_config.cpp
+git add firmware/beacon/src/config/tickers.h firmware/beacon/src/config/location.h firmware/beacon/test/test_config/test_main.cpp
 ```
 
 Suggested message: `feat(p0b): freeze ticker + location config schemas`
@@ -527,7 +531,7 @@ VERBATIM from spec §3.4. It is an abstract interface (no impl until P2). Verify
 
 **Files:**
 - Create: `firmware/beacon/src/core/hublink.h`
-- Create: `firmware/beacon/test/test_native/test_hublink.cpp`
+- Create: `firmware/beacon/test/test_hublink/test_main.cpp`
 
 - [ ] **Step 3.1: Write `hublink.h` (VERBATIM from spec §3.4)**
 
@@ -623,7 +627,7 @@ int main(int, char**) {
 - [ ] **Step 3.4: Commit checkpoint** —
 
 ```bash
-git add firmware/beacon/src/core/hublink.h firmware/beacon/test/test_native/test_hublink.cpp
+git add firmware/beacon/src/core/hublink.h firmware/beacon/test/test_hublink/test_main.cpp
 ```
 
 Suggested message: `feat(p0b): freeze HubLink transport interface`
@@ -639,7 +643,7 @@ The spec §3.3 API. LVGL/Arduino-free so it tests on native. Lock abstracted beh
 - Create: `firmware/beacon/src/core/ds_lock.h`
 - Create: `firmware/beacon/src/core/datastore.h`
 - Create: `firmware/beacon/src/core/datastore.cpp`
-- Create: `firmware/beacon/test/test_native/test_datastore.cpp`
+- Create: `firmware/beacon/test/test_datastore/test_main.cpp`
 
 - [ ] **Step 4.1: Write `stale.h` (per-source staleness constants + finance lookup)**
 
@@ -650,14 +654,13 @@ Per-source `stale_s` come from `tech.md` §6 cadence table for the non-finance r
 #include <stdint.h>
 #include "config/tickers.h"
 
-// Per-source stale thresholds (seconds), tech.md §6 "Stale at" column.
-#define STALE_WEATHER_S    1800u   // 30 min
-#define STALE_USAGE_S       300u   // 5 min (hub plane)
-#define STALE_BUDDY_S       300u   // 5 min (hub plane)
-#define STALE_NOWPLAYING_S   15u   // 15 s
+// Per-source stale thresholds (tech.md §6 cadence table). Finance is per-ticker.
+#define WEATHER_STALE_S    1800u   // 30 min
+#define USAGE_STALE_S       300u   // 5 min / hub-offline
+#define BUDDY_STALE_S       300u
+#define NOWPLAYING_STALE_S   15u
 
-// Finance staleness is per-ticker; defaults come from DEFAULT_TICKERS[idx].stale_s.
-static inline uint32_t stale_finance_s(uint8_t idx) {
+static inline uint32_t finance_stale_s(uint8_t idx) {
   return (idx < DEFAULT_TICKERS_COUNT) ? DEFAULT_TICKERS[idx].stale_s : 0u;
 }
 ```
@@ -668,20 +671,23 @@ The DataStore must be host-testable, so the FreeRTOS mutex is abstracted. On nat
 
 ```c
 #pragma once
+// Thin mutex wrapper so datastore.cpp stays portable: std::mutex on the host test
+// build (BEACON_NATIVE), a FreeRTOS mutex on device. Critical sections are pure
+// struct copies (tech.md §6) — no I/O ever holds the lock.
 
 #ifdef BEACON_NATIVE
   #include <mutex>
   typedef std::mutex ds_lock_t;
-  static inline void ds_lock_init(ds_lock_t*)        {}
-  static inline void ds_lock_take(ds_lock_t* m)      { m->lock(); }
-  static inline void ds_lock_give(ds_lock_t* m)      { m->unlock(); }
+  static inline void ds_lock_init(ds_lock_t&) {}
+  static inline void ds_lock_take(ds_lock_t& m) { m.lock(); }
+  static inline void ds_lock_give(ds_lock_t& m) { m.unlock(); }
 #else
-  #include <freertos/FreeRTOS.h>
-  #include <freertos/semphr.h>
+  #include "freertos/FreeRTOS.h"
+  #include "freertos/semphr.h"
   typedef SemaphoreHandle_t ds_lock_t;
-  static inline void ds_lock_init(ds_lock_t* m)      { *m = xSemaphoreCreateMutex(); }
-  static inline void ds_lock_take(ds_lock_t* m)      { xSemaphoreTake(*m, portMAX_DELAY); }
-  static inline void ds_lock_give(ds_lock_t* m)      { xSemaphoreGive(*m); }
+  static inline void ds_lock_init(ds_lock_t& m) { m = xSemaphoreCreateMutex(); }
+  static inline void ds_lock_take(ds_lock_t& m) { xSemaphoreTake(m, portMAX_DELAY); }
+  static inline void ds_lock_give(ds_lock_t& m) { xSemaphoreGive(m); }
 #endif
 ```
 
@@ -693,26 +699,28 @@ The spec lists the core API and says "symmetric setters per domain (full list in
 #pragma once
 #include <stdint.h>
 #include "core/records.h"
-#include "core/screen_state.h"
 
-void datastore_init(void);
+// FROZEN API (FR-STATE-0). Thread-safe per tech.md §6: Core-0 fetchers write, Core-1 UI
+// reads by-value snapshots; the lock only guards struct copies. Setters force the record
+// to ST_LIVE / ERR_NONE on success (clearing any prior error/hub-offline). Callers stamp
+// hdr.last_updated (they know the fetch time); the staleness sweep consumes it.
 
-// Setters (Core-0 fetchers). Each sets hdr.state=ST_LIVE, hdr.last_updated=now on success.
+void datastore_init(void);   // seeds finance_count + ids from DEFAULT_TICKERS, all ST_LOADING
+
+// Setters (Core-0). Copy value fields; force hdr.state=ST_LIVE, hdr.err=ERR_NONE.
 void ds_set_weather(const weather_rec_t* r);
-void ds_set_finance(uint8_t idx, const finance_rec_t* r);   // idx < MAX_TICKERS
+void ds_set_finance(uint8_t idx, const finance_rec_t* r);  // preserves the slot's seeded id
 void ds_set_usage(const usage_rec_t* r);
 void ds_set_buddy(const buddy_rec_t* r);
 void ds_set_nowplaying(const nowplaying_rec_t* r);
 
-// Explicit failure/transport transitions (do not touch the value payload).
+// Explicit failure/transport transitions (do NOT touch the value payload).
 void ds_set_state_weather(screen_state_t s, data_err_t e);
 void ds_set_state_finance(uint8_t idx, screen_state_t s, data_err_t e);
-void ds_set_state_usage(screen_state_t s, data_err_t e);
-void ds_set_state_buddy(screen_state_t s, data_err_t e);
 void ds_set_state_nowplaying(screen_state_t s, data_err_t e);
 void ds_set_hub_offline(void);   // flips usage + buddy to ST_HUB_OFFLINE
 
-// Getters (Core-1 UI). Return a by-value snapshot taken under the lock.
+// Getters (Core-1). By-value snapshot under the lock.
 weather_rec_t    ds_get_weather(void);
 finance_rec_t    ds_get_finance(uint8_t idx);
 uint8_t          ds_get_finance_count(void);
@@ -720,19 +728,13 @@ usage_rec_t      ds_get_usage(void);
 buddy_rec_t      ds_get_buddy(void);
 nowplaying_rec_t ds_get_nowplaying(void);
 
-// Staleness sweep (called ~1/s from a Core-0 timer). For each record: if state==ST_LIVE and
-// record_age_s(hdr, now) >= stale_s(source), promote to ST_STALE (boundary is inclusive: an
-// age exactly equal to stale_s is stale). Never overwrites ST_OFFLINE/ST_ERROR/ST_HUB_OFFLINE.
-// stale_s comes from ticker_cfg for finance, per-source constants for the rest.
+// Staleness sweep (~1/s from a Core-0 timer). For each record: if state==ST_LIVE and
+// record_age_s(hdr, now) >= stale_s(source), promote to ST_STALE. Inclusive boundary.
+// Never overwrites ST_OFFLINE / ST_ERROR / ST_HUB_OFFLINE (state-priority rule).
 void ds_tick_staleness(uint32_t now);
-
-// Injected clock for the success setters' last_updated stamp. Device installs an epoch-seconds
-// source (RTC/NTP) at boot; native tests install a fake so set/sweep are deterministic.
-typedef uint32_t (*ds_now_fn)(void);
-void ds_set_clock(ds_now_fn fn);
 ```
 
-(`ds_set_clock` is added so success setters stamp `last_updated` without coupling the DataStore to Arduino's `time()`/RTC — required to keep the unit LVGL/Arduino-free and the tests deterministic. It is an internal seam, not a frozen-contract change.)
+(The DataStore carries NO clock: callers fill `hdr.last_updated` on the record they pass (they know the fetch time), and the sweep takes an explicit `now` — keeping the unit free of Arduino `time()`/RTC coupling and letting host tests drive time deterministically. Only weather/finance/nowplaying get explicit-state setters; usage/buddy transition via `ds_set_hub_offline`, since the BLE hub is their only transport.)
 
 - [ ] **Step 4.4: Write `datastore.cpp` (LVGL/Arduino-free impl)**
 
@@ -743,7 +745,7 @@ void ds_set_clock(ds_now_fn fn);
 #include "config/tickers.h"
 #include <string.h>
 
-static ds_lock_t       s_lock;
+static ds_lock_t        s_lock;
 static weather_rec_t    s_weather;
 static finance_rec_t    s_finance[MAX_TICKERS];
 static uint8_t          s_finance_count;
@@ -751,135 +753,114 @@ static usage_rec_t      s_usage;
 static buddy_rec_t      s_buddy;
 static nowplaying_rec_t s_nowplaying;
 
-static uint32_t ds_now_zero(void) { return 0; }
-static ds_now_fn s_now = ds_now_zero;   // device overrides via ds_set_clock at boot
-
-void ds_set_clock(ds_now_fn fn) { s_now = fn ? fn : ds_now_zero; }
+static void hdr_loading(record_hdr_t* h) { h->last_updated = 0; h->state = ST_LOADING; h->err = ERR_NONE; }
 
 void datastore_init(void) {
-  ds_lock_init(&s_lock);
-  memset(&s_weather, 0, sizeof(s_weather));
+  ds_lock_init(s_lock);
+  ds_lock_take(s_lock);
+  memset(&s_weather, 0, sizeof(s_weather));       hdr_loading(&s_weather.hdr);
+  memset(&s_usage, 0, sizeof(s_usage));           hdr_loading(&s_usage.hdr);
+  memset(&s_buddy, 0, sizeof(s_buddy));           hdr_loading(&s_buddy.hdr);
+  memset(&s_nowplaying, 0, sizeof(s_nowplaying));  hdr_loading(&s_nowplaying.hdr);
+
+  s_finance_count = DEFAULT_TICKERS_COUNT;
+  if (s_finance_count > MAX_TICKERS) s_finance_count = MAX_TICKERS;
   memset(s_finance, 0, sizeof(s_finance));
-  memset(&s_usage, 0, sizeof(s_usage));
-  memset(&s_buddy, 0, sizeof(s_buddy));
-  memset(&s_nowplaying, 0, sizeof(s_nowplaying));
-
-  // Count contract (frozen): finance_count = number of active default tickers, capped at
-  // MAX_TICKERS; seed each slot's id from DEFAULT_TICKERS[idx].id with state = ST_LOADING.
-  uint8_t n = (uint8_t)DEFAULT_TICKERS_COUNT;
-  if (n > MAX_TICKERS) n = MAX_TICKERS;
-  s_finance_count = n;
-  for (uint8_t i = 0; i < n; i++) {
+  for (uint8_t i = 0; i < s_finance_count; i++) {
     strncpy(s_finance[i].id, DEFAULT_TICKERS[i].id, FIN_ID_LEN - 1);
-    s_finance[i].id[FIN_ID_LEN - 1] = '\0';
-    s_finance[i].hdr.state = ST_LOADING;
-    s_finance[i].hdr.err   = ERR_NONE;
+    s_finance[i].id[FIN_ID_LEN - 1] = 0;
+    hdr_loading(&s_finance[i].hdr);
   }
-  s_weather.hdr.state    = ST_LOADING;
-  s_usage.hdr.state      = ST_LOADING;
-  s_buddy.hdr.state      = ST_LOADING;
-  s_nowplaying.hdr.state = ST_LOADING;
+  ds_lock_give(s_lock);
 }
 
-// --- success setters: copy payload, stamp LIVE + last_updated, clear err ---
-static void mark_live(record_hdr_t* h) {
-  h->state = ST_LIVE;
-  h->err   = ERR_NONE;
-  h->last_updated = s_now();
-}
-
+// --- setters: copy value, force LIVE/NONE (success clears prior error/hub-offline) ---
 void ds_set_weather(const weather_rec_t* r) {
-  ds_lock_take(&s_lock);
-  s_weather = *r; mark_live(&s_weather.hdr);
-  ds_lock_give(&s_lock);
+  ds_lock_take(s_lock);
+  s_weather = *r; s_weather.hdr.state = ST_LIVE; s_weather.hdr.err = ERR_NONE;
+  ds_lock_give(s_lock);
 }
 void ds_set_finance(uint8_t idx, const finance_rec_t* r) {
   if (idx >= MAX_TICKERS) return;
-  ds_lock_take(&s_lock);
-  s_finance[idx] = *r; mark_live(&s_finance[idx].hdr);
-  ds_lock_give(&s_lock);
+  ds_lock_take(s_lock);
+  char id[FIN_ID_LEN]; strncpy(id, s_finance[idx].id, FIN_ID_LEN); id[FIN_ID_LEN - 1] = 0;
+  s_finance[idx] = *r;
+  strncpy(s_finance[idx].id, id, FIN_ID_LEN); s_finance[idx].id[FIN_ID_LEN - 1] = 0; // keep seeded id
+  s_finance[idx].hdr.state = ST_LIVE; s_finance[idx].hdr.err = ERR_NONE;
+  ds_lock_give(s_lock);
 }
 void ds_set_usage(const usage_rec_t* r) {
-  ds_lock_take(&s_lock);
-  s_usage = *r; mark_live(&s_usage.hdr);
-  ds_lock_give(&s_lock);
+  ds_lock_take(s_lock);
+  s_usage = *r; s_usage.hdr.state = ST_LIVE; s_usage.hdr.err = ERR_NONE;
+  ds_lock_give(s_lock);
 }
 void ds_set_buddy(const buddy_rec_t* r) {
-  ds_lock_take(&s_lock);
-  s_buddy = *r; mark_live(&s_buddy.hdr);
-  ds_lock_give(&s_lock);
+  ds_lock_take(s_lock);
+  s_buddy = *r; s_buddy.hdr.state = ST_LIVE; s_buddy.hdr.err = ERR_NONE;
+  ds_lock_give(s_lock);
 }
 void ds_set_nowplaying(const nowplaying_rec_t* r) {
-  ds_lock_take(&s_lock);
-  s_nowplaying = *r; mark_live(&s_nowplaying.hdr);
-  ds_lock_give(&s_lock);
+  ds_lock_take(s_lock);
+  s_nowplaying = *r; s_nowplaying.hdr.state = ST_LIVE; s_nowplaying.hdr.err = ERR_NONE;
+  ds_lock_give(s_lock);
 }
 
-// --- explicit state setters: change state/err only, never the payload ---
-static void set_state(record_hdr_t* h, screen_state_t s, data_err_t e) { h->state = s; h->err = e; }
-
+// --- explicit state transitions: do not touch value payload ---
 void ds_set_state_weather(screen_state_t s, data_err_t e) {
-  ds_lock_take(&s_lock); set_state(&s_weather.hdr, s, e); ds_lock_give(&s_lock);
+  ds_lock_take(s_lock); s_weather.hdr.state = s; s_weather.hdr.err = e; ds_lock_give(s_lock);
 }
 void ds_set_state_finance(uint8_t idx, screen_state_t s, data_err_t e) {
   if (idx >= MAX_TICKERS) return;
-  ds_lock_take(&s_lock); set_state(&s_finance[idx].hdr, s, e); ds_lock_give(&s_lock);
-}
-void ds_set_state_usage(screen_state_t s, data_err_t e) {
-  ds_lock_take(&s_lock); set_state(&s_usage.hdr, s, e); ds_lock_give(&s_lock);
-}
-void ds_set_state_buddy(screen_state_t s, data_err_t e) {
-  ds_lock_take(&s_lock); set_state(&s_buddy.hdr, s, e); ds_lock_give(&s_lock);
+  ds_lock_take(s_lock); s_finance[idx].hdr.state = s; s_finance[idx].hdr.err = e; ds_lock_give(s_lock);
 }
 void ds_set_state_nowplaying(screen_state_t s, data_err_t e) {
-  ds_lock_take(&s_lock); set_state(&s_nowplaying.hdr, s, e); ds_lock_give(&s_lock);
+  ds_lock_take(s_lock); s_nowplaying.hdr.state = s; s_nowplaying.hdr.err = e; ds_lock_give(s_lock);
 }
 void ds_set_hub_offline(void) {
-  ds_lock_take(&s_lock);
-  set_state(&s_usage.hdr, ST_HUB_OFFLINE, ERR_NONE);
-  set_state(&s_buddy.hdr, ST_HUB_OFFLINE, ERR_NONE);
-  ds_lock_give(&s_lock);
+  ds_lock_take(s_lock);
+  s_usage.hdr.state = ST_HUB_OFFLINE;
+  s_buddy.hdr.state = ST_HUB_OFFLINE;
+  ds_lock_give(s_lock);
 }
 
-// --- getters: by-value snapshot under the lock ---
+// --- getters: by-value snapshots ---
 weather_rec_t ds_get_weather(void) {
-  ds_lock_take(&s_lock); weather_rec_t c = s_weather; ds_lock_give(&s_lock); return c;
+  ds_lock_take(s_lock); weather_rec_t r = s_weather; ds_lock_give(s_lock); return r;
 }
 finance_rec_t ds_get_finance(uint8_t idx) {
-  finance_rec_t c; memset(&c, 0, sizeof(c));
-  if (idx >= MAX_TICKERS) return c;
-  ds_lock_take(&s_lock); c = s_finance[idx]; ds_lock_give(&s_lock); return c;
+  finance_rec_t r; memset(&r, 0, sizeof(r));
+  if (idx >= MAX_TICKERS) { hdr_loading(&r.hdr); return r; }
+  ds_lock_take(s_lock); r = s_finance[idx]; ds_lock_give(s_lock); return r;
 }
 uint8_t ds_get_finance_count(void) {
-  ds_lock_take(&s_lock); uint8_t c = s_finance_count; ds_lock_give(&s_lock); return c;
+  ds_lock_take(s_lock); uint8_t c = s_finance_count; ds_lock_give(s_lock); return c;
 }
 usage_rec_t ds_get_usage(void) {
-  ds_lock_take(&s_lock); usage_rec_t c = s_usage; ds_lock_give(&s_lock); return c;
+  ds_lock_take(s_lock); usage_rec_t r = s_usage; ds_lock_give(s_lock); return r;
 }
 buddy_rec_t ds_get_buddy(void) {
-  ds_lock_take(&s_lock); buddy_rec_t c = s_buddy; ds_lock_give(&s_lock); return c;
+  ds_lock_take(s_lock); buddy_rec_t r = s_buddy; ds_lock_give(s_lock); return r;
 }
 nowplaying_rec_t ds_get_nowplaying(void) {
-  ds_lock_take(&s_lock); nowplaying_rec_t c = s_nowplaying; ds_lock_give(&s_lock); return c;
+  ds_lock_take(s_lock); nowplaying_rec_t r = s_nowplaying; ds_lock_give(s_lock); return r;
 }
 
-// --- staleness sweep: ONLY ST_LIVE => ST_STALE at the inclusive boundary ---
+// --- staleness sweep ---
 static void sweep_one(record_hdr_t* h, uint32_t now, uint32_t stale_s) {
   if (h->state == ST_LIVE && record_age_s(h, now) >= stale_s) h->state = ST_STALE;
 }
 void ds_tick_staleness(uint32_t now) {
-  ds_lock_take(&s_lock);
-  sweep_one(&s_weather.hdr,    now, STALE_WEATHER_S);
-  sweep_one(&s_usage.hdr,      now, STALE_USAGE_S);
-  sweep_one(&s_buddy.hdr,      now, STALE_BUDDY_S);
-  sweep_one(&s_nowplaying.hdr, now, STALE_NOWPLAYING_S);
-  for (uint8_t i = 0; i < s_finance_count; i++)
-    sweep_one(&s_finance[i].hdr, now, stale_finance_s(i));
-  ds_lock_give(&s_lock);
+  ds_lock_take(s_lock);
+  sweep_one(&s_weather.hdr,    now, WEATHER_STALE_S);
+  sweep_one(&s_usage.hdr,      now, USAGE_STALE_S);
+  sweep_one(&s_buddy.hdr,      now, BUDDY_STALE_S);
+  sweep_one(&s_nowplaying.hdr, now, NOWPLAYING_STALE_S);
+  for (uint8_t i = 0; i < s_finance_count; i++) sweep_one(&s_finance[i].hdr, now, finance_stale_s(i));
+  ds_lock_give(s_lock);
 }
 ```
 
-- [ ] **Step 4.5: Write the FAILING tests FIRST (`test_datastore.cpp`, table-driven)**
+- [ ] **Step 4.5: Write the FAILING tests FIRST (`test_datastore/test_main.cpp`, table-driven)**
 
 ```cpp
 #include <unity.h>
@@ -887,124 +868,92 @@ void ds_tick_staleness(uint32_t now) {
 #include "core/datastore.h"
 #include "config/tickers.h"
 
-static uint32_t g_clock = 0;
-static uint32_t fake_now(void) { return g_clock; }
-
-void setUp(void) { g_clock = 0; ds_set_clock(fake_now); datastore_init(); }
+void setUp(void) { datastore_init(); }   // reset the static store before each test
 void tearDown(void) {}
 
-static void test_init_seeds_finance_count_and_ids(void) {
-  uint8_t n = ds_get_finance_count();
-  uint8_t expect = (uint8_t)DEFAULT_TICKERS_COUNT;
-  if (expect > MAX_TICKERS) expect = MAX_TICKERS;
-  TEST_ASSERT_EQUAL_UINT8(expect, n);
-  for (uint8_t i = 0; i < n; i++) {
-    finance_rec_t f = ds_get_finance(i);
-    TEST_ASSERT_EQUAL_STRING(DEFAULT_TICKERS[i].id, f.id);   // slot i == ticker i
-    TEST_ASSERT_EQUAL_INT(ST_LOADING, f.hdr.state);
-  }
+static void test_init_seeds_finance(void) {
+  TEST_ASSERT_EQUAL_UINT8(DEFAULT_TICKERS_COUNT, ds_get_finance_count());
+  finance_rec_t f0 = ds_get_finance(0);
+  TEST_ASSERT_EQUAL_STRING(DEFAULT_TICKERS[0].id, f0.id);
+  TEST_ASSERT_EQUAL_INT(ST_LOADING, f0.hdr.state);
 }
 
-static void test_set_get_snapshot_equality(void) {
-  g_clock = 5000;
+static void test_weather_set_get_forces_live(void) {
   weather_rec_t w; memset(&w, 0, sizeof(w));
-  w.temp_c = 29.5f; w.humidity_pct = 80.0f; w.wmo_code = 61;
+  w.temp_c = 30.5f; w.humidity_pct = 70; w.wmo_code = 2;
+  w.hdr.last_updated = 1000; w.hdr.state = ST_ERROR;   // setter must override to LIVE
   ds_set_weather(&w);
-  weather_rec_t got = ds_get_weather();
-  TEST_ASSERT_EQUAL_FLOAT(29.5f, got.temp_c);
-  TEST_ASSERT_EQUAL_UINT16(61, got.wmo_code);
-  TEST_ASSERT_EQUAL_INT(ST_LIVE, got.hdr.state);
-  TEST_ASSERT_EQUAL_UINT32(5000, got.hdr.last_updated);   // stamped from fake clock
+  weather_rec_t g = ds_get_weather();
+  TEST_ASSERT_EQUAL_FLOAT(30.5f, g.temp_c);
+  TEST_ASSERT_EQUAL_INT(ST_LIVE, g.hdr.state);
+  TEST_ASSERT_EQUAL_INT(ERR_NONE, g.hdr.err);
 }
 
-static void test_finance_idx_isolation(void) {
-  finance_rec_t a; memset(&a, 0, sizeof(a)); a.value = 111.0;
-  ds_set_finance(0, &a);
-  finance_rec_t slot1 = ds_get_finance(1);
-  TEST_ASSERT_EQUAL_DOUBLE(0.0, slot1.value);             // writing slot 0 leaves slot 1 untouched
-  TEST_ASSERT_EQUAL_INT(ST_LOADING, slot1.hdr.state);
-  finance_rec_t slot0 = ds_get_finance(0);
-  TEST_ASSERT_EQUAL_DOUBLE(111.0, slot0.value);
+static void test_finance_isolation_and_id_preserved(void) {
+  finance_rec_t r; memset(&r, 0, sizeof(r));
+  r.value = 123.0; r.hdr.last_updated = 1000;
+  strcpy(r.id, "WRONG");                  // caller id ignored; slot keeps seeded id
+  ds_set_finance(2, &r);
+  finance_rec_t s2 = ds_get_finance(2);
+  finance_rec_t s3 = ds_get_finance(3);
+  TEST_ASSERT_EQUAL_FLOAT(123.0f, (float)s2.value);
+  TEST_ASSERT_EQUAL_STRING(DEFAULT_TICKERS[2].id, s2.id);
+  TEST_ASSERT_EQUAL_INT(ST_LIVE, s2.hdr.state);
+  TEST_ASSERT_EQUAL_INT(ST_LOADING, s3.hdr.state);   // neighbor untouched
 }
 
-// Staleness sweep table: (initial state, last_updated, stale_s-source, now) -> expected state.
-// Weather stale_s = STALE_WEATHER_S (1800). Boundary inclusive: age == stale_s => stale.
-static void test_staleness_sweep_table(void) {
-  static const struct {
-    const char*    name;
-    screen_state_t initial;
-    data_err_t     err;
-    uint32_t       last_updated;
-    uint32_t       now;
-    screen_state_t expect;
-  } cases[] = {
-    {"live below boundary stays live", ST_LIVE,  ERR_NONE, 1000, 1000 + 1799, ST_LIVE},
-    {"live at boundary => stale",      ST_LIVE,  ERR_NONE, 1000, 1000 + 1800, ST_STALE},
-    {"live past boundary => stale",    ST_LIVE,  ERR_NONE, 1000, 1000 + 5000, ST_STALE},
-    {"error never clobbered",          ST_ERROR, ERR_HTTP, 1000, 1000 + 9999, ST_ERROR},
-    {"offline never clobbered",        ST_OFFLINE, ERR_NONE, 1000, 1000 + 9999, ST_OFFLINE},
-    {"loading not promoted",           ST_LOADING, ERR_NONE, 0,  9999, ST_LOADING},
+static void test_staleness_inclusive_boundary(void) {
+  struct { uint32_t last; uint32_t now; int expect; } cases[] = {
+    {1000, 1000 + 1799, ST_LIVE},
+    {1000, 1000 + 1800, ST_STALE},   // WEATHER_STALE_S, inclusive
+    {1000, 1000 + 5000, ST_STALE},
   };
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
     datastore_init();
-    weather_rec_t w; memset(&w, 0, sizeof(w));
-    g_clock = cases[i].last_updated;
-    if (cases[i].initial == ST_LIVE) {
-      ds_set_weather(&w);                                  // stamps last_updated + ST_LIVE
-    } else {
-      // force the non-live initial state + last_updated directly via setters
-      ds_set_weather(&w);
-      ds_set_state_weather(cases[i].initial, cases[i].err);
-    }
+    weather_rec_t w; memset(&w, 0, sizeof(w)); w.hdr.last_updated = cases[i].last;
+    ds_set_weather(&w);                // LIVE
     ds_tick_staleness(cases[i].now);
-    weather_rec_t got = ds_get_weather();
-    TEST_ASSERT_EQUAL_INT_MESSAGE(cases[i].expect, got.hdr.state, cases[i].name);
+    TEST_ASSERT_EQUAL_INT(cases[i].expect, ds_get_weather().hdr.state);
   }
 }
 
-static void test_hub_offline_flips_usage_and_buddy(void) {
+static void test_sweep_never_clobbers_explicit_states(void) {
+  ds_set_state_weather(ST_ERROR, ERR_RATE_LIMITED);
+  ds_tick_staleness(9999999);
+  TEST_ASSERT_EQUAL_INT(ST_ERROR, ds_get_weather().hdr.state);   // not promoted to STALE
+  ds_set_hub_offline();
+  ds_tick_staleness(9999999);
+  TEST_ASSERT_EQUAL_INT(ST_HUB_OFFLINE, ds_get_usage().hdr.state);
+}
+
+static void test_hub_offline_flip_and_recovery(void) {
   ds_set_hub_offline();
   TEST_ASSERT_EQUAL_INT(ST_HUB_OFFLINE, ds_get_usage().hdr.state);
   TEST_ASSERT_EQUAL_INT(ST_HUB_OFFLINE, ds_get_buddy().hdr.state);
-}
-
-static void test_success_clears_hub_offline_and_error(void) {
-  ds_set_hub_offline();
-  usage_rec_t u; memset(&u, 0, sizeof(u)); u.claude.h5.pct = 24;
-  g_clock = 7000;
-  ds_set_usage(&u);                                        // success clears HUB_OFFLINE
-  usage_rec_t got = ds_get_usage();
-  TEST_ASSERT_EQUAL_INT(ST_LIVE, got.hdr.state);
-  TEST_ASSERT_EQUAL_INT16(24, got.claude.h5.pct);
-
-  // explicit ERROR then a success clears it
-  ds_set_state_usage(ST_ERROR, ERR_RATE_LIMITED);
-  TEST_ASSERT_EQUAL_INT(ST_ERROR, ds_get_usage().hdr.state);
+  usage_rec_t u; memset(&u, 0, sizeof(u)); u.claude.h5.pct = 24; u.hdr.last_updated = 1000;
   ds_set_usage(&u);
-  TEST_ASSERT_EQUAL_INT(ST_LIVE, ds_get_usage().hdr.state);
-  TEST_ASSERT_EQUAL_INT(ERR_NONE, ds_get_usage().hdr.err);
+  TEST_ASSERT_EQUAL_INT(ST_LIVE, ds_get_usage().hdr.state);      // recovered
+  TEST_ASSERT_EQUAL_INT16(24, ds_get_usage().claude.h5.pct);
 }
 
 static void test_explicit_failure_preserves_payload(void) {
-  g_clock = 3000;
-  finance_rec_t f; memset(&f, 0, sizeof(f)); f.value = 42.0; strncpy(f.id, "btc", FIN_ID_LEN - 1);
-  ds_set_finance(5, &f);
-  ds_set_state_finance(5, ST_ERROR, ERR_TIMEOUT);         // failure must not touch payload
-  finance_rec_t got = ds_get_finance(5);
-  TEST_ASSERT_EQUAL_DOUBLE(42.0, got.value);              // value preserved
-  TEST_ASSERT_EQUAL_STRING("btc", got.id);
-  TEST_ASSERT_EQUAL_INT(ST_ERROR, got.hdr.state);
-  TEST_ASSERT_EQUAL_INT(ERR_TIMEOUT, got.hdr.err);
+  weather_rec_t w; memset(&w, 0, sizeof(w)); w.temp_c = 28.0f; w.hdr.last_updated = 1000;
+  ds_set_weather(&w);
+  ds_set_state_weather(ST_OFFLINE, ERR_NO_ROUTE);
+  weather_rec_t g = ds_get_weather();
+  TEST_ASSERT_EQUAL_INT(ST_OFFLINE, g.hdr.state);
+  TEST_ASSERT_EQUAL_INT(ERR_NO_ROUTE, g.hdr.err);
+  TEST_ASSERT_EQUAL_FLOAT(28.0f, g.temp_c);                      // value preserved
 }
 
 int main(int, char**) {
   UNITY_BEGIN();
-  RUN_TEST(test_init_seeds_finance_count_and_ids);
-  RUN_TEST(test_set_get_snapshot_equality);
-  RUN_TEST(test_finance_idx_isolation);
-  RUN_TEST(test_staleness_sweep_table);
-  RUN_TEST(test_hub_offline_flips_usage_and_buddy);
-  RUN_TEST(test_success_clears_hub_offline_and_error);
+  RUN_TEST(test_init_seeds_finance);
+  RUN_TEST(test_weather_set_get_forces_live);
+  RUN_TEST(test_finance_isolation_and_id_preserved);
+  RUN_TEST(test_staleness_inclusive_boundary);
+  RUN_TEST(test_sweep_never_clobbers_explicit_states);
+  RUN_TEST(test_hub_offline_flip_and_recovery);
   RUN_TEST(test_explicit_failure_preserves_payload);
   return UNITY_END();
 }
@@ -1021,173 +970,176 @@ Expected (after impl): all datastore tests PASS. The `build_src_filter` from Tas
 - [ ] **Step 4.7: Commit checkpoint** —
 
 ```bash
-git add firmware/beacon/src/core/stale.h firmware/beacon/src/core/ds_lock.h firmware/beacon/src/core/datastore.h firmware/beacon/src/core/datastore.cpp firmware/beacon/test/test_native/test_datastore.cpp
+git add firmware/beacon/src/core/stale.h firmware/beacon/src/core/ds_lock.h firmware/beacon/src/core/datastore.h firmware/beacon/src/core/datastore.cpp firmware/beacon/test/test_datastore/test_main.cpp
 ```
 
 Suggested message: `feat(p0b): thread-safe DataStore with staleness sweep + state priority`
 
 ---
 
-## Task 5: ui/theme.h + theme_catalog.h (catalog data + host lookup test)
+## Task 5: ui/gauge_style.h + theme.h + theme_catalog.h (catalog data + host lookup test)
 
-`beacon_theme_t` (spec §4.1, with `radius`/`stroke_hair`/`stroke_med` added vs tech.md §6) + `gauge_style_t` + global space/motion `#define`s + the catalog. `lv_color_t`/`lv_font_t` make a full native compile hard, so split: a LVGL-free `theme_catalog.h` carries ids + colors as a host-shimmable `bt_rgb_t`; font pointers + `lv_style_t` building stay in `theme.cpp` (device-side). Host test asserts catalog count + ids match the DESIGN canonical set.
+`beacon_theme_t` (spec §4.1, with `f_hero` + `radius`/`stroke_hair`/`stroke_med` added vs tech.md §6) + `gauge_style_t` + global space/motion `#define`s + the catalog. `lv_color_t`/`lv_font_t` make a full native compile hard, so split: `gauge_style_t` lives in its own LVGL-free `gauge_style.h`; a LVGL-free `theme_catalog.h` carries ids + colors as a host-shimmable `bt_rgb_t`; the `beacon_theme_t` struct (with `lv_color_t` + `const lv_font_t*`) and `THEMES[7]` building stay in `theme.h`/`theme.cpp` (device-side). The host theme test includes ONLY `theme_catalog.h` (which needs only `gauge_style.h`), never `theme.h`.
 
-**Split rationale (described per the task brief):**
-- **Host-testable (in `theme_catalog.h`):** the 7 theme `id` strings, gauge-style enum per theme, and the color tokens expressed as `bt_rgb_t {r,g,b}` (a plain struct, no LVGL). These are pure data and carry the DESIGN.md values.
-- **Device-side only (in `theme.cpp`):** `THEMES[7]` of `beacon_theme_t` (which holds `lv_color_t` + `const lv_font_t*`), built by converting each `bt_rgb_t` via `lv_color_make()` and pointing at the generated fonts (Task 6). Font pointers and `lv_style_t` cannot link on native, so they never enter a native translation unit.
+**Split rationale:**
+- **LVGL-free, host-testable:** `gauge_style.h` (the enum) and `theme_catalog.h` (the 7 theme `id` strings, gauge-style per theme, color tokens as `bt_rgb_t {r,g,b}`, and the per-theme `glow`/`radius`/`stroke_*` bytes). Pure data carrying the DESIGN.md values.
+- **Device-side only:** `theme.h`'s `beacon_theme_t` + the runtime `THEMES[7]` (which hold `lv_color_t` + `const lv_font_t*`), built in `theme.cpp` by converting each `bt_rgb_t` via `lv_color_make()` and pointing at the generated fonts (Task 6). `theme.h` includes `<lvgl.h>` unconditionally — it never reaches a native translation unit because no native test includes it.
 
 **Files:**
+- Create: `firmware/beacon/src/ui/gauge_style.h`
 - Create: `firmware/beacon/src/ui/theme.h`
 - Create: `firmware/beacon/src/ui/theme_catalog.h`
-- Create: `firmware/beacon/test/test_native/test_theme_catalog.cpp`
-- Modify: `firmware/beacon/platformio.ini` (add `theme_catalog.h` is header-only; no src filter change. But the native test includes it — no .cpp needed.)
+- Create: `firmware/beacon/test/test_theme/test_main.cpp`
 
-- [ ] **Step 5.1: Write `theme.h` (spec §4.1 struct + §4.2 API + global tokens)**
+- [ ] **Step 5.1a: Write `gauge_style.h` (LVGL-free enum, shared by catalog + gauge)**
 
 ```c
 #pragma once
-#include <stdint.h>
-#ifndef BEACON_NATIVE
-  #include <lvgl.h>
-#endif
-
+// LVGL-free so both the host-testable theme catalog and the device theme/gauge code share it.
 typedef enum {
   GAUGE_BAR, GAUGE_RING, GAUGE_CELL, GAUGE_WAVEFORM, GAUGE_MEASURE, GAUGE_BIGFIG, GAUGE_SUBDIAL
 } gauge_style_t;
-
-#ifndef BEACON_NATIVE
-typedef struct {
-  const char*      id;          // canonical id (DESIGN.md): editorial/hud/calm/blueprint/led/oscilloscope/analog
-  lv_color_t       bg, ink, ink_dim, line, accent, accent2, up, down, alert;
-  const lv_font_t *f_display, *f_body, *f_mono;
-  gauge_style_t    gauge;
-  uint8_t          glow;        // 0..255 accent glow amount
-  uint8_t          radius;      // element corner radius (px)  [ADDED vs tech.md §6]
-  uint8_t          stroke_hair; // hairline width (px)         [ADDED]
-  uint8_t          stroke_med;  // medium stroke width (px)    [ADDED]
-} beacon_theme_t;
-#endif
-
-// Global (not per-theme) tokens, DESIGN.md. Space rhythm 4/8/12/16/24/32.
-#define SPACE_1   4
-#define SPACE_2   8
-#define SPACE_3   12
-#define SPACE_4   16
-#define SPACE_5   24
-#define SPACE_6   32
-
-// Motion durations (ms); easing is a single shared ease-out-expo/quint for all transitions.
-#define DUR_FAST  120
-#define DUR       220
-#define DUR_SLOW  400
-
-#define THEME_COUNT 7
-#define THEME_DEFAULT_IDX 0   // editorial
-
-#ifndef BEACON_NATIVE
-// Theme engine (theme.cpp). theme_set() runs the frozen teardown order (spec §4.2):
-// destroy active screen -> free prior lv_style_t -> rebuild styles -> rebuild screen.
-void theme_set(uint8_t idx);
-const beacon_theme_t* theme_active(void);
-uint8_t theme_active_idx(void);
-#endif
 ```
 
-(Global `space`/`motion` defines + `THEME_COUNT`/`THEME_DEFAULT_IDX` are host-visible — no LVGL needed — so they sit outside the `BEACON_NATIVE` guard. The struct, font pointers, and engine API need LVGL and are fenced off.)
+- [ ] **Step 5.1b: Write `theme.h` (spec §4.1 struct + §4.2 apply-hook API + global tokens)**
+
+`theme.h` is device-side (includes `<lvgl.h>`); it is never compiled into a native translation unit. The struct field order is copied VERBATIM from the spec: `f_hero` first, then `f_display, f_body, f_mono`, then `gauge`, `glow`, `radius`, `stroke_hair, stroke_med`.
+
+```c
+#pragma once
+#include <lvgl.h>
+#include <stdint.h>
+#include "ui/gauge_style.h"
+
+// FROZEN runtime theme contract (tech.md §6 + DESIGN.md tokens). Screens read tokens only.
+// Built at runtime from THEME_CATALOG (theme_catalog.h) + the resident fonts (theme.cpp).
+typedef struct {
+  const char*      id;
+  lv_color_t       bg, ink, ink_dim, line, accent, accent2, up, down, alert;
+  const lv_font_t *f_hero;      // oversized figures (clock, big %): digits + :%°.,+-/ subset
+  const lv_font_t *f_display, *f_body, *f_mono; // display=titles/section figures (full ASCII); body/mono per role
+  gauge_style_t    gauge;
+  uint8_t          glow;
+  uint8_t          radius;
+  uint8_t          stroke_hair, stroke_med;
+} beacon_theme_t;
+
+// Global (not per-theme) tokens, DESIGN.md.
+#define SPACE_XS   4
+#define SPACE_S    8
+#define SPACE_M   12
+#define SPACE_L   16
+#define SPACE_XL  24
+#define SPACE_XXL 32
+#define DUR_FAST  120   // ms
+#define DUR       220
+#define DUR_SLOW  400
+// Easing is a single shared ease-out (no per-theme easing). Reduced-motion is a chunk-D
+// Settings flag the motion helpers consult to crossfade/instant instead of animate.
+
+// The active screen registers a rebuild hook; theme_set() invokes it after updating tokens so the
+// screen tears down + rebuilds from the new theme (no reboot, FR-THEME-3). The screen's hook is
+// responsible for the frozen teardown order: clear objects + remove styles, reset its lv_style_t,
+// rebuild from the passed tokens (one-theme-resident, tech.md §6).
+typedef void (*theme_apply_cb)(const beacon_theme_t*);
+void theme_on_apply(theme_apply_cb cb);
+
+void theme_set(uint8_t idx);                 // idx < THEME_COUNT; updates tokens + calls the apply hook
+const beacon_theme_t* theme_active(void);    // current theme tokens (NULL before first theme_set)
+uint8_t theme_index(void);                   // current index
+```
+
+(`THEME_COUNT` is defined in `theme_catalog.h`, not here — the catalog owns the array size. The space-token names are `SPACE_XS/S/M/L/XL/XXL`.)
 
 - [ ] **Step 5.2: Write `theme_catalog.h` (LVGL-free catalog data with DESIGN.md values)**
 
-Colors are the DESIGN.md token values (Editorial default table + catalog overrides). `bt_rgb_t` is a plain RGB triple so the catalog is host-testable; `theme.cpp` converts to `lv_color_t`. The `line` token in DESIGN is a translucent white (`rgba(255,255,255,.14)`) — flattened on pure-black canvas to its opaque equivalent `#242424` (0.14*255 ~= 36 = 0x24).
+Colors are the DESIGN.md token values (Editorial default table + catalog realizations), expressed as decimal `bt_rgb_t` triples so the catalog is host-testable; `theme.cpp` converts to `lv_color_t`. The `line` token in DESIGN is a translucent white (`rgba(255,255,255,.14)`) — flattened on pure-black canvas to its opaque equivalent `{36,36,34}`. `theme_catalog.h` includes `ui/gauge_style.h` (the enum) only — NOT `theme.h`.
 
 ```c
 #pragma once
 #include <stdint.h>
-#include "ui/theme.h"   // gauge_style_t, THEME_COUNT
+#include "ui/gauge_style.h"
+
+// LVGL-free catalog data (host-testable). theme.cpp maps this -> beacon_theme_t (lv_color_t/lv_font_t).
+// DESIGN.md owns token VALUES; only Editorial has full hex there, so the other six are concrete
+// realizations of DESIGN.md's named accents (tunable on hardware in the Task 9 demo). bg is always
+// pure black (AMOLED off-pixels). The ids + gauge mapping + struct are the frozen part.
 
 typedef struct { uint8_t r, g, b; } bt_rgb_t;
 
-// One catalog entry, LVGL-free. theme.cpp maps these to beacon_theme_t (lv_color_t + fonts).
 typedef struct {
-  const char*   id;
+  const char*   id;                 // canonical id (DESIGN.md)
   bt_rgb_t      bg, ink, ink_dim, line, accent, accent2, up, down, alert;
   gauge_style_t gauge;
-  uint8_t       glow, radius, stroke_hair, stroke_med;
+  uint8_t       glow;               // 0..255
+  uint8_t       radius;             // element corner radius (px)
+  uint8_t       stroke_hair, stroke_med;
 } theme_catalog_t;
 
-// DESIGN.md token values. accent2 == accent where a theme uses a single accent.
-static const theme_catalog_t THEME_CATALOG[THEME_COUNT] = {
-  // editorial (default): signal orange, flat, hairline rules. up=ink, down=accent.
-  {"editorial",
-   {0,0,0}, {0xf4,0xf3,0xef}, {0x74,0x72,0x6c}, {0x24,0x24,0x24},
-   {0xff,0x4a,0x2b}, {0xff,0x4a,0x2b}, {0xf4,0xf3,0xef}, {0xff,0x4a,0x2b}, {0xff,0x4a,0x2b},
-   GAUGE_BAR, 0, 2, 1, 2},
-  // hud: cyan + amber, concentric rings, subtle glow.
-  {"hud",
-   {0,0,0}, {0xe8,0xf4,0xf7}, {0x6a,0x82,0x88}, {0x14,0x2a,0x2e},
-   {0x2d,0xe2,0xe6}, {0xff,0xb3,0x3a}, {0x2d,0xe2,0xe6}, {0xff,0xb3,0x3a}, {0xff,0xb3,0x3a},
-   GAUGE_RING, 80, 4, 1, 2},
-  // calm: faint red, sparse white-on-black, dot-matrix display.
-  {"calm",
-   {0,0,0}, {0xf2,0xf2,0xf2}, {0x6b,0x6b,0x6b}, {0x1e,0x1e,0x1e},
-   {0xd6,0x4a,0x4a}, {0xd6,0x4a,0x4a}, {0xf2,0xf2,0xf2}, {0xd6,0x4a,0x4a}, {0xd6,0x4a,0x4a},
-   GAUGE_BIGFIG, 0, 6, 1, 2},
-  // blueprint: blueprint blue, draftsman line-art, dimensions.
-  {"blueprint",
-   {0,0,0}, {0xd6,0xe6,0xf5}, {0x5e,0x76,0x8c}, {0x16,0x2a,0x3e},
-   {0x4a,0x9e,0xff}, {0x4a,0x9e,0xff}, {0xd6,0xe6,0xf5}, {0x4a,0x9e,0xff}, {0x4a,0x9e,0xff},
-   GAUGE_MEASURE, 0, 0, 1, 2},
-  // led: amber, dot panel, lit-pixel digits, slight glow.
-  {"led",
-   {0,0,0}, {0xff,0xc8,0x4a}, {0x6e,0x58,0x24}, {0x2a,0x22,0x0e},
-   {0xff,0xb0,0x1a}, {0xff,0xb0,0x1a}, {0xff,0xc8,0x4a}, {0xff,0xb0,0x1a}, {0xff,0xb0,0x1a},
-   GAUGE_CELL, 120, 2, 1, 2},
-  // oscilloscope: phosphor green, graticule + signal trace, strong glow.
-  {"oscilloscope",
-   {0,0,0}, {0x4a,0xff,0x6a}, {0x2a,0x6e,0x38}, {0x10,0x28,0x16},
-   {0x4a,0xff,0x6a}, {0x4a,0xff,0x6a}, {0x4a,0xff,0x6a}, {0xff,0x5a,0x5a}, {0xff,0xb0,0x1a},
-   GAUGE_WAVEFORM, 160, 0, 1, 2},
-  // analog: ice blue, analog hands + usage sub-dials.
-  {"analog",
-   {0,0,0}, {0xe6,0xf0,0xf7}, {0x6a,0x7c,0x88}, {0x1c,0x26,0x2c},
-   {0x8a,0xc6,0xe6}, {0x8a,0xc6,0xe6}, {0xe6,0xf0,0xf7}, {0x8a,0xc6,0xe6}, {0xff,0xb0,0x1a},
-   GAUGE_SUBDIAL, 0, 8, 1, 2},
-};
+#define THEME_COUNT 7
 
-// Canonical id order (DESIGN.md): index must equal THEME_CATALOG index.
-static const char* const THEME_IDS[THEME_COUNT] = {
-  "editorial", "hud", "calm", "blueprint", "led", "oscilloscope", "analog"
+static const theme_catalog_t THEME_CATALOG[THEME_COUNT] = {
+  // Editorial Index (default) — DESIGN.md exact values
+  { "editorial",
+    {0,0,0}, {244,243,239}, {116,114,108}, {36,36,34}, {255,74,43}, {255,74,43},
+    {244,243,239}, {255,74,43}, {255,74,43}, GAUGE_BAR, 0, 0, 1, 2 },
+  // Aerospace HUD — cyan + amber, concentric rings
+  { "hud",
+    {0,0,0}, {224,247,250}, {96,125,139}, {20,40,46}, {0,229,255}, {255,179,0},
+    {0,229,255}, {255,82,82}, {255,179,0}, GAUGE_RING, 40, 2, 1, 2 },
+  // Calm Futurism — faint red, sparse white-on-black, big figures
+  { "calm",
+    {0,0,0}, {238,238,238}, {120,120,120}, {30,30,30}, {224,86,74}, {224,86,74},
+    {238,238,238}, {224,86,74}, {224,86,74}, GAUGE_BIGFIG, 10, 8, 1, 2 },
+  // Blueprint — draftsman blue, dimension lines
+  { "blueprint",
+    {0,0,0}, {214,230,245}, {90,120,150}, {26,42,58}, {74,144,217}, {74,144,217},
+    {120,200,140}, {230,120,110}, {74,144,217}, GAUGE_MEASURE, 0, 0, 1, 2 },
+  // LED Matrix — amber lit-pixel
+  { "led",
+    {0,0,0}, {255,176,0}, {120,82,0}, {40,28,0}, {255,176,0}, {255,176,0},
+    {255,176,0}, {255,80,40}, {255,80,40}, GAUGE_CELL, 60, 0, 1, 2 },
+  // Oscilloscope — phosphor green graticule + trace
+  { "oscilloscope",
+    {0,0,0}, {51,255,102}, {28,110,56}, {16,48,24}, {51,255,102}, {51,255,102},
+    {51,255,102}, {255,90,90}, {255,210,80}, GAUGE_WAVEFORM, 50, 0, 1, 2 },
+  // Analog Neo — ice blue, analog hands + sub-dials
+  { "analog",
+    {0,0,0}, {191,227,242}, {96,128,144}, {28,40,48}, {159,208,232}, {159,208,232},
+    {191,227,242}, {232,140,140}, {159,208,232}, GAUGE_SUBDIAL, 20, 12, 1, 2 },
 };
 ```
 
-(Color values for the non-default themes are derived from DESIGN.md's catalog descriptions — "cyan + amber", "phosphor green", "ice blue", etc. — since DESIGN.md gives full per-token hex only for Editorial. These are the implementer's concrete realizations of the named accents on the shared pure-black/ink scheme; adjust on hardware in Task 9 if a hue reads wrong, but the ids/gauge/struct shape are frozen.)
+(Color values for the non-default themes are concrete realizations of DESIGN.md's named accents — "cyan + amber", "phosphor green", "ice blue", etc. — since DESIGN.md gives full per-token hex only for Editorial. Adjust on hardware in Task 9 if a hue reads wrong, but the ids/gauge/struct shape are frozen.)
 
-- [ ] **Step 5.3: Write the FAILING test FIRST (`test_theme_catalog.cpp`, table-driven)**
+- [ ] **Step 5.3: Write the FAILING test FIRST (`test_theme/test_main.cpp`, table-driven)**
+
+The host test includes ONLY `theme_catalog.h` (LVGL-free) — never `theme.h`.
 
 ```cpp
 #include <unity.h>
 #include <string.h>
-#include "ui/theme_catalog.h"
-#include "ui/theme.h"
+#include "ui/theme_catalog.h"   // LVGL-free; the device beacon_theme_t (theme.h) wraps this
 
 void setUp(void) {}
 void tearDown(void) {}
 
 static void test_catalog_count(void) {
   TEST_ASSERT_EQUAL_INT(7, THEME_COUNT);
-  // catalog array sized to THEME_COUNT
   TEST_ASSERT_EQUAL_INT(THEME_COUNT, (int)(sizeof(THEME_CATALOG) / sizeof(THEME_CATALOG[0])));
 }
 
-// ids match the DESIGN.md canonical set, in canonical order, default at index 0.
-static void test_catalog_ids_canonical(void) {
-  static const char* expect[] = {
+// ids match the DESIGN.md canonical set, in order, unique. default at index 0.
+static void test_catalog_ids(void) {
+  const char* expect[THEME_COUNT] = {
     "editorial", "hud", "calm", "blueprint", "led", "oscilloscope", "analog"
   };
   for (int i = 0; i < THEME_COUNT; i++) {
-    TEST_ASSERT_EQUAL_STRING_MESSAGE(expect[i], THEME_CATALOG[i].id, expect[i]);
-    TEST_ASSERT_EQUAL_STRING(expect[i], THEME_IDS[i]);
+    TEST_ASSERT_NOT_NULL(THEME_CATALOG[i].id);
+    TEST_ASSERT_EQUAL_STRING(expect[i], THEME_CATALOG[i].id);
+    for (int j = i + 1; j < THEME_COUNT; j++)
+      TEST_ASSERT_FALSE(strcmp(THEME_CATALOG[i].id, THEME_CATALOG[j].id) == 0);
   }
-  TEST_ASSERT_EQUAL_STRING("editorial", THEME_CATALOG[THEME_DEFAULT_IDX].id);
 }
 
 // each entry's gauge is a valid gauge_style_t and bg is pure black (DESIGN: black is free).
@@ -1198,7 +1150,6 @@ static void test_catalog_invariants(void) {
     TEST_ASSERT_EQUAL_UINT8(0, t->bg.r);
     TEST_ASSERT_EQUAL_UINT8(0, t->bg.g);
     TEST_ASSERT_EQUAL_UINT8(0, t->bg.b);
-    TEST_ASSERT_NOT_NULL(t->id);
   }
 }
 
@@ -1224,19 +1175,19 @@ static void test_catalog_gauge_mapping(void) {
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_catalog_count);
-  RUN_TEST(test_catalog_ids_canonical);
+  RUN_TEST(test_catalog_ids);
   RUN_TEST(test_catalog_invariants);
   RUN_TEST(test_catalog_gauge_mapping);
   return UNITY_END();
 }
 ```
 
-- [ ] **Step 5.4: Verify (host)** — `cd firmware/beacon && ~/.beacon-pio/bin/pio test -e native`. Expected: all theme-catalog tests PASS. `theme.h` compiles on native because the `lv_color_t`/`lv_font_t` struct + engine API are fenced behind `#ifndef BEACON_NATIVE`; only the enum + global defines are visible to the host.
+- [ ] **Step 5.4: Verify (host)** — `cd firmware/beacon && ~/.beacon-pio/bin/pio test -e native`. Expected: all theme-catalog tests PASS. The host test compiles because it includes only `theme_catalog.h` (which includes only `gauge_style.h`); `theme.h`'s `lv_color_t`/`lv_font_t` struct never enters the native build.
 
 - [ ] **Step 5.5: Commit checkpoint** —
 
 ```bash
-git add firmware/beacon/src/ui/theme.h firmware/beacon/src/ui/theme_catalog.h firmware/beacon/test/test_native/test_theme_catalog.cpp
+git add firmware/beacon/src/ui/gauge_style.h firmware/beacon/src/ui/theme.h firmware/beacon/src/ui/theme_catalog.h firmware/beacon/test/test_theme/test_main.cpp
 ```
 
 Suggested message: `feat(p0b): theme struct + global tokens + host-testable catalog`
@@ -1245,157 +1196,131 @@ Suggested message: `feat(p0b): theme struct + global tokens + host-testable cata
 
 ## Task 6: Fonts — source, subset, generate, budget (FREEZE GATE)
 
-Source the 7 display fonts + body/mono, generate LVGL C-array subsets via `npx lv_font_conv`, commit under `ui/fonts/`, produce the manifest, and confirm the app fits the 3MB `ota_0` slot. Device/tooling task — no Unity; verification is a build size check.
+Source 7 typefaces, instance the variable ones to static weights, glyph-subset into LVGL C-array fonts via `npx lv_font_conv@1.5.3` (compressed), commit under `ui/fonts/`, produce the manifest, and confirm the app fits the 3MB `ota_0` slot. Device/tooling task — no Unity; verification is a build size check.
 
-**Font roles (spec §4.3):** display = Space Grotesk, Rajdhani, Doto, Chakra Petch, Pixelify Sans, JetBrains Mono, Inter; shared body = Space Grotesk / Rajdhani / Chakra Petch / Inter (per theme); shared mono = JetBrains Mono (all). To bound flash, each display family ships TWO subsets: a mid size (full printable ASCII + `°`, for now-playing track title + labels) and a hero size (digits + `:%°.,+-/` only, for clock / big %).
+**Font roles (spec §4.3) => 20 generated arrays:** each typeface ships a hero subset (84px, digits + `:%.,+-/° ` symbols only, for clock / big %) and a display subset (30px, full printable ASCII + `°`, for titles / now-playing track / section figures); 5 families also ship a body subset (18px, full ASCII + `°`); JetBrains Mono ships the single shared mono subset (15px, full ASCII + `°`, used by every theme). Total = 7 hero + 7 display + 5 body + 1 mono = 20 C arrays.
+
+| Theme | hero / display | body | mono |
+|---|---|---|---|
+| editorial | Space Grotesk | Space Grotesk | JetBrains Mono |
+| hud | Rajdhani | Rajdhani | JetBrains Mono |
+| calm | Doto | Inter | JetBrains Mono |
+| blueprint | Chakra Petch | Chakra Petch | JetBrains Mono |
+| led | Pixelify Sans | Inter | JetBrains Mono |
+| oscilloscope | JetBrains Mono | JetBrains Mono | JetBrains Mono |
+| analog | Inter | Inter | JetBrains Mono |
+
+(calm/led/analog have no own body subset — they reuse Inter's body; oscilloscope reuses JetBrains Mono's body. That is why only 5 body arrays exist: Space Grotesk, Rajdhani, Chakra Petch, Inter, JetBrains Mono.)
 
 **Files:**
-- Create: `firmware/beacon/src/ui/fonts/*.c` (generated)
-- Create: `firmware/beacon/src/ui/fonts/fonts.h` (LV_FONT_DECLARE for all subsets)
-- Create: `firmware/beacon/src/ui/fonts/MANIFEST.md` (the asset/flash budget)
-- Modify: `firmware/beacon/src/lv_conf.h` (add `LV_FONT_CUSTOM_DECLARE` entries so LVGL knows the fonts)
+- Create: `firmware/beacon/src/ui/fonts/font_*.c` (20 generated arrays)
+- Create: `firmware/beacon/src/ui/fonts/fonts.h` (`extern const lv_font_t` decls for all subsets)
+- Create: `firmware/beacon/src/ui/fonts/MANIFEST.md` (sources + roles + the asset/flash budget)
+- Modify: `firmware/beacon/src/lv_conf.h` (set `LV_USE_FONT_COMPRESSED 1` — the generated fonts are compressed)
 
-- [ ] **Step 6.1: Get the TTFs (download into a scratch dir, do NOT commit the TTFs)**
+- [ ] **Step 6.1: Get the TTFs (instance to static weights in a scratch dir; do NOT commit TTFs)**
 
-```bash
-mkdir -p /tmp/beacon-fonts && cd /tmp/beacon-fonts
-# Google Fonts (OFL) — fetch the static TTFs:
-#   Space Grotesk, Rajdhani, Doto, Chakra Petch, Pixelify Sans, JetBrains Mono, Inter
-# Example (repeat per family; use the static, not variable, TTF where a weight is named):
-#   curl -L -o SpaceGrotesk-Medium.ttf  "<google-fonts raw TTF url>"
-#   curl -L -o JetBrainsMono-Regular.ttf "<google-fonts raw TTF url>"
-# Source weights per DESIGN.md: Space Grotesk 500, Inter Light/400, JetBrains Mono 400-500,
-# Rajdhani 500, Doto (dot), Chakra Petch 500, Pixelify Sans 400.
+Pull the 7 typefaces from the `google/fonts` repo raw paths (the `floriankarsten` paths 404'd — use `google/fonts`). Variable fonts are instanced to static weights via `fonttools varLib.instancer`.
+
+```
+| Family | google/fonts path | Instanced weight |
+|---|---|---|
+| Space Grotesk | ofl/spacegrotesk/SpaceGrotesk[wght].ttf | wght=500 |
+| Rajdhani | ofl/rajdhani/Rajdhani-Medium.ttf | static Medium |
+| Doto | ofl/doto/Doto[ROND,wght].ttf | wght=500, ROND=0 |
+| Chakra Petch | ofl/chakrapetch/ChakraPetch-Medium.ttf | static Medium |
+| Pixelify Sans | ofl/pixelifysans/PixelifySans[wght].ttf | wght=400 |
+| JetBrains Mono | ofl/jetbrainsmono/JetBrainsMono[wght].ttf | wght=500 |
+| Inter | ofl/inter/Inter[opsz,wght].ttf | wght=400, opsz=14 |
 ```
 
-(Fonts are OFL — license permits embedding. Keep TTFs out of the repo; only the generated `.c` arrays are committed. If offline, the user supplies the TTFs in `/tmp/beacon-fonts`.)
+```bash
+mkdir -p /tmp/beaconfonts/ttf && cd /tmp/beaconfonts
+# fetch each from https://raw.githubusercontent.com/google/fonts/main/<path>, then for the
+# variable ones instance to a static weight, e.g.:
+#   fonttools varLib.instancer SpaceGrotesk[wght].ttf wght=500 -o ttf/SpaceGrotesk.ttf
+#   fonttools varLib.instancer "Doto[ROND,wght].ttf" wght=500 ROND=0 -o ttf/Doto.ttf
+# the two already-static Medium files are copied straight into ttf/.
+```
 
-- [ ] **Step 6.2: Generate the LVGL C-array subsets with `npx lv_font_conv`**
+(Fonts are OFL — license permits embedding. Keep TTFs out of the repo; only the generated `.c` arrays are committed.)
 
-Two glyph profiles. `--range 0x20-0x7F` is full printable ASCII; `0xB0` is `°`. Hero subset is digits + a few symbols via `--symbols`. `--bpp 4` for smooth display fonts, `--bpp 1` for the LED/pixel + oscilloscope styles (crisp, smaller). `--format lvgl --lv-include lvgl.h`.
+- [ ] **Step 6.2: Generate the LVGL C-array subsets with `npx lv_font_conv@1.5.3` (compressed)**
+
+Two glyph profiles. `-r 0x20-0x7E -r 0xB0` is full printable ASCII + `°`; the hero subset uses `--symbols "0123456789:%.,+-/° "`. `--bpp 4` throughout; `--format lvgl`. The generated fonts are COMPRESSED (`bitmap_format=1`), so `LV_USE_FONT_COMPRESSED` must be 1 (Step 6.4) or all text renders blank.
+
+NOTE: zsh does not word-split an unquoted `$VAR`, so the per-family loop wraps the call in a helper function rather than relying on word-splitting:
 
 ```bash
-cd /tmp/beacon-fonts
+cd /tmp/beaconfonts
 OUT=/Users/angaziz/work/personal/beacon/firmware/beacon/src/ui/fonts
+HERO_SYMS="0123456789:%.,+-/° "
 
-# --- shared body/mono (full ASCII + degree), used by labels/rows/track/artist/errors ---
-npx lv_font_conv --font JetBrainsMono-Regular.ttf --size 18 --bpp 4 \
-  --range 0x20-0x7F --range 0xB0 --format lvgl --force-fast-kern-format \
-  --lv-include lvgl.h -o $OUT/font_mono_18.c
-npx lv_font_conv --font JetBrainsMono-Regular.ttf --size 14 --bpp 4 \
-  --range 0x20-0x7F --range 0xB0 --format lvgl --force-fast-kern-format \
-  --lv-include lvgl.h -o $OUT/font_mono_14.c
+gen() {  # gen <ttf> <size> <key> <role> [hero]
+  local ttf="$1" size="$2" key="$3" role="$4" hero="$5"
+  if [ "$hero" = "hero" ]; then
+    npx -y lv_font_conv@1.5.3 --font "ttf/$ttf" --size "$size" --bpp 4 --format lvgl \
+      --symbols "$HERO_SYMS" -o "$OUT/font_${key}_${role}.c"
+  else
+    npx -y lv_font_conv@1.5.3 --font "ttf/$ttf" --size "$size" --bpp 4 --format lvgl \
+      -r 0x20-0x7E -r 0xB0 -o "$OUT/font_${key}_${role}.c"
+  fi
+}
 
-# --- per-theme display MID size (28px, full ASCII + degree: track titles + headings) ---
-# editorial: Space Grotesk Medium
-npx lv_font_conv --font SpaceGrotesk-Medium.ttf --size 28 --bpp 4 \
-  --range 0x20-0x7F --range 0xB0 --format lvgl --lv-include lvgl.h \
-  -o $OUT/disp_editorial_28.c
-# hud: Rajdhani
-npx lv_font_conv --font Rajdhani-Medium.ttf --size 28 --bpp 4 \
-  --range 0x20-0x7F --range 0xB0 --format lvgl --lv-include lvgl.h \
-  -o $OUT/disp_hud_28.c
-# calm: Doto (dot-matrix; bpp 1 keeps the dot look + small)
-npx lv_font_conv --font Doto-Regular.ttf --size 28 --bpp 1 \
-  --range 0x20-0x7F --range 0xB0 --format lvgl --lv-include lvgl.h \
-  -o $OUT/disp_calm_28.c
-# blueprint: Chakra Petch
-npx lv_font_conv --font ChakraPetch-Medium.ttf --size 28 --bpp 4 \
-  --range 0x20-0x7F --range 0xB0 --format lvgl --lv-include lvgl.h \
-  -o $OUT/disp_blueprint_28.c
-# led: Pixelify Sans (pixel; bpp 1)
-npx lv_font_conv --font PixelifySans-Regular.ttf --size 28 --bpp 1 \
-  --range 0x20-0x7F --range 0xB0 --format lvgl --lv-include lvgl.h \
-  -o $OUT/disp_led_28.c
-# oscilloscope: JetBrains Mono (bpp 4, glow drawn separately)
-npx lv_font_conv --font JetBrainsMono-Regular.ttf --size 28 --bpp 4 \
-  --range 0x20-0x7F --range 0xB0 --format lvgl --lv-include lvgl.h \
-  -o $OUT/disp_oscilloscope_28.c
-# analog: Inter Light
-npx lv_font_conv --font Inter-Light.ttf --size 28 --bpp 4 \
-  --range 0x20-0x7F --range 0xB0 --format lvgl --lv-include lvgl.h \
-  -o $OUT/disp_analog_28.c
-
-# --- per-theme HERO size (72px, digits + clock/finance symbols only: clock + big %) ---
-# symbols restrict the heavy glyphs to what hero figures use.
-HERO_SYMS="0123456789:%.,+-/ °"
-for pair in \
-  "editorial:SpaceGrotesk-Medium.ttf:4" \
-  "hud:Rajdhani-Medium.ttf:4" \
-  "calm:Doto-Regular.ttf:1" \
-  "blueprint:ChakraPetch-Medium.ttf:4" \
-  "led:PixelifySans-Regular.ttf:1" \
-  "oscilloscope:JetBrainsMono-Regular.ttf:4" \
-  "analog:Inter-Light.ttf:4"; do
-  name="${pair%%:*}"; rest="${pair#*:}"; ttf="${rest%%:*}"; bpp="${rest##*:}"
-  npx lv_font_conv --font "$ttf" --size 72 --bpp "$bpp" \
-    --symbols "$HERO_SYMS" --format lvgl --lv-include lvgl.h \
-    -o "$OUT/disp_${name}_72.c"
-done
+# hero (84) + display (30) per family; body (18) for the 5 families that own one; mono (15) once.
+gen SpaceGrotesk.ttf 84 sg    hero hero;  gen SpaceGrotesk.ttf 30 sg    disp; gen SpaceGrotesk.ttf 18 sg    body
+gen Rajdhani.ttf     84 raj   hero hero;  gen Rajdhani.ttf     30 raj   disp; gen Rajdhani.ttf     18 raj   body
+gen Doto.ttf         84 doto  hero hero;  gen Doto.ttf         30 doto  disp
+gen ChakraPetch.ttf  84 cp    hero hero;  gen ChakraPetch.ttf  30 cp    disp; gen ChakraPetch.ttf  18 cp    body
+gen PixelifySans.ttf 84 pix   hero hero;  gen PixelifySans.ttf 30 pix   disp
+gen JetBrainsMono.ttf 84 jbm  hero hero;  gen JetBrainsMono.ttf 30 jbm  disp; gen JetBrainsMono.ttf 18 jbm  body
+gen Inter.ttf        84 inter hero hero;  gen Inter.ttf        30 inter disp; gen Inter.ttf        18 inter body
+gen JetBrainsMono.ttf 15 jbm  mono
 ```
 
-(Body fonts: editorial/oscilloscope reuse their display family at body size, hud uses Rajdhani, blueprint uses Chakra Petch, calm/led/analog use Inter. To keep this task bounded, the shared `font_mono_18/14` cover mono + double as the generic body where a theme's body == mono is acceptable; per-theme body at 18px is generated the same way as the MID display block above if Task 9 shows a theme needs its own body weight. The MANIFEST records exactly which subsets shipped.)
+(The variable names == generated filenames: `font_sg_hero`, `font_sg_disp`, `font_sg_body`, ... `font_jbm_mono`. `THEME_FONTS[]` in `theme.cpp` (Task 7) maps each theme to its hero/disp/body/mono per the table above.)
 
 - [ ] **Step 6.3: Write `fonts.h` (declare every generated subset)**
+
+The generated arrays are plain `const lv_font_t` objects, declared `extern`:
 
 ```c
 #pragma once
 #include <lvgl.h>
 
-LV_FONT_DECLARE(font_mono_18);
-LV_FONT_DECLARE(font_mono_14);
-
-LV_FONT_DECLARE(disp_editorial_28);   LV_FONT_DECLARE(disp_editorial_72);
-LV_FONT_DECLARE(disp_hud_28);         LV_FONT_DECLARE(disp_hud_72);
-LV_FONT_DECLARE(disp_calm_28);        LV_FONT_DECLARE(disp_calm_72);
-LV_FONT_DECLARE(disp_blueprint_28);   LV_FONT_DECLARE(disp_blueprint_72);
-LV_FONT_DECLARE(disp_led_28);         LV_FONT_DECLARE(disp_led_72);
-LV_FONT_DECLARE(disp_oscilloscope_28);LV_FONT_DECLARE(disp_oscilloscope_72);
-LV_FONT_DECLARE(disp_analog_28);      LV_FONT_DECLARE(disp_analog_72);
+// Glyph-subset fonts generated by lv_font_conv (see MANIFEST.md).
+// Variable names == generated filenames. hero = 84px digits+symbols; disp = 30px full ASCII;
+// body = 18px full ASCII; mono = 15px full ASCII (JetBrains Mono, shared by all themes).
+extern const lv_font_t font_sg_hero,    font_sg_disp,    font_sg_body;     // Space Grotesk
+extern const lv_font_t font_raj_hero,   font_raj_disp,   font_raj_body;    // Rajdhani
+extern const lv_font_t font_doto_hero,  font_doto_disp;                    // Doto
+extern const lv_font_t font_cp_hero,    font_cp_disp,    font_cp_body;     // Chakra Petch
+extern const lv_font_t font_pix_hero,   font_pix_disp;                     // Pixelify Sans
+extern const lv_font_t font_jbm_hero,   font_jbm_disp,   font_jbm_body, font_jbm_mono; // JetBrains Mono
+extern const lv_font_t font_inter_hero, font_inter_disp, font_inter_body;  // Inter
 ```
 
-- [ ] **Step 6.4: Point lv_conf.h at the custom fonts**
+- [ ] **Step 6.4: Enable compressed-font decoding in lv_conf.h**
 
-Edit the existing `LV_FONT_CUSTOM_DECLARE` line (currently empty at lv_conf.h:399). LVGL declares custom fonts here so they are visible to its font subsystem:
+The generated fonts are compressed (`bitmap_format=1`). Set the existing flag to 1 (with it at 0, gauge shapes still draw but ALL text renders blank):
 
 ```c
-#define LV_FONT_CUSTOM_DECLARE \
-  LV_FONT_DECLARE(font_mono_18) LV_FONT_DECLARE(font_mono_14) \
-  LV_FONT_DECLARE(disp_editorial_28) LV_FONT_DECLARE(disp_editorial_72) \
-  LV_FONT_DECLARE(disp_hud_28) LV_FONT_DECLARE(disp_hud_72) \
-  LV_FONT_DECLARE(disp_calm_28) LV_FONT_DECLARE(disp_calm_72) \
-  LV_FONT_DECLARE(disp_blueprint_28) LV_FONT_DECLARE(disp_blueprint_72) \
-  LV_FONT_DECLARE(disp_led_28) LV_FONT_DECLARE(disp_led_72) \
-  LV_FONT_DECLARE(disp_oscilloscope_28) LV_FONT_DECLARE(disp_oscilloscope_72) \
-  LV_FONT_DECLARE(disp_analog_28) LV_FONT_DECLARE(disp_analog_72)
+#define LV_USE_FONT_COMPRESSED 1   /*lv_font_conv emits compressed glyphs (.bitmap_format=1); LVGL must decode them*/
 ```
 
-- [ ] **Step 6.5: Write `MANIFEST.md` (the font/asset budget — fill measured bytes after the build)**
+(No `LV_FONT_CUSTOM_DECLARE` needed — the fonts are referenced directly through `fonts.h`'s `extern` decls from `theme.cpp`, not registered with LVGL's built-in font subsystem.)
 
-Create `firmware/beacon/src/ui/fonts/MANIFEST.md` with one row per subset (family, role, size, bpp, glyph set, bytes) plus the budget summary. Bytes are the `.c` array sizes (measure with `wc -c` and/or the link map). Template:
+- [ ] **Step 6.5: Write `MANIFEST.md` (sources + roles + the asset/flash budget)**
 
-```
-| File | Family | Role | Size | bpp | Glyphs | Bytes |
-|---|---|---|---|---|---|---|
-| font_mono_18.c        | JetBrains Mono | body+mono | 18 | 4 | ASCII+deg | <measure> |
-| font_mono_14.c        | JetBrains Mono | body+mono | 14 | 4 | ASCII+deg | <measure> |
-| disp_editorial_28.c   | Space Grotesk  | display   | 28 | 4 | ASCII+deg | <measure> |
-| disp_editorial_72.c   | Space Grotesk  | hero      | 72 | 4 | digits+sym| <measure> |
-| ... (one row per generated subset) ...
-| **Total fonts** | | | | | | **<sum>** |
+Create `firmware/beacon/src/ui/fonts/MANIFEST.md` documenting: the `google/fonts` source paths + instanced weights (Step 6.1 table), the role/size/glyph table (hero 84 / display 30 / body 18 / mono 15), the per-theme `THEME_FONTS[]` mapping, the regenerate recipe, and the budget. Generated C totals ~786 KB of the 3 MB app slot (GC-dropped until referenced; real linked cost is measured by the Task 9 demo build). Record the measured `.bin` Flash% as the freeze-gate evidence.
 
-App slot budget: ota_0 = 0x300000 = 3145728 B.
-P0-A baseline app = ~647 KB. Fonts total = <sum>. Headroom = 3MB - (647KB + <sum>).
-FREEZE GATE: PASS iff measured firmware .bin Flash% < 100% of ota_0 with margin.
-```
-
-- [ ] **Step 6.6: Verify (FREEZE GATE — device build size)** — build and read the Flash summary:
+- [ ] **Step 6.6: Verify (FREEZE GATE — device build size)** — install the native platform once if not already (`~/.beacon-pio/bin/pio platform install native`), then build and read the Flash summary:
 
 ```bash
 cd firmware/beacon && ~/.beacon-pio/bin/pio run -e beacon
 ```
 
-(Note: fonts only link in once `theme.cpp`/`gauge.cpp` from Tasks 7-8 reference them; this build links them via `LV_FONT_CUSTOM_DECLARE` + a throwaway reference if needed. If the linker drops unused arrays, defer the size gate to Task 9's build where the demo references all 7 themes.) Expected: build succeeds; PlatformIO prints `Flash: [== ] xx.x% (used N bytes from 3145728 bytes)`. **GATE: the used bytes must be < 3145728 (ota_0) with comfortable margin.** Record N in MANIFEST.md and confirm PASS.
+(Note: fonts only link in once `theme.cpp` from Task 7 references them via `THEME_FONTS[]`; if the linker drops unused arrays, defer the size gate to Task 9's build where the demo references all 7 themes.) Expected: build succeeds; PlatformIO prints `Flash: [== ] xx.x% (used N bytes from 3145728 bytes)`. **GATE: the used bytes must be < 3145728 (ota_0) with comfortable margin** (fonts ~786 KB). Record N in MANIFEST.md and confirm PASS.
 
 - [ ] **Step 6.7: Commit checkpoint** —
 
@@ -1407,169 +1332,94 @@ Suggested message: `feat(p0b): glyph-subset theme fonts + flash-budget manifest`
 
 ---
 
-## Task 7: ui/theme.cpp — theme_set() (frozen teardown order) + theme_active()
+## Task 7: ui/theme.cpp — theme_set() (apply-hook model) + theme_active()/theme_index()
 
-Build `THEMES[7]` from `THEME_CATALOG` + the fonts; implement `theme_set()` in the spec §4.2 frozen order and `theme_active()`/`theme_active_idx()`. Device task.
+Build the runtime `THEMES[7]` from `THEME_CATALOG` + the fonts (mapping `bt_rgb_t` -> `lv_color_t` and pointing at the generated fonts via `THEME_FONTS[]`); implement `theme_set()` (update tokens, then call the apply hook), `theme_active()`, and `theme_index()`. The teardown/rebuild itself lives in the screen's apply hook (Task 9), NOT in the engine. Device task.
 
 **Files:**
 - Create: `firmware/beacon/src/ui/theme.cpp`
 
 - [ ] **Step 7.1: Write `theme.cpp`**
 
-`theme_set()` follows the frozen order: (1) destroy the active screen's objects, (2) free prior `lv_style_t`, (3) rebuild the shared style set from the new tokens, (4) rebuild the active screen. The screen-rebuild callback is injected (`theme_on_rebuild`) so the engine does not hardcode any one screen — the demo (Task 9) and later real screens register theirs.
+`theme_set(idx)` maps the catalog entry into the resident `s_theme` token struct (fonts from `THEME_FONTS[idx]`), then invokes the registered apply hook so the active screen tears down + rebuilds from the new tokens. The engine holds no `lv_style_t` set and never touches the screen tree — the screen owns its teardown (one-theme-resident). `THEME_FONTS[]` selects each theme's `{hero, disp, body, mono}` per the MANIFEST mapping (mono is `font_jbm_mono`, shared by all).
 
 ```cpp
 #include "ui/theme.h"
 #include "ui/theme_catalog.h"
 #include "ui/fonts/fonts.h"
-#include "util/log.h"
-#include <lvgl.h>
 
-// rgb triple -> lv_color_t (RGB565 packed, LV_COLOR_DEPTH=16).
-static inline lv_color_t mk(bt_rgb_t c) { return lv_color_make(c.r, c.g, c.b); }
-
-// Per-theme font selection: {display-hero, display-mid, body, mono}.
-typedef struct { const lv_font_t *hero, *mid, *body, *mono; } theme_fonts_t;
+// Per-theme font selection (MANIFEST.md). mono is shared (JetBrains Mono) across all themes.
+typedef struct { const lv_font_t *hero, *disp, *body, *mono; } theme_fonts_t;
 static const theme_fonts_t THEME_FONTS[THEME_COUNT] = {
-  {&disp_editorial_72,    &disp_editorial_28,    &font_mono_18, &font_mono_18}, // editorial
-  {&disp_hud_72,          &disp_hud_28,          &font_mono_18, &font_mono_18}, // hud
-  {&disp_calm_72,         &disp_calm_28,         &font_mono_18, &font_mono_18}, // calm
-  {&disp_blueprint_72,    &disp_blueprint_28,    &font_mono_18, &font_mono_18}, // blueprint
-  {&disp_led_72,          &disp_led_28,          &font_mono_18, &font_mono_18}, // led
-  {&disp_oscilloscope_72, &disp_oscilloscope_28, &font_mono_18, &font_mono_18}, // oscilloscope
-  {&disp_analog_72,       &disp_analog_28,       &font_mono_18, &font_mono_18}, // analog
+  {&font_sg_hero,    &font_sg_disp,    &font_sg_body,    &font_jbm_mono},  // editorial
+  {&font_raj_hero,   &font_raj_disp,   &font_raj_body,   &font_jbm_mono},  // hud
+  {&font_doto_hero,  &font_doto_disp,  &font_inter_body, &font_jbm_mono},  // calm
+  {&font_cp_hero,    &font_cp_disp,    &font_cp_body,    &font_jbm_mono},  // blueprint
+  {&font_pix_hero,   &font_pix_disp,   &font_inter_body, &font_jbm_mono},  // led
+  {&font_jbm_hero,   &font_jbm_disp,   &font_jbm_body,   &font_jbm_mono},  // oscilloscope
+  {&font_inter_hero, &font_inter_disp, &font_inter_body, &font_jbm_mono},  // analog
 };
 
-static beacon_theme_t s_themes[THEME_COUNT];
-static bool           s_built = false;
-static uint8_t        s_active = THEME_DEFAULT_IDX;
+static beacon_theme_t s_theme;
+static uint8_t        s_idx = 0;
+static theme_apply_cb s_apply = nullptr;
 
-// shared style set, rebuilt per theme; freed before each rebuild (one-theme-resident rule).
-static lv_style_t s_st_screen, s_st_eyebrow, s_st_display, s_st_body, s_st_value;
-static bool       s_styles_inited = false;
+static inline lv_color_t C(bt_rgb_t c) { return lv_color_make(c.r, c.g, c.b); }
 
-// screen-rebuild hook (injected by the active screen module).
-typedef void (*theme_rebuild_fn)(void);
-static theme_rebuild_fn s_rebuild = nullptr;
-void theme_on_rebuild(theme_rebuild_fn fn) { s_rebuild = fn; }   // declared in theme.h (device side)
-
-static void build_catalog_once(void) {
-  if (s_built) return;
-  for (int i = 0; i < THEME_COUNT; i++) {
-    const theme_catalog_t* c = &THEME_CATALOG[i];
-    beacon_theme_t* t = &s_themes[i];
-    t->id      = c->id;
-    t->bg      = mk(c->bg);      t->ink     = mk(c->ink);     t->ink_dim = mk(c->ink_dim);
-    t->line    = mk(c->line);    t->accent  = mk(c->accent);  t->accent2 = mk(c->accent2);
-    t->up      = mk(c->up);      t->down    = mk(c->down);    t->alert   = mk(c->alert);
-    t->f_display = THEME_FONTS[i].mid;     // mid carries full ASCII for titles/labels
-    t->f_body    = THEME_FONTS[i].body;
-    t->f_mono    = THEME_FONTS[i].mono;
-    t->gauge   = c->gauge;
-    t->glow    = c->glow;        t->radius  = c->radius;
-    t->stroke_hair = c->stroke_hair;       t->stroke_med = c->stroke_med;
-  }
-  s_built = true;
-}
-
-// step 2: release prior lv_style_t (idempotent).
-static void free_styles(void) {
-  if (!s_styles_inited) return;
-  lv_style_reset(&s_st_screen);  lv_style_reset(&s_st_eyebrow); lv_style_reset(&s_st_display);
-  lv_style_reset(&s_st_body);    lv_style_reset(&s_st_value);
-  s_styles_inited = false;
-}
-
-// step 3: rebuild the shared style set from the active theme's tokens.
-static void build_styles(const beacon_theme_t* t) {
-  lv_style_init(&s_st_screen);
-  lv_style_set_bg_color(&s_st_screen, t->bg);
-  lv_style_set_bg_opa(&s_st_screen, LV_OPA_COVER);
-  lv_style_set_text_color(&s_st_screen, t->ink);
-  lv_style_set_pad_all(&s_st_screen, SPACE_4);
-  lv_style_set_radius(&s_st_screen, t->radius);
-
-  lv_style_init(&s_st_eyebrow);
-  lv_style_set_text_font(&s_st_eyebrow, t->f_mono);
-  lv_style_set_text_color(&s_st_eyebrow, t->ink_dim);
-
-  lv_style_init(&s_st_display);
-  lv_style_set_text_font(&s_st_display, t->f_display);
-  lv_style_set_text_color(&s_st_display, t->ink);
-
-  lv_style_init(&s_st_body);
-  lv_style_set_text_font(&s_st_body, t->f_body);
-  lv_style_set_text_color(&s_st_body, t->ink);
-
-  lv_style_init(&s_st_value);
-  lv_style_set_text_font(&s_st_value, t->f_mono);
-  lv_style_set_text_color(&s_st_value, t->accent);
-
-  s_styles_inited = true;
-}
-
-// exposed for screens that style their own objects from the shared set.
-lv_style_t* theme_style_screen(void)  { return &s_st_screen;  }
-lv_style_t* theme_style_eyebrow(void) { return &s_st_eyebrow; }
-lv_style_t* theme_style_display(void) { return &s_st_display; }
-lv_style_t* theme_style_body(void)    { return &s_st_body;    }
-lv_style_t* theme_style_value(void)   { return &s_st_value;   }
+void theme_on_apply(theme_apply_cb cb) { s_apply = cb; }
 
 void theme_set(uint8_t idx) {
-  if (idx >= THEME_COUNT) idx = THEME_DEFAULT_IDX;
-  build_catalog_once();
-  s_active = idx;
+  if (idx >= THEME_COUNT) return;
+  s_idx = idx;
+  const theme_catalog_t* t = &THEME_CATALOG[idx];
+  const theme_fonts_t*   f = &THEME_FONTS[idx];
 
-  // 1) destroy/detach the active screen's objects (clean current tree first).
-  lv_obj_t* scr = lv_scr_act();
-  if (scr) lv_obj_clean(scr);
+  s_theme.id      = t->id;
+  s_theme.bg      = C(t->bg);
+  s_theme.ink     = C(t->ink);
+  s_theme.ink_dim = C(t->ink_dim);
+  s_theme.line    = C(t->line);
+  s_theme.accent  = C(t->accent);
+  s_theme.accent2 = C(t->accent2);
+  s_theme.up      = C(t->up);
+  s_theme.down    = C(t->down);
+  s_theme.alert   = C(t->alert);
+  s_theme.f_hero    = f->hero;
+  s_theme.f_display = f->disp;
+  s_theme.f_body    = f->body;
+  s_theme.f_mono    = f->mono;
+  s_theme.gauge       = t->gauge;
+  s_theme.glow        = t->glow;
+  s_theme.radius      = t->radius;
+  s_theme.stroke_hair = t->stroke_hair;
+  s_theme.stroke_med  = t->stroke_med;
 
-  // 2) release the prior theme's lv_style_t (one-theme-resident; tech.md §6).
-  free_styles();
-
-  // 3) rebuild the shared style set from the new theme's tokens.
-  build_styles(&s_themes[idx]);
-
-  // 4) rebuild the active screen from the new styles (no reboot; FR-THEME-3).
-  lv_obj_add_style(scr, &s_st_screen, 0);
-  if (s_rebuild) s_rebuild();
-
-  LOGI("theme set => %s (idx %u)", s_themes[idx].id, (unsigned)idx);
+  if (s_apply) s_apply(&s_theme);   // screen tears down + rebuilds from the new tokens
 }
 
-const beacon_theme_t* theme_active(void) { build_catalog_once(); return &s_themes[s_active]; }
-uint8_t theme_active_idx(void) { return s_active; }
+const beacon_theme_t* theme_active(void) { return s_theme.id ? &s_theme : nullptr; }
+uint8_t theme_index(void) { return s_idx; }
 ```
 
-- [ ] **Step 7.2: Add the device-side decls to `theme.h`** (inside the existing `#ifndef BEACON_NATIVE` engine block):
+(All of `theme_on_apply`, `theme_set`, `theme_active`, `theme_index`, and the `theme_apply_cb` typedef are declared in `theme.h` (Task 5) — no extra decls needed here.)
 
-```c
-typedef void (*theme_rebuild_fn)(void);
-void theme_on_rebuild(theme_rebuild_fn fn);
-lv_style_t* theme_style_screen(void);
-lv_style_t* theme_style_eyebrow(void);
-lv_style_t* theme_style_display(void);
-lv_style_t* theme_style_body(void);
-lv_style_t* theme_style_value(void);
-```
+- [ ] **Step 7.2: Verify (device build)** — `cd firmware/beacon && ~/.beacon-pio/bin/pio run -e beacon`. Expected: links clean (theme.cpp + fonts compile into the image). No runtime check yet — that is Task 9.
 
-- [ ] **Step 7.3: Verify (device build)** — `cd firmware/beacon && ~/.beacon-pio/bin/pio run -e beacon`. Expected: links clean (theme.cpp + fonts compile into the image). No runtime check yet — that is Task 9.
+- [ ] **Step 7.3: Verify native is untouched** — `~/.beacon-pio/bin/pio test -e native`. Expected: still all PASS (theme.cpp is NOT in `build_src_filter` beyond datastore.cpp, so native ignores it).
 
-- [ ] **Step 7.4: Verify native is untouched** — `~/.beacon-pio/bin/pio test -e native`. Expected: still all PASS (theme.cpp is NOT in `build_src_filter`, so native ignores it).
-
-- [ ] **Step 7.5: Commit checkpoint** —
+- [ ] **Step 7.4: Commit checkpoint** —
 
 ```bash
 git add firmware/beacon/src/ui/theme.cpp firmware/beacon/src/ui/theme.h
 ```
 
-Suggested message: `feat(p0b): theme engine - theme_set frees prior styles then rebuilds (FR-THEME-1/3)`
+Suggested message: `feat(p0b): theme engine - theme_set updates tokens then calls the apply hook (FR-THEME-1/3)`
 
 ---
 
-## Task 8: ui/gauge.{h,cpp} — gauge_render() (bar full; others concrete skeletons)
+## Task 8: ui/gauge.{h,cpp} — gauge_render() (bar/ring/cell/measure/bigfig; waveform/subdial deferred)
 
-`gauge_render()` switches on the active theme's `gauge_style`. Implement `GAUGE_BAR` in full; `ring/cell/measure/bigfig` as concrete LVGL 8.4 skeletons; `waveform/subdial` render a labeled deferred stub. Device task.
+`gauge_render(parent, th, pct)` renders a 0..100 level into a fixed-size root using the PASSED theme's `gauge` style (the theme is passed in explicitly, not read from a global). bar/ring/cell/measure/bigfig are built from stock LVGL 8.4 widgets; waveform (oscilloscope) + subdial (analog) are bespoke widgets deferred to their screens and render a labeled placeholder. Device task.
 
 **Files:**
 - Create: `firmware/beacon/src/ui/gauge.h`
@@ -1579,146 +1429,136 @@ Suggested message: `feat(p0b): theme engine - theme_set frees prior styles then 
 
 ```c
 #pragma once
-#ifndef BEACON_NATIVE
 #include <lvgl.h>
+#include "ui/theme.h"
 
-// Renders a 0..1 normalized level into `parent` using the ACTIVE theme's gauge_style.
-// Returns the created container (caller positions/sizes it). pct is clamped to [0,1].
-lv_obj_t* gauge_render(lv_obj_t* parent, float pct);
-#endif
+// Render a 0..100 level into `parent` using the theme's gauge style. Returns the created
+// root object (caller positions/sizes it). bar/ring/cell/measure/bigfig are implemented;
+// waveform (oscilloscope) + subdial (analog) are bespoke widgets deferred to their screens
+// and render a labeled placeholder for now (DESIGN.md outlier widgets).
+lv_obj_t* gauge_render(lv_obj_t* parent, const beacon_theme_t* th, uint8_t pct);
 ```
 
-- [ ] **Step 8.2: Write `gauge.cpp` (bar full; others concrete)**
+- [ ] **Step 8.2: Write `gauge.cpp` (bar/ring/cell/measure/bigfig full; waveform/subdial stub)**
+
+Each style draws into a fixed `GAUGE_W x GAUGE_H` transparent root (`make_root`). `pct` is clamped to 100. bar/measure use `lv_bar`, ring uses `lv_arc`, cell lays out `CELL_COUNT` segments via flex, bigfig prints the value in the theme's hero font, and the two bespoke styles render a labeled placeholder.
 
 ```cpp
 #include "ui/gauge.h"
-#include "ui/theme.h"
-#include "util/log.h"
-#include <lvgl.h>
+#include <stdio.h>
 
-#define GAUGE_W      200
-#define GAUGE_H       16
-#define GAUGE_CELLS   20     // cell-style segment count
-#define RING_SIZE    120
-#define RING_ARC_W     8
+#define GAUGE_W 220
+#define GAUGE_H 120
+#define CELL_COUNT 10
 
-static float clamp01(float v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
-
-// --- GAUGE_BAR (Editorial): hairline track + accent fill, full implementation ---
-static lv_obj_t* render_bar(lv_obj_t* parent, float pct, const beacon_theme_t* t) {
-  lv_obj_t* track = lv_obj_create(parent);
-  lv_obj_set_size(track, GAUGE_W, GAUGE_H);
-  lv_obj_set_style_bg_opa(track, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_radius(track, t->radius, 0);
-  lv_obj_set_style_border_width(track, t->stroke_hair, 0);
-  lv_obj_set_style_border_color(track, t->line, 0);
-  lv_obj_set_style_pad_all(track, 0, 0);
-  lv_obj_clear_flag(track, LV_OBJ_FLAG_SCROLLABLE);
-
-  lv_obj_t* fill = lv_obj_create(track);
-  lv_obj_set_size(fill, (lv_coord_t)(GAUGE_W * clamp01(pct)), GAUGE_H);
-  lv_obj_align(fill, LV_ALIGN_LEFT_MID, 0, 0);
-  lv_obj_set_style_bg_color(fill, t->accent, 0);
-  lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, 0);
-  lv_obj_set_style_radius(fill, t->radius, 0);
-  lv_obj_set_style_border_width(fill, 0, 0);
-  if (t->glow) {                                  // optional accent glow (themes with glow>0)
-    lv_obj_set_style_shadow_color(fill, t->accent, 0);
-    lv_obj_set_style_shadow_width(fill, t->glow / 8, 0);
-    lv_obj_set_style_shadow_opa(fill, LV_OPA_50, 0);
-  }
-  return track;
+static lv_obj_t* make_root(lv_obj_t* parent) {
+  lv_obj_t* g = lv_obj_create(parent);
+  lv_obj_set_size(g, GAUGE_W, GAUGE_H);
+  lv_obj_set_style_bg_opa(g, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(g, 0, 0);
+  lv_obj_set_style_pad_all(g, 0, 0);
+  lv_obj_clear_flag(g, LV_OBJ_FLAG_SCROLLABLE);
+  return g;
 }
 
-// --- GAUGE_RING (HUD): concentric arc, accent foreground over line track ---
-static lv_obj_t* render_ring(lv_obj_t* parent, float pct, const beacon_theme_t* t) {
-  lv_obj_t* arc = lv_arc_create(parent);
-  lv_obj_set_size(arc, RING_SIZE, RING_SIZE);
+static void gauge_bar(lv_obj_t* g, const beacon_theme_t* th, uint8_t pct) {
+  lv_obj_t* bar = lv_bar_create(g);
+  lv_obj_set_size(bar, GAUGE_W, 14);
+  lv_obj_center(bar);
+  lv_bar_set_range(bar, 0, 100);
+  lv_bar_set_value(bar, pct, LV_ANIM_OFF);
+  lv_obj_set_style_radius(bar, th->radius, LV_PART_MAIN);
+  lv_obj_set_style_radius(bar, th->radius, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(bar, th->line, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(bar, th->accent, LV_PART_INDICATOR);
+}
+
+static void gauge_ring(lv_obj_t* g, const beacon_theme_t* th, uint8_t pct) {
+  lv_obj_t* arc = lv_arc_create(g);
+  lv_obj_set_size(arc, GAUGE_H - 8, GAUGE_H - 8);
+  lv_obj_center(arc);
   lv_arc_set_rotation(arc, 135);
   lv_arc_set_bg_angles(arc, 0, 270);
   lv_arc_set_range(arc, 0, 100);
-  lv_arc_set_value(arc, (int16_t)(clamp01(pct) * 100));
-  lv_obj_remove_style(arc, NULL, LV_PART_KNOB);   // no draggable knob
+  lv_arc_set_value(arc, pct);
+  lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
   lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_style_arc_color(arc, t->line,   LV_PART_MAIN);
-  lv_obj_set_style_arc_width(arc, RING_ARC_W, LV_PART_MAIN);
-  lv_obj_set_style_arc_color(arc, t->accent, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_width(arc, RING_ARC_W, LV_PART_INDICATOR);
-  return arc;
+  lv_obj_set_style_arc_color(arc, th->line, LV_PART_MAIN);
+  lv_obj_set_style_arc_color(arc, th->accent, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_width(arc, 10, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(arc, 10, LV_PART_INDICATOR);
 }
 
-// --- GAUGE_CELL (LED): N segments, lit up to pct in accent, rest in line ---
-static lv_obj_t* render_cell(lv_obj_t* parent, float pct, const beacon_theme_t* t) {
-  lv_obj_t* row = lv_obj_create(parent);
-  lv_obj_set_size(row, GAUGE_W, GAUGE_H);
-  lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(row, 0, 0);
-  lv_obj_set_style_pad_all(row, 0, 0);
-  lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_style_pad_column(row, SPACE_1, 0);
-  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-  int lit = (int)(clamp01(pct) * GAUGE_CELLS + 0.5f);
-  for (int i = 0; i < GAUGE_CELLS; i++) {
-    lv_obj_t* c = lv_obj_create(row);
-    lv_obj_set_size(c, (GAUGE_W / GAUGE_CELLS) - SPACE_1, GAUGE_H);
-    lv_obj_set_style_radius(c, 0, 0);
+static void gauge_cell(lv_obj_t* g, const beacon_theme_t* th, uint8_t pct) {
+  lv_obj_set_flex_flow(g, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(g, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  uint8_t lit = (uint8_t)((pct + 5) / 10);
+  for (int i = 0; i < CELL_COUNT; i++) {
+    lv_obj_t* c = lv_obj_create(g);
+    lv_obj_set_size(c, 14, 36);
     lv_obj_set_style_border_width(c, 0, 0);
-    lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(c, i < lit ? t->accent : t->line, 0);
+    lv_obj_set_style_radius(c, 0, 0);
+    lv_obj_set_style_bg_color(c, (i < lit) ? th->accent : th->line, 0);
+    lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
   }
-  return row;
 }
 
-// --- GAUGE_MEASURE (Blueprint): a ruler tick scale with an accent index mark ---
-static lv_obj_t* render_measure(lv_obj_t* parent, float pct, const beacon_theme_t* t) {
-  lv_obj_t* scale = lv_obj_create(parent);
-  lv_obj_set_size(scale, GAUGE_W, GAUGE_H + SPACE_2);
-  lv_obj_set_style_bg_opa(scale, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_pad_all(scale, 0, 0);
-  lv_obj_set_style_border_side(scale, LV_BORDER_SIDE_BOTTOM, 0); // baseline rule
-  lv_obj_set_style_border_width(scale, t->stroke_hair, 0);
-  lv_obj_set_style_border_color(scale, t->line, 0);
-  lv_obj_clear_flag(scale, LV_OBJ_FLAG_SCROLLABLE);
-  // index mark at pct
-  lv_obj_t* idx = lv_obj_create(scale);
-  lv_obj_set_size(idx, t->stroke_med, GAUGE_H);
-  lv_obj_align(idx, LV_ALIGN_BOTTOM_LEFT, (lv_coord_t)(GAUGE_W * clamp01(pct)), 0);
-  lv_obj_set_style_bg_color(idx, t->accent, 0);
-  lv_obj_set_style_bg_opa(idx, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_width(idx, 0, 0);
-  return scale;
-}
-
-// --- GAUGE_BIGFIG (Calm): the value AS a big figure, no track ---
-static lv_obj_t* render_bigfig(lv_obj_t* parent, float pct, const beacon_theme_t* t) {
-  lv_obj_t* lbl = lv_label_create(parent);
-  lv_obj_add_style(lbl, theme_style_display(), 0);   // hero/display font from active theme
-  lv_label_set_text_fmt(lbl, "%d%%", (int)(clamp01(pct) * 100 + 0.5f));
-  lv_obj_set_style_text_color(lbl, t->accent, 0);
-  return lbl;
-}
-
-// --- deferred bespoke styles: labeled placeholder (need custom widgets; DESIGN.md outliers) ---
-static lv_obj_t* render_deferred(lv_obj_t* parent, const char* name, const beacon_theme_t* t) {
-  lv_obj_t* lbl = lv_label_create(parent);
-  lv_obj_add_style(lbl, theme_style_eyebrow(), 0);
-  lv_label_set_text_fmt(lbl, "%s: deferred", name);
-  lv_obj_set_style_text_color(lbl, t->ink_dim, 0);
-  return lbl;
-}
-
-lv_obj_t* gauge_render(lv_obj_t* parent, float pct) {
-  const beacon_theme_t* t = theme_active();
-  switch (t->gauge) {
-    case GAUGE_BAR:     return render_bar(parent, pct, t);
-    case GAUGE_RING:    return render_ring(parent, pct, t);
-    case GAUGE_CELL:    return render_cell(parent, pct, t);
-    case GAUGE_MEASURE: return render_measure(parent, pct, t);
-    case GAUGE_BIGFIG:  return render_bigfig(parent, pct, t);
-    case GAUGE_WAVEFORM: return render_deferred(parent, "waveform", t);
-    case GAUGE_SUBDIAL:  return render_deferred(parent, "subdial",  t);
+static void gauge_measure(lv_obj_t* g, const beacon_theme_t* th, uint8_t pct) {
+  // draftsman dimension: a flat bar with end-cap ticks + a numeric label
+  lv_obj_t* bar = lv_bar_create(g);
+  lv_obj_set_size(bar, GAUGE_W, 6);
+  lv_obj_align(bar, LV_ALIGN_CENTER, 0, 8);
+  lv_bar_set_range(bar, 0, 100);
+  lv_bar_set_value(bar, pct, LV_ANIM_OFF);
+  lv_obj_set_style_radius(bar, 0, LV_PART_MAIN);
+  lv_obj_set_style_radius(bar, 0, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(bar, th->line, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(bar, th->accent, LV_PART_INDICATOR);
+  for (int i = 0; i < 3; i++) {  // ticks at 0/50/100
+    lv_obj_t* tick = lv_obj_create(g);
+    lv_obj_set_size(tick, th->stroke_med, 14);
+    lv_obj_set_style_bg_color(tick, th->line, 0);
+    lv_obj_set_style_border_width(tick, 0, 0);
+    lv_obj_align(tick, LV_ALIGN_CENTER, (int16_t)(-GAUGE_W / 2 + i * (GAUGE_W / 2)), 8);
   }
-  return render_deferred(parent, "unknown", t);
+  char buf[8]; snprintf(buf, sizeof(buf), "%u%%", pct);
+  lv_obj_t* lbl = lv_label_create(g);
+  lv_label_set_text(lbl, buf);
+  lv_obj_set_style_text_color(lbl, th->ink, 0);
+  lv_obj_set_style_text_font(lbl, th->f_mono, 0);
+  lv_obj_align(lbl, LV_ALIGN_CENTER, 0, -22);
+}
+
+static void gauge_bigfig(lv_obj_t* g, const beacon_theme_t* th, uint8_t pct) {
+  char buf[8]; snprintf(buf, sizeof(buf), "%u%%", pct);
+  lv_obj_t* lbl = lv_label_create(g);
+  lv_label_set_text(lbl, buf);
+  lv_obj_set_style_text_color(lbl, th->accent, 0);
+  lv_obj_set_style_text_font(lbl, th->f_hero, 0);
+  lv_obj_center(lbl);
+}
+
+static void gauge_stub(lv_obj_t* g, const beacon_theme_t* th, const char* what) {
+  lv_obj_t* lbl = lv_label_create(g);
+  lv_label_set_text(lbl, what);
+  lv_obj_set_style_text_color(lbl, th->ink_dim, 0);
+  lv_obj_set_style_text_font(lbl, th->f_mono, 0);
+  lv_obj_center(lbl);
+}
+
+lv_obj_t* gauge_render(lv_obj_t* parent, const beacon_theme_t* th, uint8_t pct) {
+  if (pct > 100) pct = 100;
+  lv_obj_t* g = make_root(parent);
+  switch (th->gauge) {
+    case GAUGE_BAR:      gauge_bar(g, th, pct);     break;
+    case GAUGE_RING:     gauge_ring(g, th, pct);    break;
+    case GAUGE_CELL:     gauge_cell(g, th, pct);    break;
+    case GAUGE_MEASURE:  gauge_measure(g, th, pct); break;
+    case GAUGE_BIGFIG:   gauge_bigfig(g, th, pct);  break;
+    case GAUGE_WAVEFORM: gauge_stub(g, th, "~ scope (P-later)"); break;  // bespoke, deferred
+    case GAUGE_SUBDIAL:  gauge_stub(g, th, "(o) dial (P-later)"); break;  // bespoke, deferred
+  }
+  return g;
 }
 ```
 
@@ -1736,107 +1576,96 @@ Suggested message: `feat(p0b): token-driven gauge component (bar/ring/cell/measu
 
 ## Task 9: on-device verification — theme-switch demo + DataStore smoke
 
-A throwaway demo screen (tap to cycle all 7 themes; eyebrow + big figure + a gauge + a finance-style row) + a Core-0 DataStore smoke task (mock writes + state transitions logged). Flash + verify all 7 themes render correctly, live switch with no reboot (FR-THEME-3), heap floor holds across switches. Device task — replaces the P0-A test screen in `main.cpp` for this chunk's verification.
+A throwaway demo screen (tap to cycle all 7 themes; eyebrow + theme name + hero figure + a gauge + a finance-style row + hint) + a scripted DataStore smoke run from `setup()` (mock writes + state transitions logged over serial). Flash + verify all 7 themes render correctly, live switch with no reboot (FR-THEME-3), heap holds across switches. Device task — wires the demo + smoke into `main.cpp` for this chunk's verification.
 
 **Files:**
 - Create: `firmware/beacon/src/ui/demo_screen.h`
 - Create: `firmware/beacon/src/ui/demo_screen.cpp`
-- Modify: `firmware/beacon/src/main.cpp` (swap `test_screen_show()` for the demo + start the smoke task)
+- Modify: `firmware/beacon/src/main.cpp` (call `datastore_smoke()` + `demo_screen_init()` from `setup()`)
 
 - [ ] **Step 9.1: Write `demo_screen.h`**
 
 ```c
 #pragma once
-// Throwaway P0-B verification screen: tap to cycle all 7 themes; renders eyebrow + big figure
-// + gauge + a finance-style row from the ACTIVE theme's tokens. Removed when real screens land.
-void demo_screen_show(void);
+// Throwaway P0-B verification screen: tap to cycle all 7 themes, proving the theme engine +
+// live re-render (FR-THEME-3) + fonts + gauges on hardware. Replaced by the real carousel in Chunk C.
+void demo_screen_init(void);
 ```
 
 - [ ] **Step 9.2: Write `demo_screen.cpp`**
 
+The screen registers a rebuild hook via `theme_on_apply(build)`; `theme_set()` calls it with the new tokens. `build()` performs the frozen teardown (clear children + strip the screen's own styles) then rebuilds from the passed `beacon_theme_t*`. The tap handler just advances the index; the clickable flag + event are added once on the screen (they survive `lv_obj_clean`, which only removes children).
+
 ```cpp
 #include "ui/demo_screen.h"
+#include <lvgl.h>
 #include "ui/theme.h"
+#include "ui/theme_catalog.h"
 #include "ui/gauge.h"
 #include "config/layout.h"
-#include "util/log.h"
-#include <lvgl.h>
-#include <esp_heap_caps.h>
 
-static lv_obj_t* s_safe = nullptr;
-
-// builds the representative layout into the active screen from current theme styles.
-static void demo_rebuild(void) {
-  const beacon_theme_t* t = theme_active();
+// Rebuild hook: frozen teardown order — clear children, strip styles on the screen itself,
+// then rebuild from the new tokens (one-theme-resident; heap must hold across switches).
+static void build(const beacon_theme_t* th) {
   lv_obj_t* scr = lv_scr_act();
+  lv_obj_clean(scr);
+  lv_obj_remove_style_all(scr);
+  lv_obj_set_style_bg_color(scr, th->bg, 0);
+  lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
-  s_safe = lv_obj_create(scr);
-  lv_obj_set_size(s_safe, SCREEN_W - 2 * SAFE_INSET, SCREEN_H - 2 * SAFE_INSET);
-  lv_obj_center(s_safe);
-  lv_obj_set_style_bg_opa(s_safe, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(s_safe, 0, 0);
-  lv_obj_set_flex_flow(s_safe, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_row(s_safe, SPACE_4, 0);
-  lv_obj_clear_flag(s_safe, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t* eb = lv_label_create(scr);                 // eyebrow (mono)
+  lv_label_set_text_fmt(eb, "BEACON / %s", th->id);
+  lv_obj_set_style_text_color(eb, th->ink_dim, 0);
+  lv_obj_set_style_text_font(eb, th->f_mono, 0);
+  lv_obj_align(eb, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET);
 
-  // eyebrow: mono BEACON / <THEME>
-  lv_obj_t* eb = lv_label_create(s_safe);
-  lv_obj_add_style(eb, theme_style_eyebrow(), 0);
-  lv_label_set_text_fmt(eb, "BEACON / %s", t->id);
+  lv_obj_t* nm = lv_label_create(scr);                 // theme name (display font)
+  lv_label_set_text(nm, th->id);
+  lv_obj_set_style_text_color(nm, th->ink, 0);
+  lv_obj_set_style_text_font(nm, th->f_display, 0);
+  lv_obj_align(nm, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET + 24);
 
-  // big figure (display/hero font)
-  lv_obj_t* fig = lv_label_create(s_safe);
-  lv_obj_add_style(fig, theme_style_display(), 0);
-  lv_label_set_text(fig, "42%");
-  lv_obj_set_style_text_color(fig, t->accent, 0);
+  lv_obj_t* hero = lv_label_create(scr);               // hero figure (hero font, accent)
+  lv_label_set_text(hero, "42%");
+  lv_obj_set_style_text_color(hero, th->accent, 0);
+  lv_obj_set_style_text_font(hero, th->f_hero, 0);
+  lv_obj_align(hero, LV_ALIGN_CENTER, 0, -40);
 
-  // gauge (token-driven)
-  gauge_render(s_safe, 0.42f);
+  lv_obj_t* g = gauge_render(scr, th, 42);             // gauge (per theme style)
+  lv_obj_align(g, LV_ALIGN_CENTER, 0, 70);
 
-  // finance-style row: label (body) + value (mono/accent)
-  lv_obj_t* row = lv_obj_create(s_safe);
-  lv_obj_set_width(row, lv_pct(100));
-  lv_obj_set_height(row, LV_SIZE_CONTENT);
-  lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
-  lv_obj_set_style_border_width(row, t->stroke_hair, 0);
-  lv_obj_set_style_border_color(row, t->line, 0);
-  lv_obj_set_style_pad_all(row, SPACE_2, 0);
-  lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_t* k = lv_label_create(row);
-  lv_obj_add_style(k, theme_style_body(), 0);
-  lv_label_set_text(k, "BTC");
-  lv_obj_t* v = lv_label_create(row);
-  lv_obj_add_style(v, theme_style_value(), 0);
-  lv_label_set_text(v, "+2.4%");
-  lv_obj_set_style_text_color(v, t->up, 0);
+  lv_obj_t* fin = lv_label_create(scr);                // finance-style row (body, up color)
+  lv_label_set_text(fin, "S&P 500   +1.2%");
+  lv_obj_set_style_text_color(fin, th->up, 0);
+  lv_obj_set_style_text_font(fin, th->f_body, 0);
+  lv_obj_align(fin, LV_ALIGN_BOTTOM_MID, 0, -SAFE_INSET - 20);
+
+  lv_obj_t* hint = lv_label_create(scr);               // hint (mono)
+  lv_label_set_text(hint, "tap to cycle theme");
+  lv_obj_set_style_text_color(hint, th->ink_dim, 0);
+  lv_obj_set_style_text_font(hint, th->f_mono, 0);
+  lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -SAFE_INSET);
 }
 
-static void tap_cb(lv_event_t*) {
-  uint8_t next = (theme_active_idx() + 1) % THEME_COUNT;
-  uint32_t before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  theme_set(next);                                    // frees prior styles, rebuilds via demo_rebuild
-  uint32_t after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  LOGI("theme switch -> %s; free internal heap %u (was %u)",
-       theme_active()->id, (unsigned)after, (unsigned)before);
+static void tap_cb(lv_event_t* e) {
+  (void)e;
+  theme_set((uint8_t)((theme_index() + 1) % THEME_COUNT));
 }
 
-void demo_screen_show(void) {
+void demo_screen_init(void) {
   lv_obj_t* scr = lv_scr_act();
-  lv_obj_add_event_cb(scr, tap_cb, LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_flag(scr, LV_OBJ_FLAG_CLICKABLE);
-  theme_on_rebuild(demo_rebuild);                    // engine calls this on every theme_set
-  theme_set(THEME_DEFAULT_IDX);                      // first paint = editorial
+  lv_obj_add_flag(scr, LV_OBJ_FLAG_CLICKABLE);     // persists across rebuilds (event, not style)
+  lv_obj_add_event_cb(scr, tap_cb, LV_EVENT_CLICKED, NULL);
+  theme_on_apply(build);
+  theme_set(0);   // Editorial; triggers build()
 }
 ```
 
-- [ ] **Step 9.3: Add a DataStore smoke task + wire the demo in `main.cpp`**
+- [ ] **Step 9.3: Add the DataStore smoke + wire the demo in `main.cpp`**
 
-Replace the `test_screen` include + call, add the datastore + demo includes, install an epoch clock, and start a Core-0 FreeRTOS task that drives mock writes + state transitions. Surgical edits to the existing `main.cpp`:
+The smoke is a plain function called once from `setup()` (not a FreeRTOS task): it stamps `hdr.last_updated` itself and passes explicit `now` values to `ds_tick_staleness`, so it deterministically exercises LIVE => STALE, then proves ST_ERROR survives a later sweep (state-priority), then HUB_OFFLINE. Surgical edits to the existing `main.cpp`:
 
-Change the includes block (drop `test_screen.h`, add the new ones):
+Includes + the smoke function above `setup()`:
 
 ```cpp
 #include <Arduino.h>
@@ -1847,51 +1676,33 @@ Change the includes block (drop `test_screen.h`, add the new ones):
 #include "ui/lvgl_port.h"
 #include "ui/demo_screen.h"
 #include "core/datastore.h"
-#include "config/tickers.h"
-#include <time.h>
-```
+#include "core/stale.h"
 
-Add the clock source + smoke task above `setup()`:
-
-```cpp
-static uint32_t epoch_now(void) { return (uint32_t)time(nullptr); }   // RTC/NTP wired in P0 time service
-
-// Core-0 smoke task: mock writes + LIVE=>STALE=>ERROR=>recover, logs the sweep + priority rules.
-static void smoke_task(void*) {
-  uint32_t base = epoch_now();
-  for (;;) {
-    finance_rec_t f = {}; f.value = 68000.0; f.change_pct = 2.4;
-    strncpy(f.id, DEFAULT_TICKERS[5].id, FIN_ID_LEN - 1);
-    ds_set_finance(5, &f);                              // LIVE (btc slot)
-    LOGI("smoke: btc set LIVE state=%d", ds_get_finance(5).hdr.state);
-
-    ds_tick_staleness(epoch_now());                    // not stale yet
-    ds_tick_staleness(epoch_now() + 700);              // > btc stale_s (600) => STALE
-    LOGI("smoke: after sweep state=%d (expect %d STALE)", ds_get_finance(5).hdr.state, ST_STALE);
-
-    ds_set_state_finance(5, ST_ERROR, ERR_RATE_LIMITED);
-    LOGI("smoke: forced ERROR state=%d err=%d", ds_get_finance(5).hdr.state, ds_get_finance(5).hdr.err);
-
-    ds_set_hub_offline();
-    LOGI("smoke: hub offline usage=%d buddy=%d", ds_get_usage().hdr.state, ds_get_buddy().hdr.state);
-    usage_rec_t u = {}; u.claude.h5.pct = 24; ds_set_usage(&u);
-    LOGI("smoke: usage recovered state=%d (expect %d LIVE)", ds_get_usage().hdr.state, ST_LIVE);
-
-    ds_set_finance(5, &f);                              // recover btc
-    LOGI("smoke: btc recovered state=%d", ds_get_finance(5).hdr.state);
-    (void)base;
-    vTaskDelay(pdMS_TO_TICKS(5000));
-  }
+// P0-B on-device DataStore smoke: scripted transitions logged over serial (state-priority proof).
+static void datastore_smoke(void) {
+  datastore_init();
+  weather_rec_t w; memset(&w, 0, sizeof(w));
+  w.temp_c = 30.0f; w.hdr.last_updated = 100;
+  ds_set_weather(&w);
+  LOGI("ds weather=%d (expect LIVE=1)", ds_get_weather().hdr.state);
+  ds_tick_staleness(100 + WEATHER_STALE_S);
+  LOGI("ds weather=%d after sweep (expect STALE=2)", ds_get_weather().hdr.state);
+  ds_set_state_weather(ST_ERROR, ERR_RATE_LIMITED);
+  ds_tick_staleness(100 + WEATHER_STALE_S * 10);
+  LOGI("ds weather=%d (ERROR not clobbered, expect 4)", ds_get_weather().hdr.state);
+  ds_set_hub_offline();
+  LOGI("ds usage=%d buddy=%d (expect HUB_OFFLINE=5)",
+       ds_get_usage().hdr.state, ds_get_buddy().hdr.state);
+  LOGI("ds finance_count=%d", ds_get_finance_count());
 }
 ```
 
-In `setup()`, after `lvgl_port_begin()` succeeds, replace `test_screen_show();` with:
+In `setup()`, after `lvgl_port_begin()` succeeds:
 
 ```cpp
-  ds_set_clock(epoch_now);
-  datastore_init();
-  demo_screen_show();
-  xTaskCreatePinnedToCore(smoke_task, "smoke", 4096, nullptr, 1, nullptr, 0);  // Core 0
+  datastore_smoke();
+  demo_screen_init();
+  LOGI("setup done; tap to cycle themes");
 ```
 
 - [ ] **Step 9.4: Verify (device — flash + observe)** — flash and monitor:
@@ -1900,14 +1711,17 @@ In `setup()`, after `lvgl_port_begin()` succeeds, replace `test_screen_show();` 
 cd firmware/beacon && ~/.beacon-pio/bin/pio run -e beacon -t upload && ~/.beacon-pio/bin/pio device monitor
 ```
 
-Expected on the PANEL: editorial theme paints first (eyebrow `BEACON / editorial`, big `42%`, a hairline bar gauge, a `BTC +2.4%` row). Each TAP cycles to the next theme — all 7 render with the correct display font + accent color + gauge style (bar=>ring=>bigfig=>measure=>cell=>waveform-stub=>subdial-stub), no reboot, no corruption (FR-THEME-2 + FR-THEME-3).
+Expected on the PANEL: editorial theme paints first (eyebrow `BEACON / editorial`, the theme name in its display font, hero `42%`, the bar gauge, an `S&P 500 +1.2%` row, and a `tap to cycle theme` hint). Each TAP cycles to the next theme — all 7 render with the correct hero/display/body fonts + accent color + gauge style (bar=>ring=>bigfig=>measure=>cell=>waveform-stub=>subdial-stub per the catalog order), no reboot, no corruption (FR-THEME-2 + FR-THEME-3). The two stubs show `~ scope (P-later)` / `(o) dial (P-later)`.
 
-Expected on SERIAL:
-- `theme set => <id> (idx N)` per switch and `theme switch -> <id>; free internal heap U (was W)` — the heap floor must HOLD across many switches (U does not monotonically fall; proves `theme_set` frees prior styles).
-- smoke task: `btc set LIVE`, `after sweep state=2 (expect 2 STALE)`, `forced ERROR`, `hub offline usage=5 buddy=5`, `usage recovered state=1`, `btc recovered`.
-- The `>= 60 KB free internal heap` floor (`tech.md` §8) is never breached during switching.
+Expected on SERIAL (the `datastore_smoke()` run from `setup()`):
+- `ds weather=1 (expect LIVE=1)`
+- `ds weather=2 after sweep (expect STALE=2)`
+- `ds weather=4 (ERROR not clobbered, expect 4)` — proves the sweep never overwrites ST_ERROR (state-priority rule).
+- `ds usage=5 buddy=5 (expect HUB_OFFLINE=5)`
+- `ds finance_count=N` (N = `DEFAULT_TICKERS_COUNT`).
+- `setup done; tap to cycle themes`, then the loop runs with the watchdog fed (`enableLoopWDT`).
 
-If any theme renders wrong glyphs (missing chars) revisit the font subset ranges (Task 6); if heap falls per switch, `free_styles()` is not resetting all styles.
+If any theme renders blank text while gauge shapes still draw, `LV_USE_FONT_COMPRESSED` is 0 (Task 6.4) — the fonts are compressed. If a theme renders wrong glyphs (missing chars), revisit the font subset ranges (Task 6). The heap must hold across many taps (each `build()` clears the prior tree before rebuilding); a steady decline points at a missed teardown in the apply hook.
 
 - [ ] **Step 9.5: Re-confirm the FREEZE GATE with the full demo build** — the demo references all 7 themes + all fonts, so the linker keeps every array. Read the Flash% from the Step 9.4 build and finalize MANIFEST.md: confirm `used < 3145728` (ota_0) with margin. GATE must be PASS before the chunk is "done".
 
@@ -1933,8 +1747,8 @@ Suggested message: `feat(p0b): on-device theme-switch demo + DataStore smoke; co
 | §3.4 HubLink interface + send/callback/copy semantics | Task 3 (verbatim) + mock test |
 | §3.5 tickers.h (DEFAULT_TICKERS, MAX_TICKERS, enums) | Task 2 (verbatim) + config test |
 | §3.5 location.h (location_cfg_t, DEFAULT_LOCATION, wmo_entry_t, WMO_MAP) | Task 2 |
-| §4.1 beacon_theme_t (+radius/stroke_hair/stroke_med) + gauge_style_t + global space/motion | Task 5 (theme.h) |
-| §4.2 THEMES[7] catalog + theme_set frozen order + theme_active | Task 5 (data) + Task 7 (engine) |
+| §4.1 beacon_theme_t (+f_hero/radius/stroke_hair/stroke_med) + gauge_style_t + global space/motion | Task 5 (gauge_style.h + theme.h) |
+| §4.2 THEMES[7] catalog + theme_set apply-hook model + theme_active/theme_index | Task 5 (data) + Task 7 (engine) |
 | §4.3 7 display + body + mono fonts, subsets, manifest, freeze gate | Task 6 + Task 9.5 |
 | §4.4 gauge_render bar/ring/cell/measure/bigfig + waveform/subdial deferred | Task 8 |
 | §5.1 host unit tests (native env, table-driven) | Tasks 0-5 |
@@ -1944,21 +1758,22 @@ Suggested message: `feat(p0b): on-device theme-switch demo + DataStore smoke; co
 
 ### Native/device split (type consistency)
 
-- `BEACON_NATIVE` fences every LVGL/Arduino include. Native compiles only: `records.h`, `screen_state.h`, `hublink.h`, `tickers.h`, `location.h`, `stale.h`, `ds_lock.h` (std::mutex branch), `datastore.{h,cpp}`, the LVGL-free parts of `theme.h`, and `theme_catalog.h`.
-- Device compiles all of the above (FreeRTOS mutex branch) plus `theme.cpp`, `gauge.cpp`, `demo_screen.cpp`, fonts.
-- `build_src_filter = +<core/datastore.cpp>` is the ONLY product `.cpp` linked into native; theme/gauge/demo `.cpp` never reach the host.
+- `BEACON_NATIVE` fences every LVGL/Arduino include. Native compiles only: `records.h`, `screen_state.h`, `hublink.h`, `tickers.h`, `location.h`, `stale.h`, `ds_lock.h` (std::mutex branch), `datastore.{h,cpp}`, `gauge_style.h`, and `theme_catalog.h`. `theme.h` is fully device-side (it includes `<lvgl.h>` unconditionally) and is never included by a native test.
+- Device compiles all of the above (FreeRTOS mutex branch) plus `theme.h`, `theme.cpp`, `gauge.cpp`, `demo_screen.cpp`, fonts.
+- `build_src_filter = -<*> +<core/datastore.cpp>` (a SINGLE line) makes `datastore.cpp` the ONLY product `.cpp` linked into native; theme/gauge/demo `.cpp` never reach the host.
 - `lv_color_t` is RGB565 (`LV_COLOR_DEPTH=16`, confirmed in lv_conf.h) — catalog stores `bt_rgb_t` and converts via `lv_color_make()` device-side, so no LVGL type crosses into native.
 
 ### Placeholder scan
 
-- No `TBD`, no "similar to above", no pseudocode. The only literal "deferred"/"placeholder" tokens are the INTENTIONAL `GAUGE_WAVEFORM`/`GAUGE_SUBDIAL` deferred stubs (spec §4.4 explicitly defers them) and `<measure>`/`<sum>` blanks in the MANIFEST template (filled with real byte counts during Task 6/9).
-- Every code step shows complete, compilable code (real LVGL 8.4 calls — `lv_arc_*`, `lv_obj_set_style_*`, `lv_label_*`, `xTaskCreatePinnedToCore`).
+- No `TBD`, no "similar to above", no pseudocode. The only literal "deferred"/"placeholder" tokens are the INTENTIONAL `GAUGE_WAVEFORM`/`GAUGE_SUBDIAL` stubs (spec §4.4 explicitly defers them); MANIFEST byte counts are filled with the real measured values during Task 6/9.
+- Every code step shows complete, compilable code (real LVGL 8.4 calls — `lv_bar_*`, `lv_arc_*`, `lv_obj_set_style_*`, `lv_label_*`).
 
 ### Deviations from spec (additive seams, not contract changes)
 
 - `DEFAULT_TICKERS_COUNT`, `WMO_MAP_COUNT` — derived size helpers the spec implies ("number of entries in DEFAULT_TICKERS").
-- `ds_set_clock(ds_now_fn)` — injectable epoch clock so the LVGL/Arduino-free DataStore stamps `last_updated` deterministically (required for native testing). Internal seam, not a frozen-API change.
-- `theme_on_rebuild()` + `theme_style_*()` accessors — the screen-rebuild hook + shared-style getters needed to make `theme_set`'s step 4 ("rebuild the active screen") work without the engine hardcoding a screen. Device-side only.
+- Callers stamp `hdr.last_updated` and the sweep takes an explicit `now` (`ds_tick_staleness(now)`) — the LVGL/Arduino-free DataStore carries no clock, so native tests drive deterministic times directly. This is the frozen API (datastore.h), not a deviation.
+- `theme_on_apply(theme_apply_cb)` — the screen registers a rebuild hook; `theme_set()` updates the resident tokens then invokes it. The engine holds NO `lv_style_t` and never touches the screen tree (the screen owns its teardown), so there are no `theme_style_*()` accessors. Device-side only.
+- `theme_index()` — current-index getter (the spec named it `theme_active_idx`; renamed for brevity, same semantics).
 - `WMO_MAP` populated (spec left it as a `/* ... */` comment) with the standard Open-Meteo WMO buckets.
 - Non-Editorial theme color hexes are concrete realizations of DESIGN.md's named accents (only Editorial has a full per-token hex table in DESIGN.md); ids/gauge/struct are frozen, hues are tunable on hardware in Task 9.
 

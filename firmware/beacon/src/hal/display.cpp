@@ -15,6 +15,10 @@ bool display_begin() {
   s_bus->writeC8D8(0x36, 0xA0);   // MADCTL (Waveshare value)
   s_bus->writeC8D8(0x53, 0x20);   // enable brightness control
   s_bus->writeC8D8(0x51, 0xFF);   // brightness = max
+  // Clear the FULL 480x480 GRAM, not just the offset-8 466 visible window: the unpainted edge
+  // ring otherwise shows uninitialized (greenish) GRAM at boot. Offset-0 instance, no reset.
+  static Arduino_CO5300 s_full(s_bus, GFX_NOT_DEFINED, 0, 480, 480, 0, 0, 0, 0);
+  s_full.fillScreen(0x0000);
   s_gfx->fillScreen(0x0000);
   LOGI("CO5300 up %dx%d", SCREEN_W, SCREEN_H);
   return true;

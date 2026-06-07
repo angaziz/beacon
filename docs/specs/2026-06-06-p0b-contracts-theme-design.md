@@ -27,10 +27,12 @@ firmware/beacon/src/
 │   ├── tickers.h           # FROZEN schema: ticker_cfg_t + editable DEFAULT_TICKERS[] + MAX_TICKERS
 │   └── location.h          # FROZEN schema: location_cfg_t + DEFAULT_LOCATION + WMO_MAP
 └── ui/
-    ├── theme.{h,cpp}       # beacon_theme_t + gauge_style_t + THEMES[7]; theme_set() (releases prior styles)
+    ├── gauge_style.h      # FROZEN: gauge_style_t enum (LVGL-free; shared by catalog + gauge)
+    ├── theme.{h,cpp}       # beacon_theme_t + THEMES[7]; theme_set() updates tokens + calls the apply hook
+    ├── theme_catalog.h    # LVGL-free catalog data (bt_rgb_t tokens) -> mapped to beacon_theme_t in theme.cpp
     ├── gauge.{h,cpp}       # gauge_render(): bar/ring/cell/measure/bigfig; waveform/subdial -> deferred stub
-    └── fonts/              # generated C arrays: 7 display + body + mono (glyph-subset)
-test/                       # native-env table-driven unit tests
+    └── fonts/              # generated C arrays: 7 hero + 7 display + 5 body + 1 mono (glyph-subset)
+test/                       # native-env table-driven unit tests (flat test/test_<unit>/ folders)
 ```
 
 ## 3. Frozen contracts
@@ -155,7 +157,8 @@ Thread-safe per `tech.md` §6: Core-0 data tasks write, Core-1 UI reads snapshot
 ```c
 void datastore_init(void);
 
-// Setters (Core-0 fetchers). Each sets hdr.state=ST_LIVE, hdr.last_updated=now on success.
+// Setters (Core-0 fetchers). Copy value fields; force hdr.state=ST_LIVE, hdr.err=ERR_NONE.
+// The CALLER stamps hdr.last_updated on the record it passes (the store carries no clock).
 void ds_set_weather(const weather_rec_t* r);
 void ds_set_finance(uint8_t idx, const finance_rec_t* r);   // idx < MAX_TICKERS
 void ds_set_usage(const usage_rec_t* r);
@@ -282,24 +285,23 @@ typedef struct {
   const lv_font_t *f_display, *f_body, *f_mono; // display=titles/section figures (full ASCII); body/mono per role
   gauge_style_t    gauge;
   uint8_t          glow;        // 0..255 accent glow amount
-  uint8_t          radius;      // element corner radius (px)  [ADDED vs tech.md §6]
-  uint8_t          stroke_hair; // hairline width (px)         [ADDED]
-  uint8_t          stroke_med;  // medium stroke width (px)    [ADDED]
+  uint8_t          radius;      // element corner radius (px)
+  uint8_t          stroke_hair; // hairline width (px)
+  uint8_t          stroke_med;  // medium stroke width (px)
 } beacon_theme_t;
 ```
 
-Global (not per-theme) tokens, as `#define`s shared across themes (DESIGN.md): `space` rhythm (4/8/12/16/24/32); `motion` durations (`DUR_FAST 120`, `DUR 220`, `DUR_SLOW 400`); easing is fixed **ease-out-expo/quint** (a single shared easing function used by all transitions, no per-theme easing). **Reduced-motion** is a global flag (a Settings toggle persisted in chunk D) that motion helpers consult to substitute a crossfade/instant path; the flag's storage is D's, but the motion helpers + the global durations/easing are frozen here so screens animate against a stable contract.
+Global (not per-theme) tokens, as `#define`s shared across themes (DESIGN.md): `space` rhythm (4/8/12/16/24/32); `motion` durations (`DUR_FAST 120`, `DUR 220`, `DUR_SLOW 400`); easing is a single shared **ease-out** used by all transitions (no per-theme easing). **Reduced-motion** is a global flag (a Settings toggle persisted in chunk D) that motion helpers consult to substitute a crossfade/instant path; the flag's storage is D's, but the motion helpers + the global durations/easing are frozen here so screens animate against a stable contract.
 
 ### 4.2 Catalog + switching
 
-`static const beacon_theme_t THEMES[7]` carries the DESIGN.md token values for editorial (default), hud, calm, blueprint, led, oscilloscope, analog. `theme_set(uint8_t idx)` runs in this **frozen order** (so no live object ever references a freed style):
+A runtime `THEMES[7]` (built once from the LVGL-free `THEME_CATALOG` + the resident fonts in `theme.cpp`) carries the DESIGN.md token values for editorial (default), hud, calm, blueprint, led, oscilloscope, analog. Switching uses an **apply-hook** model: the active screen registers a rebuild callback via `theme_on_apply(theme_apply_cb)`; `theme_set(uint8_t idx)` updates the resident token struct then invokes that hook. The screen's hook performs the **frozen teardown order** (so no live object ever references a freed style):
 
-1. **Destroy/detach the active screen's objects** (tear down the current screen tree first).
-2. **Release the prior theme's `lv_style_t` objects** (one-theme-resident rule, `tech.md` §6 — mandatory; the ~199KB internal heap will not tolerate accumulation).
-3. **Rebuild the shared style set** from the new theme's tokens.
-4. **Rebuild the active screen** from the new styles (no reboot — FR-THEME-3).
+1. **Clear the active screen's objects** (`lv_obj_clean` on the screen tree).
+2. **Strip the screen's own styles** (`lv_obj_remove_style_all` — one-theme-resident rule, `tech.md` §6 — mandatory; the ~199KB internal heap will not tolerate accumulation).
+3. **Rebuild from the passed tokens** (no reboot — FR-THEME-3).
 
-`const beacon_theme_t* theme_active(void)` exposes the current theme; screens read tokens only (no hardcoded colors/fonts — `tech.md` §6 / coding conventions §10).
+`const beacon_theme_t* theme_active(void)` exposes the current theme (NULL before the first `theme_set`); `uint8_t theme_index(void)` exposes the current index. Screens read tokens only (no hardcoded colors/fonts — `tech.md` §6 / coding conventions §10).
 
 ### 4.3 Fonts (all 7 themes)
 
