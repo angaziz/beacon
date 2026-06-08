@@ -22,7 +22,7 @@ Six screens, navigated by swipe + motion gestures:
 | Home | clock, date, weather, humidity | WiFi (direct) |
 | Finance | configurable FX→IDR, crypto, indices, ETFs | WiFi (direct) |
 | AI Usage | Claude + Codex, **both** 5h and 7-day windows + reset | Mac hub (BLE) |
-| Coding Buddy | session state + approve/deny Claude tool-permission prompts + launch tasks | Mac hub (BLE) |
+| Coding Buddy | session state + approve/deny Claude tool-permission prompts | Mac hub (BLE) |
 | Now-Playing | Spotify control (remote for an active Connect device) | WiFi (direct) |
 | Settings | WiFi, brightness, theme picker, tickers, etc. | local (NVS) |
 
@@ -31,7 +31,7 @@ Six screens, navigated by swipe + motion gestures:
 ```
    Public internet (direct, WiFi+TLS)          Mac companion hub (BLE)
    - finance / weather / time                   - Claude + Codex usage
-   - Spotify control                            - coding buddy (approve/deny, launch)
+   - Spotify control                            - coding buddy (approve/deny)
    - Hermes agent (device -> VPS)               - holds Claude/Codex secrets; none reach the device
                        \                        /
                         \                      /
@@ -99,7 +99,7 @@ The full phased plan (requirements, acceptance, dependencies) is in [`docs/prd.m
   - [x] Swipe carousel + six state-aware screen shells, bespoke per-theme (6 × 7 = 42 views) + per-theme chrome + battery on Settings
   - [x] Persistence (NVS: screen/brightness/theme/networks), time service (NTP + PCF85063 RTC + POSIX TZ), WiFi provisioning (SoftAP captive portal)
 - [x] **P1 — Ambient screens**: Home (clock + weather), Finance (live FX→IDR / BTC / indices), full screen-state model; live on hardware. Location is **auto-geolocated** (IP-based); on-device ticker/location *editing* (FR-SET-4, SHOULD) deferred. Also added: multi-network WiFi (WiFiMulti) + on-device Wi-Fi manager.
-- [ ] **P2 — Hub + AI**: macOS hub app (Swift) + AI Usage + Coding Buddy over BLE
+- [ ] **P2 — Hub + AI** (code complete, running on hardware): macOS hub app (Swift) + AI Usage + Coding Buddy over BLE. AI Usage is **live on-device** over a bonded NimBLE link (Codex via `~/.codex`; Claude via the Claude Code statusline `rate_limits`, since the unofficial `oauth/usage` now 429s), simultaneously with the device-direct WiFi/TLS plane. Heap re-measured under the full load => LVGL draw buffers moved to PSRAM (`-DBEACON_LVGL_PSRAM`, now the default build flag). **Human-gated remaining:** buddy permission round-trip acceptance + P2-0 contract capture. Scope cut: device-initiated *launch* (FR-BUDDY-4 / FR-HUB-4) removed.
 - [ ] **P3 — Input polish**: IMU + touch gestures
 - [ ] **P4 — Now-Playing**: Spotify control
 - [ ] **Explore**: Hermes agent, voice
@@ -113,7 +113,7 @@ The full phased plan (requirements, acceptance, dependencies) is in [`docs/prd.m
 ## Built on / thanks
 
 - [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16) — board, drivers, examples
-- [LVGL](https://lvgl.io) · [GFX Library for Arduino](https://github.com/moononournation/Arduino_GFX) · [XPowersLib](https://github.com/lewisxhe/XPowersLib) · [SensorLib](https://github.com/lewisxhe/SensorLib) · ESP32 BLE (Bluedroid, in the Arduino-ESP32 core)
+- [LVGL](https://lvgl.io) · [GFX Library for Arduino](https://github.com/moononournation/Arduino_GFX) · [XPowersLib](https://github.com/lewisxhe/XPowersLib) · [SensorLib](https://github.com/lewisxhe/SensorLib) · ESP32 BLE (the Arduino-ESP32 core `BLE*` wrapper — NimBLE-backed on the pinned esp32s3 libs)
 - Prior art that informed the design: [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter), [claude-desktop-buddy-esp32](https://github.com/vthinkxie/claude-desktop-buddy-esp32)
 
 ## Disclaimer

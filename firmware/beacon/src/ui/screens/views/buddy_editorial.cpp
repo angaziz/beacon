@@ -1,6 +1,7 @@
 #include "ui/screen.h"
 #include "ui/screens/screen_common.h"
 #include "core/datastore.h"
+#include "core/hub_task.h"
 #include "util/log.h"
 
 static lv_obj_t *s_slot, *s_status, *s_kicker, *s_tool, *s_cmdbox, *s_cmd, *s_deny, *s_approve, *s_idle;
@@ -10,7 +11,8 @@ static void decide_cb(lv_event_t* e) {
   buddy_rec_t b = ds_get_buddy();
   // guard a stale click: don't resurrect ST_LIVE over hub-offline/reconnecting (ds_set_* forces LIVE)
   if (!b.prompt.present || b.hdr.state == ST_HUB_OFFLINE || b.hdr.state == ST_RECONNECTING) return;
-  LOGI("buddy decide id=%s approve=%ld (stub; hub round-trip is P2)", b.prompt.id, approve);
+  // Send to the hub; clear locally only if accepted for transport (keep the prompt visible otherwise).
+  if (!hub_send_permission(b.prompt.id, approve != 0)) return;
   b.prompt.present = false; ds_set_buddy(&b);
 }
 

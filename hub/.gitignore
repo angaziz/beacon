@@ -1,0 +1,4 @@
+.build/
+Beacon Hub.app/
+.DS_Store
+*.xcodeproj

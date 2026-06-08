@@ -8,6 +8,7 @@
 #include "ui/theme.h"
 #include "config/layout.h"
 #include "core/datastore.h"
+#include "core/hub_task.h"
 #include <Arduino.h>
 static void update(void);
 
@@ -18,25 +19,26 @@ static lv_obj_t *s_deny, *s_approve;
 static lv_obj_t *s_idle[BUDDY_ENTRIES];
 static bool      s_actions_enabled;
 
-static void decide_clear(void) {
+static void decide_clear(bool approve) {
   buddy_rec_t r = ds_get_buddy();
   // guard a stale click: don't resurrect ST_LIVE over hub-offline/reconnecting (ds_set_* forces LIVE)
   if (!r.prompt.present || r.hdr.state == ST_HUB_OFFLINE || r.hdr.state == ST_RECONNECTING) return;
+  if (!hub_send_permission(r.prompt.id, approve)) return;   // keep prompt visible if not enqueued
   r.prompt.present = false;
   ds_set_buddy(&r);
-  LV_LOG_USER("buddy_calm: prompt decided (local stub)");
+  LV_LOG_USER("buddy_calm: prompt decided");
   update();
 }
 
 static void on_deny(lv_event_t* e) {
   (void)e;
   if (!s_actions_enabled) return;
-  decide_clear();
+  decide_clear(false);
 }
 static void on_approve(lv_event_t* e) {
   (void)e;
   if (!s_actions_enabled) return;
-  decide_clear();
+  decide_clear(true);
 }
 
 static void build(lv_obj_t* page) {

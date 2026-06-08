@@ -12,9 +12,11 @@
 #include "core/net.h"
 #include "core/provision.h"
 #include "core/fetch_task.h"
+#include "core/hub_task.h"
 #include "ui/styles.h"
 #include "ui/theme.h"
 #include "ui/carousel.h"
+#include "ui/pair_overlay.h"
 #include "ui/dev_seed.h"
 
 static lv_obj_t* setup_step(lv_obj_t* card, const beacon_theme_t* t, const char* txt) {
@@ -107,15 +109,17 @@ void setup() {
     net_begin();                   // WiFi STA from NVS creds; starts NTP on GOT_IP (non-blocking)
   }
 #if BEACON_DEV
-  dev_seed_init();                 // fake data + state-cycler harness (no network)
+  dev_seed_init();                 // fake data + state-cycler harness (no network/BLE)
 #else
   fetch_task_start();              // Core-0 scheduler: real weather + finance + staleness sweep
+  hub_task_start();                // Core-0 hub plane: BLE link -> usage + buddy (P2)
 #endif
   LOGI("setup done; swipe to navigate");
 }
 
 void loop() {
   provision_loop();    // no-op unless the setup portal is active
+  pair_overlay_service();  // show/hide the BLE passkey card while a hub is bonding (Core-1)
   timekeep_service();  // perform any staged RTC write here (Core-1, serialized with touch on I2C)
   lvgl_port_tick();
   delay(5);

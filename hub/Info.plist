@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>com.beacon.hub</string>
+  <key>CFBundleName</key>
+  <string>Beacon Hub</string>
+  <key>CFBundleExecutable</key>
+  <string>beacon-hub</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.1</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <!-- Required for CoreBluetooth: without this TCC aborts the process (privacy violation) instead of
+       prompting. Embedded into the executable via a linker __info_plist section (see Package.swift). -->
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>Beacon Hub connects to your Beacon desk device over Bluetooth to show AI usage and relay coding-buddy prompts.</string>
+  <!-- Menubar agent: no Dock icon. (Runtime also sets .accessory.) -->
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>

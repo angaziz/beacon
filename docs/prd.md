@@ -4,13 +4,13 @@
 >
 > **Companion docs:** `PRODUCT.md` (strategy/why) · `DESIGN.md` (visual system + theme tokens) · [`tech.md`](tech.md) (technical constitution: how it's built, NFRs, conventions) · `docs/research/` (evidence) · `docs/spikes/` (proven hardware experiments). Where this doc and `tech.md` disagree on *how*, `tech.md` wins; where strategy is unclear, `PRODUCT.md` wins.
 >
-> **Status (2026-06-08):** **P0 + P1 complete and running on-device** (in `firmware/beacon/`). Foundation (bring-up, frozen contracts + theme engine, swipe carousel/42 views, NVS persistence FR-PLAT-3, time service FR-PLAT-8 NTP+RTC, WiFi provisioning FR-SET-1) and the ambient screens (FR-HOME clock+weather, FR-FIN live FX→IDR/BTC/indices, FR-STATE screen-state model) are validated on hardware over real WiFi. Beyond spec: multi-network WiFi (WiFiMulti) + on-device Wi-Fi manager, IP-based auto-geolocation. **Deferred:** FR-SET-4 (on-device ticker/location editing, SHOULD), FR-PLAT-7 idle dim/sleep. **Next:** P2 (macOS hub + AI Usage / Coding Buddy over BLE). Conventions: requirement IDs are stable; priority is MoSCoW (MUST/SHOULD/COULD); each requirement has a Phase (see §7).
+> **Status (2026-06-08):** **P0 + P1 complete and running on-device** (in `firmware/beacon/`). Foundation (bring-up, frozen contracts + theme engine, swipe carousel/42 views, NVS persistence FR-PLAT-3, time service FR-PLAT-8 NTP+RTC, WiFi provisioning FR-SET-1) and the ambient screens (FR-HOME clock+weather, FR-FIN live FX→IDR/BTC/indices, FR-STATE screen-state model) are validated on hardware over real WiFi. Beyond spec: multi-network WiFi (WiFiMulti) + on-device Wi-Fi manager, IP-based auto-geolocation. **Deferred:** FR-SET-4 (on-device ticker/location editing, SHOULD), FR-PLAT-7 idle dim/sleep. **In progress:** P2 (macOS hub + AI Usage / Coding Buddy over BLE) — code complete and running on hardware; AI Usage is live on-device over BLE, with buddy permission round-trip acceptance + P2-0 contract capture human-gated (see §7 P2 progress). Conventions: requirement IDs are stable; priority is MoSCoW (MUST/SHOULD/COULD); each requirement has a Phase (see §7).
 
 ---
 
 ## 1. Vision & scope
 
-**BLUF:** Beacon is a 2.16" AMOLED desk device that, at a glance, shows a developer their Claude Code / Codex usage, live markets, weather/time, and now-playing music, and lets them approve Claude tool-permission prompts and launch tasks — without breaking focus on their Mac. It is a **companion to the Mac** (private AI data over BLE) and **independent over WiFi** (public data direct), themeable, gesture-driven.
+**BLUF:** Beacon is a 2.16" AMOLED desk device that, at a glance, shows a developer their Claude Code / Codex usage, live markets, weather/time, and now-playing music, and lets them approve Claude tool-permission prompts — without breaking focus on their Mac. It is a **companion to the Mac** (private AI data over BLE) and **independent over WiFi** (public data direct), themeable, gesture-driven.
 
 **In scope (MVP):** six on-device screens (Home, Finance, AI Usage, Coding Buddy, Now-Playing, Settings), the 7-theme engine, and a macOS hub app that feeds the two BLE-fed screens.
 
@@ -39,7 +39,7 @@ Single owner-user: a developer at their desk. Beacon is **peripheral** — glanc
    DEVICE-DIRECT PLANE (WiFi+TLS)              HUB PLANE (BLE)
    - Finance (FX/crypto/indices/ETF)           - Claude usage (5h + 7d)
    - Weather + time (NTP)                       - Codex usage (5h + 7d)
-   - Now-Playing (Spotify Web API)              - Coding Buddy (state, approve/deny, launch)
+   - Now-Playing (Spotify Web API)              - Coding Buddy (state, approve/deny)
    - Hermes (device -> VPS) [Explore]           - Hub holds Claude/Codex secrets (never reach device)
                          \                      /
                           [ Beacon device ] --- local NVS: settings, theme, WiFi, tickers
@@ -120,7 +120,6 @@ Priority = MUST / SHOULD / COULD. Phase per §7.
 | FR-BUDDY-1 | MUST | P2 | **Idle state:** show Claude Code session state pushed by the Hub — running/waiting counts, tokens, context %, recent activity. |
 | FR-BUDDY-2 | MUST | P2 | **Prompt state:** when a tool-permission prompt arrives, surface it (tool name + command hint) and let the user **Approve** or **Deny** by tap/gesture; the decision returns to the Hub and resolves the prompt. |
 | FR-BUDDY-3 | MUST | P2 | Approve/Deny round-trip must complete well within the Claude Code hook timeout (~30s); design for a <5s human action; on timeout the prompt is treated as denied (fail-closed) and labeled. |
-| FR-BUDDY-4 | SHOULD | P2 | **Launch:** start a new Claude Code task from the device (text/dictated later) via the Hub running `claude -p`. |
 | FR-BUDDY-5 | MUST | P2 | The buddy must NOT imply unsupported actions: it **cannot** answer Claude's `AskUserQuestion` multiple-choice prompts, persist "don't ask again", or type into a live TUI session. |
 
 **Acceptance:** a real Claude Code tool prompt appears on the device and an Approve/Deny tap resolves it in Claude Code; idle state reflects live session counts; unsupported actions are absent from the UI.
@@ -156,10 +155,9 @@ Priority = MUST / SHOULD / COULD. Phase per §7.
 | FR-HUB-1 | MUST | P2 | A macOS menubar app that reads Claude usage (Keychain) + Codex usage (`~/.codex`) and pushes normalized usage to the device over BLE. Tokens never leave the Mac. |
 | FR-HUB-2 | MUST | P2 | Ingest Claude Code session/hook events (state + permission prompts) and relay buddy state + prompts to the device; relay Approve/Deny decisions back. |
 | FR-HUB-3 | MUST | P2 | Pair/bond with one device securely; reconnect automatically; expose connection status in the menubar. |
-| FR-HUB-4 | SHOULD | P2 | Launch new Claude Code tasks (`claude -p`) on request from the device. |
 | FR-HUB-5 | COULD | later | Mac-side STT for voice → text (Explore, with §5.11). |
 
-**Acceptance:** with the hub running, AI Usage + Coding Buddy populate over BLE and approvals work; the device bonds once and **auto-reconnects** after the hub restarts; **launching** a task from the device starts a `claude -p` session; killing the hub leaves the device in last-synced state.
+**Acceptance:** with the hub running, AI Usage + Coding Buddy populate over BLE and approvals work; the device bonds once and **auto-reconnects** after the hub restarts; killing the hub leaves the device in last-synced state.
 
 ### 5.10 Cross-cutting: data freshness & states — `FR-STATE`
 
@@ -177,7 +175,7 @@ Priority = MUST / SHOULD / COULD. Phase per §7.
 | ID | Priority | Phase | Requirement |
 |---|---|---|---|
 | FR-HERMES-1 | COULD | Explore | Interact with a self-hosted Nous Research **Hermes** agent: device → VPS (direct plane). Send a command/query, show the response. Interface TBD (ntfy / thin HTTP shim) — decide at phase start. |
-| FR-VOICE-1 | COULD | Explore | Push-to-talk voice as the input for Hermes (and possibly buddy task launch): capture audio, STT on Mac/VPS (no on-device wake word in scope). |
+| FR-VOICE-1 | COULD | Explore | Push-to-talk voice as the input for Hermes: capture audio, STT on Mac/VPS (no on-device wake word in scope). |
 
 **Acceptance:** deferred; each gets its own spec when its phase starts.
 
@@ -202,6 +200,10 @@ Each phase is independently buildable and reviewable; a session/agent can own on
 
 **P0 progress (2026-06-07):** done — bring-up (power/display/LVGL/touch, pinned toolchain), `SAFE_INSET`/`partitions.csv` frozen on hardware (FR-PLAT-9), frozen contracts (FR-STATE-0) + theme engine with all 7 themes (FR-THEME-*), and the swipe carousel with six state-aware screens rendered bespoke-per-theme — 42 views (FR-PLAT-2/4, FR-THEME-3/4). Remaining — NVS persistence (FR-PLAT-3), idle dim/sleep (FR-PLAT-7), time service (FR-PLAT-8), WiFi provisioning + live Settings actions (FR-SET-1/2/3/5). The frozen contracts are landed, so P1/P2/P3/P4 are already unblocked.
 
+**P1 progress (2026-06-07):** done and running on hardware — Home (FR-HOME clock+weather via Open-Meteo) and Finance (FR-FIN live FX→IDR/BTC/US indices+ETFs/IHSG, config-driven) over the device-direct WiFi+TLS plane, with the full screen-state model (FR-STATE-1/2: loading/live/stale+age/offline/error). Beyond spec: multi-network WiFi (WiFiMulti) + on-device Wi-Fi manager, IP-based auto-geolocation. **Deferred:** on-device ticker/location *editing* (FR-SET-4, SHOULD).
+
+**P2 progress (2026-06-08):** code complete and running on hardware. **Device:** `core/hub_proto` Arduino-free codec (+ host tests), `core/hublink_ble` NUS peripheral (bonded LESC, NimBLE-backed core `BLE*` wrapper), `core/hub_task` Core-0 wiring (frame => `ds_set_usage`/`ds_set_buddy`, edge-triggered `ds_set_hub_offline`), 7 buddy decide-paths wired to `hub_send_permission` (send-gated clear), Settings pair overlay. **Hub (`hub/`, SwiftPM menubar app):** `BeaconCentral` (CoreBluetooth NUS central, OS-mediated pairing, acked `.withResponse` RX writes, auto-reconnect), `UsagePoller` (Claude Keychain + Codex `~/.codex`), `ClaudeCodeBridge` (blocking permission hooks + idle/session + statusline shim), `MenubarController`, runs as a signed `.app`. **Live on-device:** AI Usage (Codex via `~/.codex`; Claude via the Claude Code statusline `rate_limits`, since the unofficial `oauth/usage` now 429s) over BLE while the device-direct WiFi/TLS plane runs simultaneously; **heap re-measured** under the full load => LVGL draw buffers moved to PSRAM (`-DBEACON_LVGL_PSRAM`, now the default build flag; `tech.md` §2). **Human-gated remaining:** buddy permission round-trip acceptance (FR-BUDDY-2/3) + P2-0 contract capture (`hub/CONTRACT.md`). **Scope cut:** device-initiated *launch* (FR-BUDDY-4 / FR-HUB-4) removed.
+
 Dependencies: P1–P4 all depend on **P0 freezing the shared contracts** (FR-STATE-0: `DataStore`, `screen_state_t`, `HubLink`, config schemas) plus `SAFE_INSET` and `partitions.csv`. P2 implements the BLE protocol in `tech.md` §7. Once P0 lands and those contracts are frozen, P1 / P2 / P3 / P4 are parallelizable across separate agents/sessions.
 
 ## 8. Open questions / deferred decisions
@@ -210,7 +212,7 @@ Dependencies: P1–P4 all depend on **P0 freezing the shared contracts** (FR-STA
 - **Hermes interface**: ntfy channel vs thin HTTP shim wrapping the `hermes` CLI on the VPS. Decide at Explore.
 - **OTA**: in-scope Settings feature vs out-of-band flashing. Since `partitions.csv` is a **P0** deliverable (FR-PLAT-9), the OTA decision is made **in P0**; default = **reserve OTA slots** (changing the layout later reflashes everything). The OTA *update UI* (FR-SET-6) can still come later.
 - **Exact panel corner radius**: assumed ~90px; confirm on hardware (cyan-border test) and lock `SAFE_INSET`.
-- **NimBLE vs Bluedroid for the hub link**: Bluedroid proven (P2 default); revisit only if RAM pressure appears.
+- **BLE stack for the hub link** (resolved at P2): use the Arduino-ESP32 core `BLE*` wrapper, which is **NimBLE-backed** on the pinned esp32s3 libs (Bluedroid is absent for the s3) — verified on hardware. `hublink_ble` calls only the stack-agnostic wrapper (no raw `esp_ble_*`), and the separate `NimBLE-Arduino` (h2zero) 1.4.x library must NOT be added (crashes on core 3.x). See `tech.md` §5/§13.
 
 ## 9. Definition of done (per phase)
 
