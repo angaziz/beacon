@@ -54,22 +54,32 @@ Headers: `Authorization: Bearer <tok>`, `chatgpt-account-id: <id>`. Token: `~/.c
 ```
 Normalizes to `usage.codex`.
 
-### C.3 Claude Code permission hook (`PreToolUse` / `PermissionRequest`) — CONFIRMED (CC v2.1.x docs)
+### C.3 Claude Code permission hook (`PermissionRequest`, primary; `PreToolUse`, back-compat) — CONFIRMED (CC v2.1.x docs)
 Claude Code supports native **`"type":"http"`** hooks (no curl forwarder needed). `PreToolUse` and
-`PermissionRequest` are **distinct** events; use **`PreToolUse`** to intercept early. Request body:
+`PermissionRequest` are **distinct** events, and **`PermissionRequest` is the one Beacon hooks**:
+`PreToolUse` fires on **every** tool call, so holding it open ~25 s would block routine `Read`/`Grep`
+(and a narrow matcher like `Bash` misses `Write`/`Edit`); `PermissionRequest` fires **only when a tool
+actually needs permission**, so `matcher:"*"` is safe and covers all tools. The bridge still accepts
+`PreToolUse` for back-compat. Request body (same fields both events):
 ```json
-{"session_id":"abc","tool_use_id":"toolu_01","hook_event_name":"PreToolUse",
- "tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/build","description":"..."}}
+{"session_id":"abc","tool_use_id":"toolu_01","hook_event_name":"PermissionRequest",
+ "tool_name":"Write","tool_input":{"file_path":"/x","command":"...","description":"..."}}
 ```
 Hint = `tool_input.command` (Bash) | `file_path` | `description`. Correlation id = `tool_use_id`/
-`session_id` (the hub mints its own short BLE id and maps it). Response (exit 0 + 2xx body):
+`session_id` (the hub mints its own short BLE id and maps it).
+
+**Response shape DIFFERS by event** (`HookResponse.permission`, `Protocol.swift`) — emitting the wrong
+one silently fails to gate the tool:
 ```json
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow",
- "permissionDecisionReason":"Approved on Beacon device"}}
+// PermissionRequest (primary): decision.behavior; message only on deny; updatedInput NOT required for allow
+{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}
+{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied on Beacon device"}}}
+// PreToolUse (back-compat): permissionDecision in {allow,deny,ask}; precedence deny>ask>allow
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"Approved on Beacon device"}}
 ```
-`permissionDecision` in {`allow`,`deny`,`ask`}; precedence `deny`>`ask`>`allow`. Hook `timeout` is in
-**seconds** (config: 35 for PreToolUse to cover the device's ~25 s window). Non-2xx/timeout =
-non-blocking (CC proceeds) -- so the hub MUST return `deny` within the window; never let it hang.
+HTTP 2xx + body, no outer envelope. Hook `timeout` is in **seconds** (config: 35 to cover the device's
+~25 s window). Non-2xx/timeout = **non-blocking (CC proceeds, fail-OPEN)** -- so the hub MUST return
+`deny` within the window; never let it hang.
 
 ### C.4 Session / statusline — CONFIRMED (CC v2.1.x docs)
 `SessionStart`(matcher startup/resume/clear/compact)/`Stop`/`Notification` http hooks => buddy idle.

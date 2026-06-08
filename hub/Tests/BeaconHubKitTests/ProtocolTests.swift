@@ -53,6 +53,31 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil(DeviceCommand.parse(Data("garbage".utf8)))
     }
 
+    func testPermissionHookResponseShapePerEvent() throws {
+        // PreToolUse uses permissionDecision; PermissionRequest uses decision.behavior. A wrong shape
+        // means CC ignores the decision and the device's approve/deny never gates the tool.
+        let cases: [(event: String, allow: Bool)] = [
+            ("PreToolUse", true), ("PreToolUse", false),
+            ("PermissionRequest", true), ("PermissionRequest", false),
+        ]
+        for c in cases {
+            let obj = try JSONSerialization.jsonObject(
+                with: HookResponse.permission(event: c.event, allow: c.allow)) as! [String: Any]
+            let out = obj["hookSpecificOutput"] as! [String: Any]
+            XCTAssertEqual(out["hookEventName"] as? String, c.event, "\(c)")
+            switch c.event {
+            case "PermissionRequest":
+                XCTAssertNil(out["permissionDecision"], "PermissionRequest must not use the PreToolUse shape \(c)")
+                let decision = out["decision"] as! [String: Any]
+                XCTAssertEqual(decision["behavior"] as? String, c.allow ? "allow" : "deny", "\(c)")
+                XCTAssertEqual(decision["message"] != nil, !c.allow, "message only on deny \(c)")
+            default:
+                XCTAssertNil(out["decision"], "PreToolUse must not use the PermissionRequest shape \(c)")
+                XCTAssertEqual(out["permissionDecision"] as? String, c.allow ? "allow" : "deny", "\(c)")
+            }
+        }
+    }
+
     func testAckAndErr() throws {
         let ack = try JSONSerialization.jsonObject(with: HubAck.ack(id: "req_abc", ok: true)) as! [String: Any]
         XCTAssertEqual(ack["v"] as? Int, 1)

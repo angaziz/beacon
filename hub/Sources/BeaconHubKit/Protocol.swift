@@ -85,6 +85,29 @@ public enum DeviceCommand: Equatable {
     }
 }
 
+// hub -> Claude Code permission-hook HTTP response (NOT a BLE frame). PreToolUse and PermissionRequest
+// require DIFFERENT decision shapes (CC v2.1.x): PreToolUse uses hookSpecificOutput.permissionDecision;
+// PermissionRequest uses hookSpecificOutput.decision.behavior. Emit the one matching the originating
+// event, else the device's approve/deny does not gate the tool. Beacon hooks PermissionRequest (fires
+// only when permission is actually needed); PreToolUse is kept for back-compat.
+public enum HookResponse {
+    public static func permission(event: String, allow: Bool) -> Data {
+        let inner: [String: Any]
+        switch event {
+        case "PermissionRequest":
+            var decision: [String: Any] = ["behavior": allow ? "allow" : "deny"]
+            if !allow { decision["message"] = "Denied on Beacon device" }   // message optional; allow needs none
+            inner = ["hookEventName": "PermissionRequest", "decision": decision]
+        default:   // PreToolUse (and aliases): permissionDecision allow|deny
+            inner = ["hookEventName": event,
+                     "permissionDecision": allow ? "allow" : "deny",
+                     "permissionDecisionReason": allow ? "Approved on Beacon device" : "Denied on Beacon device"]
+        }
+        let payload: [String: Any] = ["hookSpecificOutput": inner]
+        return (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])) ?? Data("{}".utf8)
+    }
+}
+
 // hub->device ack/err for a received command (tech.md §7.1).
 public enum HubAck {
     public static func ack(id: String, ok: Bool) -> Data {

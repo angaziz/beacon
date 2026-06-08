@@ -182,8 +182,9 @@ final class ClaudeCodeBridge {
         case "Stop":
             buddy.running = max(0, buddy.running - 1)
         case "Notification":
-            // A Notification typically means CC is idle/waiting on the user.
-            buddy.waiting += 1
+            // CC waiting on the user -- but there is no paired "resolved" event, so incrementing a
+            // counter here would climb forever. Surface it only in the entries feed below, not waiting.
+            break
         default: break
         }
         if let entry = Self.entryLine(event: event, body: body) {
@@ -281,17 +282,9 @@ final class ClaudeCodeBridge {
     // --- raw HTTP write ---
 
     private func respondDecision(_ conn: NWConnection, allow: Bool, event: String) {
-        // Confirmed Claude Code permission-hook response: hookSpecificOutput.{hookEventName,
-        // permissionDecision}. Echo the originating event so PermissionRequest is handled correctly.
-        let payload: [String: Any] = [
-            "hookSpecificOutput": [
-                "hookEventName": event,
-                "permissionDecision": allow ? "allow" : "deny",
-                "permissionDecisionReason": allow ? "Approved on Beacon device" : "Denied on Beacon device",
-            ],
-        ]
-        let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data("{}".utf8)
-        respond(conn, status: "200 OK", json: data)
+        // PreToolUse and PermissionRequest need DIFFERENT decision shapes (HookResponse picks the right
+        // one by event); the wrong shape silently fails to gate the tool.
+        respond(conn, status: "200 OK", json: HookResponse.permission(event: event, allow: allow))
     }
 
     private func respondJSON(_ conn: NWConnection, _ obj: [String: Any]) {

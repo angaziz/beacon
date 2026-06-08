@@ -1,10 +1,10 @@
 {
-  "_comment": "Merge these keys into ~/.claude/settings.json to wire Claude Code to the Beacon hub. The hub listens on 127.0.0.1:8765 (ClaudeCodeBridge). ESSENTIAL for the buddy round-trip: the PreToolUse hook + statusLine. The Session/Stop/Notification hooks are optional (idle state). timeout is in SECONDS; PreToolUse is 35 to cover the device's ~25s decision window.",
+  "_comment": "Merge these keys into ~/.claude/settings.json to wire Claude Code to the Beacon hub (127.0.0.1:8765, ClaudeCodeBridge). ESSENTIAL for the buddy round-trip: the PermissionRequest hook + statusLine. PermissionRequest fires ONLY when a tool actually needs permission (Write, Edit, Bash, MCP, ...) -- unlike PreToolUse, which fires on EVERY tool and would block routine reads if held open. SessionStart/Stop/Notification are optional (running count + activity feed). timeout is in SECONDS; PermissionRequest is 35 to cover the device's ~25s decision window. If you already have other hooks for these events, ADD these as additional array entries -- do not overwrite. (PreToolUse with a narrow matcher like \"Bash\" is the back-compat alternative; the bridge still accepts it.)",
 
   "hooks": {
-    "PreToolUse": [
+    "PermissionRequest": [
       {
-        "matcher": "Bash",
+        "matcher": "*",
         "hooks": [
           { "type": "http", "url": "http://127.0.0.1:8765/hook", "timeout": 35 }
         ]
@@ -12,7 +12,7 @@
     ],
     "SessionStart": [
       {
-        "matcher": "startup",
+        "matcher": "startup|resume",
         "hooks": [
           { "type": "http", "url": "http://127.0.0.1:8765/hook", "timeout": 5 }
         ]
