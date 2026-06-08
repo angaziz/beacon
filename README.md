@@ -56,7 +56,7 @@ Dot-Matrix, Blueprint, LED Matrix, Oscilloscope, Analog Neo. See the full galler
 beacon/
 ├── PRODUCT.md              # product strategy: users, purpose, principles
 ├── DESIGN.md               # visual design system + theme tokens (the 7 themes)
-├── firmware/beacon/        # product firmware (PlatformIO): bring-up, contracts, theme engine, carousel
+├── firmware/               # product firmware (PlatformIO): bring-up, contracts, theme engine, carousel
 │   ├── src/                #   core/ (DataStore, HubLink, records) · hal/ · ui/ (carousel, screens, views, theme)
 │   └── test/               #   native unit tests (contracts, theme, datastore, carousel…)
 └── docs/
@@ -72,7 +72,7 @@ beacon/
         └── wifi-ble-coexistence/   # WiFi + BLE + HTTPS coexistence test
 ```
 
-The product firmware lives under `firmware/beacon/` (build/flash instructions in its [`README`](firmware/beacon/README.md)); `docs/spikes/` keeps the exploratory experiments separate from it.
+The product firmware lives under `firmware/` (build/flash instructions in its [`README`](firmware/README.md)); `docs/spikes/` keeps the exploratory experiments separate from it.
 
 ## Getting started (hardware)
 

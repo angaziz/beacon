@@ -26,7 +26,7 @@ Use the venv's `pio` for everything (a bare `pio` from Homebrew runs on Python 3
 ## Build / flash / monitor
 
 ```bash
-cd firmware/beacon
+cd firmware
 ~/.beacon-pio/bin/pio run                 # build
 ~/.beacon-pio/bin/pio run -t erase        # one-time: clears prior Arduino-IDE 4MB bootloader state
 ~/.beacon-pio/bin/pio run -t upload       # flash
