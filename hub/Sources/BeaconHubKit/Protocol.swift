@@ -91,17 +91,20 @@ public enum DeviceCommand: Equatable {
 // event, else the device's approve/deny does not gate the tool. Beacon hooks PermissionRequest (fires
 // only when permission is actually needed); PreToolUse is kept for back-compat.
 public enum HookResponse {
-    public static func permission(event: String, allow: Bool) -> Data {
+    // `message` names the deny cause in the CC TUI (e.g. "Beacon device offline"); nil falls back to
+    // the generic reason. Ignored on allow (CONTRACT.md §C.3: message only on deny).
+    public static func permission(event: String, allow: Bool, message: String? = nil) -> Data {
+        let denyReason = message ?? "Denied on Beacon device"
         let inner: [String: Any]
         switch event {
         case "PermissionRequest":
             var decision: [String: Any] = ["behavior": allow ? "allow" : "deny"]
-            if !allow { decision["message"] = "Denied on Beacon device" }   // message optional; allow needs none
+            if !allow { decision["message"] = denyReason }   // message optional; allow needs none
             inner = ["hookEventName": "PermissionRequest", "decision": decision]
         default:   // PreToolUse (and aliases): permissionDecision allow|deny
             inner = ["hookEventName": event,
                      "permissionDecision": allow ? "allow" : "deny",
-                     "permissionDecisionReason": allow ? "Approved on Beacon device" : "Denied on Beacon device"]
+                     "permissionDecisionReason": allow ? "Approved on Beacon device" : denyReason]
         }
         let payload: [String: Any] = ["hookSpecificOutput": inner]
         return (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])) ?? Data("{}".utf8)

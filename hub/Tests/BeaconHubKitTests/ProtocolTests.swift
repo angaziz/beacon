@@ -78,6 +78,32 @@ final class ProtocolTests: XCTestCase {
         }
     }
 
+    func testPermissionDenyMessageNamesCause() throws {
+        // A custom deny message (e.g. "Beacon device offline") must surface in the TUI for both event
+        // shapes; nil falls back to the generic reason; allow never carries a message.
+        func reason(_ obj: [String: Any], event: String) -> String? {
+            // The user-visible reason: PermissionRequest carries it in decision.message (deny only),
+            // PreToolUse in permissionDecisionReason (always).
+            let out = obj["hookSpecificOutput"] as! [String: Any]
+            if event == "PermissionRequest" { return (out["decision"] as? [String: Any])?["message"] as? String }
+            return out["permissionDecisionReason"] as? String
+        }
+        let cases: [(event: String, allow: Bool, message: String?, want: String?)] = [
+            ("PermissionRequest", false, "Beacon device offline", "Beacon device offline"),
+            ("PermissionRequest", false, "another prompt is pending", "another prompt is pending"),
+            ("PermissionRequest", false, nil, "Denied on Beacon device"),
+            ("PermissionRequest", true, "Beacon device offline", nil),   // allow ignores message
+            ("PreToolUse", false, "Beacon device offline", "Beacon device offline"),
+            ("PreToolUse", false, nil, "Denied on Beacon device"),
+            ("PreToolUse", true, "Beacon device offline", "Approved on Beacon device"),
+        ]
+        for c in cases {
+            let obj = try JSONSerialization.jsonObject(
+                with: HookResponse.permission(event: c.event, allow: c.allow, message: c.message)) as! [String: Any]
+            XCTAssertEqual(reason(obj, event: c.event), c.want, "\(c)")
+        }
+    }
+
     func testAckAndErr() throws {
         let ack = try JSONSerialization.jsonObject(with: HubAck.ack(id: "req_abc", ok: true)) as! [String: Any]
         XCTAssertEqual(ack["v"] as? Int, 1)

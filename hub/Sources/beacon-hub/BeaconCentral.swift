@@ -15,12 +15,14 @@ final class BeaconCentral: NSObject {
     private static let namePrefix = "Beacon"
 
     // Callbacks (set by AppDelegate). onReady => caller resends a full frame after (re)subscribe.
+    // onStatusChange carries an (isConnected, name) snapshot captured ON this queue, so callers never
+    // read the queue-owned link state back across threads.
     var onReady: (() -> Void)?
     var onCommand: ((DeviceCommand) -> Void)?
-    var onStatusChange: (() -> Void)?
+    var onStatusChange: ((Bool, String?) -> Void)?
 
     private(set) var isConnected = false {
-        didSet { if oldValue != isConnected { onStatusChange?() } }
+        didSet { if oldValue != isConnected { onStatusChange?(isConnected, connectedName) } }
     }
     private(set) var connectedName: String?
 
@@ -62,12 +64,13 @@ final class BeaconCentral: NSObject {
         guard central.state == .poweredOn else { return }
         inbound.removeAll(keepingCapacity: true)
         central.scanForPeripherals(withServices: [Self.service], options: nil)
-        onStatusChange?()
+        onStatusChange?(isConnected, connectedName)
     }
 
     private func handleDisconnect() {
-        isConnected = false
+        // Clear the name BEFORE isConnected so the didSet emits a consistent (false, nil) snapshot.
         connectedName = nil
+        isConnected = false
         rx = nil
         tx = nil
         // Error paths (service/char discovery, pairing failure) land here while still GATT-connected;
@@ -98,7 +101,7 @@ extension BeaconCentral: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn: beginScan()
-        default: isConnected = false; onStatusChange?()
+        default: isConnected = false; onStatusChange?(isConnected, connectedName)
         }
     }
 
