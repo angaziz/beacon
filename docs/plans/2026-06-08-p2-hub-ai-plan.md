@@ -5,29 +5,71 @@
 > (`pio run -e beacon`) + host tests pass (`pio test -e native`); the hub builds in Xcode; **on-device
 > bonded-link acceptance + heap re-measure are the human tests** (`prd.md` §9).
 
-## Status — planning signed off; P2-A codec landed + host-tested; next is the Bluedroid transport (on-hardware)
+## Status — running on hardware: AI Usage live over BLE + device-direct intact; buddy round-trip + P2-0 remain
 
-Spec + plan drafted, then reviewed by two independent 2nd-opinion passes (Codex + a Claude agent);
-all findings were verified against the tree and the valid ones folded in (§2). A confirmation
-re-review (both agents) **green-lit** the revised docs. The three decisions are **owner-confirmed
-(2026-06-08)**: **D2** = retry once then show error (device "--" + menubar reason); **D3** = LESC +
-bonding, passkey preferred but P2-A decides passkey-vs-Just-Works on the seamless-UX result;
-**D4** = Xcode project.
+Spec + plan reviewed by two independent passes (Codex + Claude), all findings verified and folded in
+(§2), confirmation re-review **green-lit**. Decisions **owner-confirmed (2026-06-08)**: **D2** retry
+once then show error (device "--" + menubar reason); **D3** LESC + bonding, passkey preferred
+(P2-A decides passkey-vs-Just-Works on the seamless-UX result); **D4** an Xcode-openable SwiftPM
+package (CLI-buildable + Xcode-openable; a hand-generated `.xcodeproj` would not be CLI-verifiable).
 
-**Done (P2-A, codec slice — fully verified, no hardware/Mac needed):** `core/hub_proto.{h,cpp}`
-(Arduino-free) — frame reassembler (`\n`/CRLF, split-across-writes, oversize-drop+recover), status
-parse (`v==1` gate, null/missing windows => `pct=-1`, prompt present/absent => idle, `*_LEN`
-truncation, entries cap), command builders (`permission`/`launch`, newline-terminated, id-echo,
-overflow=>0), ack/err parse. Built against the **frozen** `tech.md` §7.1 schema (the device-facing
-frame is frozen, so this does not front-run P2-0, which gates the hub's *upstream* ingestion). Added
-to `[env:native]` `build_src_filter`. `test/test_hub_proto` = 18 cases; **`pio test -e native` 74/74
-green** (was 56; +18, no regressions).
+**Device (firmware) — DONE, `pio run -e beacon` SUCCESS (RAM 23.6%, Flash 60.1%):**
+- `core/hub_proto.{h,cpp}` (Arduino-free codec) + `test_hub_proto` (18 cases). **`pio test -e native`
+  74/74 green** (+18, no regressions).
+- `core/hublink_ble.{h,cpp}` — NUS GATT peripheral, bonded LESC (passkey, `-DHUBLINK_JUSTWORKS`
+  fallback), inbound/outbound stream buffers, callback-enqueue + loop()-dispatch (rev-2/3).
+- `core/hub_task.{h,cpp}` — Core-0 wiring: `onFrame` -> `ds_set_usage`/`ds_set_buddy`,
+  edge-triggered `ds_set_hub_offline`, running-min heap tracker; `hub_send_permission`/`hub_send_launch`.
+- 7 buddy views wired (3 callback shapes, send()-gated clear), `ui/pair_overlay.{h,cpp}`,
+  `main.cpp` (`hub_task_start`), `lvgl_port.cpp` `-DBEACON_LVGL_PSRAM` flag.
+- **Toolchain reality:** the pioarduino esp32s3 libs back the Arduino BLE API with **NimBLE**, not
+  Bluedroid (`CONFIG_BT_NIMBLE_ENABLED`). `hublink_ble` uses only the stack-agnostic `BLE*` wrapper,
+  so it works on either backing; `HubLink` keeps the screens unaware. `tech.md` §5/§13 updated.
 
-**Next:** the **on-hardware** part of P2-A — `core/hublink_ble.{h,cpp}` (Bluedroid NUS peripheral,
-bonded LESC, inbound/outbound queues per rev-2/3) + the Settings pair overlay — which can only be
-verified by flashing + nRF Connect (the `prd.md` §9 device gate). **P2-0** (capture real usage + hook
-payloads into `hub/CONTRACT.md`) remains the gate for the *hub* chunks (P2-D/E), runnable in parallel
-on the owner's Mac.
+**Hub (`hub/`, SwiftPM) — DONE, `swift build` clean, `swift test` 9/9 green:**
+- `BeaconHubKit` — `Protocol.swift` (§7.1 frame encode + command/ack codec), `UsageNormalizer.swift`
+  (Claude/Codex -> §7.2). 9 unit tests.
+- `beacon-hub` agent — `BeaconCentral` (CoreBluetooth NUS central, OS-mediated pairing, `\n`
+  reassembly, MTU-chunked writes, auto-reconnect), `UsagePoller` (Keychain Claude + `~/.codex` Codex),
+  `ClaudeCodeBridge` (localhost `NWListener` HTTP, blocking permission hooks -> short-id prompt ->
+  ~25 s fail-closed deny, session/statusline), `MenubarController`, `AppDelegate` (frame build +
+  heartbeat + reconnect resend + launch via `claude -p`), `main.swift` (`.accessory` agent).
+- `hub/CONTRACT.md` (frame/command FROZEN; upstream shapes DRAFT pending P2-0), `statusline-shim/`.
+
+### On-hardware bring-up (2026-06-08) — VERIFIED on the Waveshare board + a real Mac
+
+First end-to-end run; these findings + fixes are binding:
+1. **Heap re-measure done => PSRAM buffers are now the default.** With LVGL draw buffers in internal
+   SRAM, min free internal heap collapsed to ~44 KB under active BLE + WiFi + TLS and **device-direct
+   TLS fetches timed out** (weather/markets blank). With **`-DBEACON_LVGL_PSRAM`** (added to
+   `platformio.ini` `build_flags`, not just opt-in): boot ~253 KB, steady ~115 KB, transient min
+   ~53 KB, and **both planes work** — AI Usage live over BLE AND weather/markets live over WiFi+TLS,
+   simultaneously. `tech.md` §2 updated with the numbers. (The ~53 KB transient sits just under the
+   60 KB guideline but is stable; revisit only if it tightens.)
+2. **Hub RX writes must be acknowledged (`.withResponse`).** `.withoutResponse` packets are silently
+   dropped under WiFi+BLE congestion, corrupting multi-chunk status frames (device logged
+   `hub: bad/ignored frame`). `BeaconCentral.send` now uses `.withResponse` — reliable + ordered; the
+   data rate is tiny so the extra round-trips are free.
+3. **The hub must run as a signed `.app` bundle launched via LaunchServices.** macOS TCC only reads
+   `NSBluetoothAlwaysUsageDescription` for a LaunchServices-launched, code-signed app — a bare
+   `swift run` (or running the binary by path) is **aborted as a privacy violation**. Added
+   `Info.plist` + `build-app.sh` (ad-hoc sign + `open`); run via `./build-app.sh run`.
+4. **Keychain token is cached (one prompt).** Reading `Claude Code-credentials` per poll re-prompted
+   every 45 s; `ClaudeUsageProvider` now caches the token (re-reads only on 401). "Always Allow"
+   persists per build (ad-hoc signing changes identity each rebuild => one prompt after each rebuild).
+5. **Confirmed at runtime:** MTU negotiates to 247; bonding `OK (bonded)`; NimBLE host task healthy;
+   NTP+RTC time; `up=1 time=1`.
+
+**Remaining (human-gated):**
+- **Buddy round-trip acceptance** (`prd.md` §9 / FR-BUDDY-2/3): wire Claude Code's permission hook to
+  the hub (`~/.beacon-hub/port`) + the statusline shim, then confirm a real tool prompt
+  approves/denies on the device within the hook timeout, and kill-hub => `ST_HUB_OFFLINE`. (Usage path
+  is already accepted; the buddy path is the last unverified MUST.)
+- **P2-0** capture — replace the DRAFT upstream shapes in `hub/CONTRACT.md` with real redacted
+  captures; settles the `TODO(P2-0)` stubs (Claude/Codex 401 refresh, Codex local fallback, exact
+  hook/statusline field names + permission-hook response shape).
+- **P2-F (optional):** a device-side launch affordance calling `hub_send_launch` (FR-BUDDY-4, SHOULD;
+  the hub side already runs `claude -p`).
 
 ## 0. BLUF
 

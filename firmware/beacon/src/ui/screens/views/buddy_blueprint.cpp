@@ -7,6 +7,7 @@
 #include "ui/theme.h"
 #include "config/layout.h"
 #include "core/datastore.h"
+#include "core/hub_task.h"
 #include "util/log.h"
 #include <Arduino.h>
 
@@ -23,6 +24,7 @@ static void decide_cb(lv_event_t* e) {
   bool approve = (bool)(intptr_t)lv_event_get_user_data(e);
   buddy_rec_t r = ds_get_buddy();
   if (actions_locked(r.hdr.state) || !r.prompt.present) return;
+  if (!hub_send_permission(r.prompt.id, approve)) return;   // keep prompt visible if not enqueued
   r.prompt.present = false;
   ds_set_buddy(&r);
   LOGI("buddy %s prompt %s", approve ? "APPROVE" : "DENY", r.prompt.id);

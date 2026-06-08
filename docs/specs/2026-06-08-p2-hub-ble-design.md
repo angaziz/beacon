@@ -88,7 +88,9 @@ parse/format TUs are Arduino-free, only `<ArduinoJson.h>` + `records.h` + libc):
 
 ### 3.2 `core/hublink_ble.{h,cpp}` — Bluedroid `HubLink` implementation
 
-Implements the frozen `HubLink` interface (`core/hublink.h`). Bluedroid (canonical; NimBLE banned):
+Implements the frozen `HubLink` interface (`core/hublink.h`) via the core `BLE*` wrapper. (The pinned
+esp32s3 libs back that wrapper with IDF NimBLE, not Bluedroid — P2 finding, `tech.md` §5; the impl
+uses only the stack-agnostic wrapper, no raw `esp_ble_*`):
 
 - **GATT peripheral:** Nordic-UART service `6e400001-...`; RX `...0002` (write/no-resp,
   central->device); TX `...0003` (notify, device->central). Advertise `Beacon-<chipid>`.
@@ -194,7 +196,9 @@ force-unwraps outside tests; isolate token handling; never log token contents).
 - **`BeaconCentral`** (CoreBluetooth `CBCentralManager`) — scan for the `Beacon` name prefix +
   service UUID; connect; **trigger encryption by accessing an encrypted characteristic — macOS shows
   the OS pairing dialog** (D3; the app does not handle the passkey itself); discover NUS; subscribe TX
-  notify; write RX. Auto-reconnect on drop (FR-HUB-3). Reassemble inbound acks on `\n`.
+  notify; write RX with **`.withResponse`** (acknowledged: hardware-verified that `.withoutResponse`
+  packets drop under WiFi+BLE congestion and corrupt multi-chunk frames, §4.3). Auto-reconnect on drop
+  (FR-HUB-3). Reassemble inbound acks on `\n`.
 - **`StatusFrameBuilder`** — merges the latest usage + buddy state into one §7.1 status frame,
   serializes to newline-delimited JSON, chunks to the negotiated MTU, writes via `BeaconCentral`.
   Sends on change + a heartbeat; **resends a full frame on (re)connect** (the device relies on this).
@@ -212,6 +216,21 @@ the **same** real payloads — not guessed field names that churn later. P2-0 ca
   `PermissionRequest` are aliases), + the `buddy` block they map to, + the short-id<->hook-id mapping.
 - **`status_frame.ndjson`, `commands.ndjson`** — canonical §7.1 frames the device host tests (§3.1)
   load and the hub serializer is asserted against.
+
+### 4.3 macOS runtime + packaging (hardware-verified 2026-06-08)
+
+Findings from the first on-hardware run, now binding:
+- **Signed `.app` bundle, launched via LaunchServices, is mandatory.** macOS TCC reads
+  `NSBluetoothAlwaysUsageDescription` only for a LaunchServices-launched, code-signed app; a bare
+  `swift run` (or running the binary by path) is **aborted as a privacy violation** — an embedded
+  `__info_plist` section is not enough. Ship `Info.plist` + `build-app.sh` (ad-hoc sign + `open`); run
+  via `./build-app.sh run` (streams logs to the terminal). A notarized Developer ID build is the later
+  distribution step (and the only way "Always Allow" Keychain grants persist across rebuilds).
+- **RX writes use `.withResponse`** (acknowledged/flow-controlled). `.withoutResponse` drops under
+  WiFi+BLE coexistence congestion and corrupts multi-chunk frames (device logs `bad/ignored frame`).
+- **Keychain token is cached** (read once, re-read on 401) so macOS prompts once per run, not per poll.
+- **Device firmware ships with `-DBEACON_LVGL_PSRAM`** (LVGL buffers in PSRAM) — required for the BLE +
+  WiFi + TLS coexistence to hold the internal-heap floor (§7 / `tech.md` §2).
 
 The device `test_hub_proto` (P2-A) is built against these real fixtures from the start.
 

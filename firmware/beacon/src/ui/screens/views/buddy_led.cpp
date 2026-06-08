@@ -4,6 +4,7 @@
 #include "ui/theme.h"
 #include "config/layout.h"
 #include "core/datastore.h"
+#include "core/hub_task.h"
 #include "util/log.h"
 #include <Arduino.h>
 #include <string.h>
@@ -21,6 +22,7 @@ static void decide(bool approve) {
   buddy_rec_t r = ds_get_buddy();
   if (r.hdr.state == ST_HUB_OFFLINE || r.hdr.state == ST_RECONNECTING) return;
   if (!r.prompt.present) return;
+  if (!hub_send_permission(r.prompt.id, approve)) return;   // keep prompt visible if not enqueued
   r.prompt.present = false;
   ds_set_buddy(&r);
   LOGI("buddy: %s", approve ? "APPROVE" : "DENY");

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Beacon statusline shim (P2, D6). Set this as your Claude Code `statusLine` command so the hub gets
+# live token/context metrics (the only surface that exposes them, docs/research §2.2). It forwards the
+# statusline JSON (stdin) to the hub's local HTTP server and still prints a status line to stdout so
+# Claude Code's statusline keeps working. No tokens are involved; localhost only.
+#
+# Install: in ~/.claude/settings.json -> "statusLine": { "type": "command",
+#   "command": "/absolute/path/to/hub/statusline-shim/beacon-statusline" }
+
+input="$(cat)"
+
+# Forward to the hub if it is running (it writes its ephemeral port here at launch). Fire-and-forget,
+# 1s cap, never block Claude Code's statusline render.
+port_file="$HOME/.beacon-hub/port"
+if [ -r "$port_file" ]; then
+  port="$(cat "$port_file" 2>/dev/null)"
+  [ -n "$port" ] && curl -s -m 1 -X POST "http://127.0.0.1:${port}/statusline" \
+    -H 'Content-Type: application/json' --data-binary "$input" >/dev/null 2>&1 &
+fi
+
+# Print a minimal status line (customize freely). Best-effort model name from the payload.
+model="$(printf '%s' "$input" | /usr/bin/python3 -c 'import sys,json
+try:
+    d=json.load(sys.stdin); print(d.get("model",{}).get("display_name","claude"))
+except Exception:
+    print("claude")' 2>/dev/null)"
+printf '%s' "${model:-claude}"

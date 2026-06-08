@@ -46,6 +46,15 @@ bool lvgl_port_begin() {
 
   uint32_t caps = MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL;
   const char* region = "internal-SRAM";
+#ifdef BEACON_LVGL_PSRAM
+  // P2 heap-floor escape valve (tech.md §8 / P2 spec §7): force LVGL draw buffers into PSRAM so the
+  // scarce internal SRAM survives an active bonded BLE link + cert TLS. The boot-time auto-fallback
+  // below cannot react to that later load (BLE/WiFi start after this), so this is a build-time choice.
+  caps = MALLOC_CAP_SPIRAM; region = "PSRAM (forced: BEACON_LVGL_PSRAM)";
+  s_buf1 = (lv_color_t*)heap_caps_malloc(BUF_BYTES, caps);
+  s_buf2 = (lv_color_t*)heap_caps_malloc(BUF_BYTES, caps);
+  uint32_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+#else
   s_buf1 = (lv_color_t*)heap_caps_malloc(BUF_BYTES, caps);
   s_buf2 = (lv_color_t*)heap_caps_malloc(BUF_BYTES, caps);
   uint32_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -56,6 +65,7 @@ bool lvgl_port_begin() {
     s_buf1 = (lv_color_t*)heap_caps_malloc(BUF_BYTES, caps);
     s_buf2 = (lv_color_t*)heap_caps_malloc(BUF_BYTES, caps);
   }
+#endif
   if (!s_buf1 || !s_buf2) { LOGE("lvgl buffer alloc FAIL"); return false; }
   lv_disp_draw_buf_init(&s_draw_buf, s_buf1, s_buf2, BUF_PX);
 

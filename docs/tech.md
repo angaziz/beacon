@@ -41,7 +41,7 @@ Target: **Waveshare ESP32-S3-Touch-AMOLED-2.16**. Full detail in `docs/research/
 
 **Measured (spike):** display+power idle ≈ **338KB** free internal heap. WiFi + BLE(Bluedroid, **advertising only**) + **insecure** TLS + display ≈ **160KB** min free internal heap, **8.38MB** PSRAM free, 0 crashes, TLS fetch ~1.5s.
 
-**Proof scope / caveat:** coexistence is proven for *BLE advertising + `setInsecure()` TLS + raw-GFX display*. **Not yet measured:** an *active bonded BLE connection*, *cert-validated TLS* (more heap), and the *full LVGL UI with fonts*. P2 MUST re-measure the heap floor under an active encrypted link + cert-validated HTTPS + LVGL before declaring the architecture closed (acceptance in `prd.md`). Expectation: still comfortable, but verify — keep the LAN-WebSocket fallback path cheap (transport abstraction, §4).
+**Proof scope / caveat:** coexistence is proven for *BLE advertising + `setInsecure()` TLS + raw-GFX display*. **P2 re-measured under the full worst case** — active bonded BLE (NimBLE) link + cert-validated TLS + the full LVGL UI on hardware: with LVGL draw buffers in **internal SRAM** the min free internal heap collapsed (~44 KB) and TLS fetches timed out; with **`-DBEACON_LVGL_PSRAM`** (draw buffers in PSRAM, now the default build flag, §6) boot free-internal = ~253 KB and steady-state ~115 KB with a transient **min ~53 KB** under an active link + TLS — TLS fetches succeed (real HTTP 2xx). So the architecture is closed **only with LVGL buffers in PSRAM**; the ~53 KB transient sits just under the 60 KB guideline (§8) but is stable in practice — keep the LAN-WebSocket fallback cheap (transport abstraction, §4) and revisit if it tightens.
 
 ## 3. Validated bring-up sequence (boot order)
 
@@ -68,7 +68,7 @@ Target: **Waveshare ESP32-S3-Touch-AMOLED-2.16**. Full detail in `docs/research/
 | Display driver | GFX_Library_for_Arduino (`Arduino_CO5300`, `Arduino_ESP32QSPI`) | 1.6.4 |
 | Sensors | SensorLib (QMI8658, PCF85063) | 0.3.3 |
 | Power | XPowersLib (AXP2101) | 0.2.6 |
-| **BLE** | **Bluedroid (built into the core)** — canonical. **NimBLE-Arduino 1.4.x crashes on core 3.x; do not use.** | core |
+| **BLE** | Core **`BLE*` wrapper** (`BLEDevice`/`BLEServer`/`BLECharacteristic`/`BLESecurity`). On the pinned pioarduino esp32s3 libs (55.03.35) this wrapper is backed by **IDF NimBLE** (`CONFIG_BT_NIMBLE_ENABLED`), not Bluedroid — verified at P2. Use ONLY the stack-agnostic wrapper (no raw `esp_ble_*`/`esp_gap_ble_api.h`), so the link works on either backing and `HubLink` keeps screens unaware. **Do not add the separate `NimBLE-Arduino` library (h2zero) — its 1.4.x crashes on core 3.x; that is a different thing from the core's NimBLE backing.** | core |
 | Net | `WiFi`, `WiFiClientSecure` (cert-validated), `HTTPClient` | core |
 | JSON | ArduinoJson (filters for big payloads) | 7.x |
 | Hub | Swift (CoreBluetooth, Keychain, menubar) | macOS 13+ |
@@ -154,7 +154,7 @@ Custom GATT over a **Nordic-UART-style service**, bonded + LE-Secure-Connections
 - Service `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
 - RX (central→device, write/no-resp) `6e400002-...`
 - TX (device→central, notify) `6e400003-...`
-- **Framing:** UTF-8 **newline-delimited JSON**. A frame may span multiple BLE writes/notifies; reassemble on `\n`. Request MTU 247 on connect; do not assume >20 B/packet.
+- **Framing:** UTF-8 **newline-delimited JSON**. A frame may span multiple BLE writes/notifies; reassemble on `\n`. Request MTU 247 on connect; do not assume >20 B/packet. The central writes RX with **acknowledged writes** (ATT Write Request / `.withResponse`) — `withoutResponse` packets drop under WiFi+BLE coexistence congestion and corrupt multi-chunk frames (P2 hardware finding).
 - **Versioning:** every frame carries `"v":1`. Unknown major version ⇒ ignore + log.
 - **Idle vs prompt:** absence of `buddy.prompt` ⇒ idle.
 
@@ -256,7 +256,10 @@ hub/                        # macOS Swift app (P2) + CONTRACT.md fixtures
 - **Coexistence** proven only for advertising + insecure TLS (§2) — **re-measure under active bonded BLE + cert-validated TLS + LVGL at P2.** Keep `HubLink` abstract.
 - **Touch is unproven.** Neither spike exercised the CST92xx controller (both are draw-only). Swipe nav (FR-PLAT-2) + wake-on-touch (FR-PLAT-7) are core P0, so touch read/init is the **main unproven-hardware item in P0** — bring it up first; driver via SensorLib / the Waveshare example pack (`docs/research/`).
 - **Outlier widgets not started.** The 7 theme fonts are sourced, glyph-subset, budgeted, and on-device-verified (P0-B; `src/ui/fonts/`). The Analog face + Oscilloscope trace remain bespoke widgets (`DESIGN.md`) — currently `gauge.cpp` placeholders (`GAUGE_SUBDIAL`/`GAUGE_WAVEFORM`), deferred past P0.
-- **BLE stack:** Bluedroid (canonical); NimBLE-Arduino 1.4.x crashes on core 3.x.
+- **BLE stack:** use the core `BLE*` wrapper only. On the pinned esp32s3 libs it is backed by IDF
+  NimBLE (P2 finding; `esp_gap_ble_api.h`/Bluedroid is absent for s3) — the wrapper API is identical
+  across backings, so `hublink_ble` calls no raw `esp_ble_*`. The separate `NimBLE-Arduino` (h2zero)
+  1.4.x library still crashes on core 3.x — do not add it.
 - **Unofficial endpoints:** Claude/Codex usage + Yahoo finance — isolate behind adapters (hub for usage), expect breakage, have fallbacks (`docs/research/`).
 - **Spotify:** Premium + active Connect device; control-only; OAuth storage undecided (§9, P4).
 - **Panel 466 vs advertised 480**; **corner radius ~90px assumed** — confirm on hardware, lock `SAFE_INSET` at P0.
