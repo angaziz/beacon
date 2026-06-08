@@ -23,7 +23,7 @@ static lv_obj_t* s_pager = nullptr;
 static lv_obj_t* s_pages[8];
 static lv_obj_t* s_dots[8];
 static int s_current = 0;
-static int s_wrap_target = -1;   // pending circular wrap (executed on scroll settle)
+static bool s_settling = false;   // guards reentrant SCROLL_END from our own recenter()
 
 static void set_dots(int active) {
   const beacon_theme_t* t = theme_active();
@@ -51,24 +51,27 @@ static void on_theme(const beacon_theme_t* t) {
   if (MODULES[s_current]->update) MODULES[s_current]->update();
 }
 
-static void scroll_cb(lv_event_t*) {
-  int x = lv_obj_get_scroll_x(s_pager);
-  int maxx = (COUNT - 1) * SCREEN_W;
-  int thr = SCREEN_W / 4;
-  if (x > maxx + thr)      s_wrap_target = 0;          // past last => first
-  else if (x < -thr)       s_wrap_target = COUNT - 1;  // past first => last
-  else                     s_wrap_target = -1;         // back in bounds => cancel pending wrap
+// Reorder the page objects so s_current sits at the center slot with its circular neighbours
+// on both sides, then pin the scroll to that slot without animation. The page under the
+// viewport is unchanged pixels, so the rearrange is invisible -- it just guarantees a real
+// neighbour exists in both directions for the next swipe, making the wrap boundary an ordinary
+// one-page move (FR fix #5). LV_OBJ_FLAG_SCROLL_ONE caps a gesture at one page, so neighbours
+// on each side are always sufficient.
+static void recenter(void) {
+  s_settling = true;   // scroll_to_x(LV_ANIM_OFF) re-emits SCROLL_END synchronously
+  for (int slot = 0; slot < COUNT; slot++)
+    lv_obj_move_to_index(s_pages[carousel_logical_at(s_current, slot, COUNT)], slot);
+  lv_obj_update_layout(s_pager);
+  lv_obj_scroll_to_x(s_pager, carousel_center_slot(COUNT) * SCREEN_W, LV_ANIM_OFF);
+  s_settling = false;
 }
 
 static void scrollend_cb(lv_event_t*) {
-  if (s_wrap_target >= 0) {
-    int t = s_wrap_target; s_wrap_target = -1;
-    lv_obj_scroll_to_x(s_pager, t * SCREEN_W, LV_ANIM_OFF);   // INSTANT jump (no long multi-page scroll)
-    show(t);
-    return;
-  }
-  int idx = carousel_index_for_x(lv_obj_get_scroll_x(s_pager), SCREEN_W, COUNT);
-  if (idx != s_current) show(idx);
+  if (s_settling) return;
+  int slot = carousel_index_for_x(lv_obj_get_scroll_x(s_pager), SCREEN_W, COUNT);
+  if (slot == carousel_center_slot(COUNT)) return;   // bounced back to center: no page change
+  show(carousel_logical_at(s_current, slot, COUNT));
+  recenter();                                        // re-pin so the next swipe has both neighbours
 }
 
 static void tick_cb(lv_timer_t*) {
@@ -91,7 +94,6 @@ void carousel_init(void) {
   lv_obj_set_scrollbar_mode(s_pager, LV_SCROLLBAR_MODE_OFF);
   lv_obj_set_style_pad_all(s_pager, 0, 0);
   lv_obj_set_style_pad_column(s_pager, 0, 0);
-  lv_obj_add_event_cb(s_pager, scroll_cb, LV_EVENT_SCROLL, NULL);
   lv_obj_add_event_cb(s_pager, scrollend_cb, LV_EVENT_SCROLL_END, NULL);
 
   for (int i = 0; i < COUNT; i++) {
@@ -132,10 +134,8 @@ void carousel_init(void) {
   theme_set(theme0);        // restore persisted theme; builds all pages via on_theme
 
   int start = nvs_get_screen(0); if (start >= COUNT) start = 0;   // restore last screen
-  if (start != 0) {
-    lv_obj_update_layout(s_pager);                                  // positions must exist before scroll
-    lv_obj_scroll_to_x(s_pager, start * SCREEN_W, LV_ANIM_OFF);
-  }
+  s_current = start;
+  recenter();                                                      // pin start to the center slot
   show(start);
   lv_timer_create(tick_cb, 500, NULL);
 }
