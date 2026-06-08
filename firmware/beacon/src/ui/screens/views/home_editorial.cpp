@@ -1,8 +1,21 @@
 #include "ui/screen.h"
 #include "ui/screens/screen_common.h"
 #include "core/datastore.h"
+#include "core/timekeep.h"
+#include <time.h>
+#include <ctype.h>
 
 static lv_obj_t *s_slot, *s_clock, *s_date, *s_temp, *s_hum;
+
+// Clock + date from the time service. RTC time is always "live" (FR-HOME-3); show "--" until known.
+static void render_clock(lv_obj_t* clock, lv_obj_t* date) {
+  if (!timekeep_has_time()) { lv_label_set_text(clock, "--:--"); lv_label_set_text(date, "--"); return; }
+  struct tm lt; timekeep_localtime(&lt);
+  char hm[8];  strftime(hm, sizeof(hm), "%H:%M", &lt);            lv_label_set_text(clock, hm);
+  char dt[24]; strftime(dt, sizeof(dt), "%a %d %b", &lt);
+  for (char* p = dt; *p; ++p) *p = (char)toupper((unsigned char)*p);
+  lv_label_set_text(date, dt);
+}
 
 static void build(lv_obj_t* page) {
   s_slot = build_header(page, "HOME");
@@ -24,12 +37,16 @@ static void build(lv_obj_t* page) {
 }
 
 static void update(void) {
+  render_clock(s_clock, s_date);
   weather_rec_t w = ds_get_weather(); uint32_t now = now_s();
   slot_set(s_slot, "Wnn . --", &w.hdr, now);
   if (sv_placeholder(w.hdr.state)) { lv_label_set_text(s_temp, "--"); lv_label_set_text(s_hum, "--"); }
   else {
-    lv_label_set_text_fmt(s_temp, "%.1f\xC2\xB0", w.temp_c);
-    lv_label_set_text_fmt(s_hum, "%.0f%%", w.humidity_pct);
+    // libc snprintf (not lv_label_set_text_fmt): LVGL's sprintf has LV_SPRINTF_USE_FLOAT=0, so %f
+    // would render a literal "f". Matches the other home views.
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%.1f\xC2\xB0", w.temp_c);   lv_label_set_text(s_temp, buf);
+    snprintf(buf, sizeof(buf), "%.0f%%", w.humidity_pct);   lv_label_set_text(s_hum, buf);
   }
   value_state(s_temp, w.hdr.state); value_state(s_hum, w.hdr.state);
 }

@@ -11,7 +11,6 @@
 #include <Arduino.h>
 static void update(void);
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 static lv_obj_t *s_device, *s_status;
 static lv_obj_t *s_title, *s_artist;

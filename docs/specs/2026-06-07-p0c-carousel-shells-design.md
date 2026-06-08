@@ -95,7 +95,7 @@ A shared treatment applied per data region so all six screens render states cons
 The top-right slot each mockup uses for time / `POLL 30S` / `REQ A1B2` doubles as the **status slot**: LIVE shows the screen's normal right-header; any non-live state replaces it with the chip. Pure helpers — `age_str(uint32_t age_s)` and `state_label(screen_state_t, data_err_t)` — are host-tested.
 
 ### 3.6 `ui/screens/screen_*.{h,cpp}`
-Six modules, each a `screen_module_t` built to its editorial mockup (`docs/design/mockups/shots/editorial/`), every value routed through `state_view`:
+Six modules, each a `screen_module_t` built to its editorial mockup (the editorial lane in `docs/design/mockups/directions.html`), every value routed through `state_view`:
 
 - **home** (`HOME`): clock (hero font) + date line (mono) + hairline + weather (temp / humidity / condition) from `weather_rec_t`. The clock, date line, and the top-right `Wnn . dd.mm` (week + date) header ALL depend on P0-D's time service, so they render placeholders (`--:--`, `--`) in C; the dev-seeder can fake a monotonic time for visual verification. Weather is the only live-data region on this screen in C.
 - **finance** (`MARKETS`): a row per active ticker (`ds_get_finance_count()` slots), each `id` (dim) | value (display) | signed change with `^`/`v` glyph + `up`/`down` color (FR-FIN-2: sign + glyph + color, never color alone). With >6 tickers the list scrolls vertically inside the page; horizontal swipe still pages (LVGL gesture-direction routing). Per-row state via `state_view` (a slot may be stale while others live).

@@ -12,7 +12,6 @@
 // a permission PROMPT (tool name as the signal, hint in a bordered scope box, DENY|APPROVE
 // readouts) or idle activity log. Approve/Deny are LOCAL STUBS. Actions disabled on HUB_OFFLINE.
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 static lv_obj_t* s_telem;
 static lv_obj_t* s_eyebrow;     // "PERMISSION - APPROVE?" / "ACTIVITY"

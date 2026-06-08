@@ -22,7 +22,6 @@ static lv_obj_t *s_status, *s_list;
 static lv_obj_t *s_id[FIN_MAX], *s_val[FIN_MAX], *s_chg[FIN_MAX];
 static uint8_t s_count;
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 static void build(lv_obj_t* page) {
   const beacon_theme_t* t = theme_active();

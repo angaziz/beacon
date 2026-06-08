@@ -83,7 +83,7 @@ static void build(lv_obj_t* page) {
 static void update(void) {
   const beacon_theme_t* t = theme_active();
   nowplaying_rec_t n = ds_get_nowplaying();
-  uint32_t now = (uint32_t)(millis() / 1000);
+  uint32_t now = now_s();
 
   char buf[40];
   if (sv_status(buf, sizeof(buf), &n.hdr, now)) lv_label_set_text(s_status, buf);

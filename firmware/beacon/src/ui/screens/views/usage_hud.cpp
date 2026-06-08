@@ -11,7 +11,6 @@
 // pct in the center and a "rst <countdown>" line below. pct<0 => "--" and no ring fill.
 // Whole-screen HUB_OFFLINE via u.hdr.
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 #define RING_SZ 118
 #define N_RINGS 4

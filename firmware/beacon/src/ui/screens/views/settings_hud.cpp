@@ -7,6 +7,10 @@
 #include "core/datastore.h"
 #include "hal/display.h"
 #include "hal/power.h"
+#include "core/net.h"
+#include "core/nvs.h"
+#include "ui/screens/screen_common.h"
+#include "ui/wifi_panel.h"
 #include <Arduino.h>
 
 // Aerospace HUD / Settings. "// SETTINGS" eyebrow + version (right) + a list of rows:
@@ -18,6 +22,7 @@ static lv_obj_t *s_theme_val;
 static lv_obj_t *s_bright_val;
 static lv_obj_t *s_tickers_val;
 static lv_obj_t *s_batt_val;
+static lv_obj_t *s_wifi_val;
 
 static const uint8_t BRIGHT_STEPS[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;   // 80%
@@ -26,11 +31,14 @@ static void do_next_theme(void*) { theme_set((theme_index() + 1) % THEME_COUNT);
 
 static void theme_tap(lv_event_t* e) { (void)e; lv_async_call(do_next_theme, NULL); }
 
+static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
+
 static void bright_tap(lv_event_t* e) {
   (void)e;
   s_bright_idx = (uint8_t)((s_bright_idx + 1) % (sizeof(BRIGHT_STEPS) / sizeof(BRIGHT_STEPS[0])));
   uint8_t pct = BRIGHT_STEPS[s_bright_idx];
   display_brightness((uint8_t)(pct * 255 / 100));
+  nvs_set_brightness((uint8_t)(pct * 255 / 100));
   char buf[8];
   snprintf(buf, sizeof(buf), "%u%%", (unsigned)pct);
   lv_label_set_text(s_bright_val, buf);
@@ -90,9 +98,13 @@ static void build(lv_obj_t* page) {
   lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
   lv_obj_set_style_pad_row(list, 0, 0);
 
-  make_row(list, t, "Wi-Fi", "not set", NULL);
+  s_wifi_val     = make_row(list, t, "Wi-Fi", "not set", NULL);
+  lv_obj_t* wrow = lv_obj_get_parent(s_wifi_val); lv_obj_add_flag(wrow, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(wrow, wifi_open_cb, LV_EVENT_CLICKED, NULL);
   s_batt_val     = make_row(list, t, "Battery", "--", NULL);
-  s_bright_val   = make_row(list, t, "Brightness", "80%", bright_tap);
+  s_bright_idx = bright_step_for_nvs(BRIGHT_STEPS, sizeof(BRIGHT_STEPS) / sizeof(BRIGHT_STEPS[0]));
+  char bb[8]; snprintf(bb, sizeof(bb), "%u%%", (unsigned)BRIGHT_STEPS[s_bright_idx]);
+  s_bright_val   = make_row(list, t, "Brightness", bb, bright_tap);
   s_theme_val    = make_row(list, t, "Theme", THEME_CATALOG[theme_index()].id, theme_tap);
   char tk[16];
   snprintf(tk, sizeof(tk), "%u assets", (unsigned)ds_get_finance_count());
@@ -102,6 +114,7 @@ static void build(lv_obj_t* page) {
 }
 
 static void update(void) {
+  char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text(s_wifi_val, wbuf);
   lv_label_set_text(s_theme_val, THEME_CATALOG[theme_index()].id);
   char tk[16];
   snprintf(tk, sizeof(tk), "%u assets", (unsigned)ds_get_finance_count());

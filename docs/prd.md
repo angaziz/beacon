@@ -4,7 +4,7 @@
 >
 > **Companion docs:** `PRODUCT.md` (strategy/why) · `DESIGN.md` (visual system + theme tokens) · [`tech.md`](tech.md) (technical constitution: how it's built, NFRs, conventions) · `docs/research/` (evidence) · `docs/spikes/` (proven hardware experiments). Where this doc and `tech.md` disagree on *how*, `tech.md` wins; where strategy is unclear, `PRODUCT.md` wins.
 >
-> **Status (2026-06-06):** research, design system, and hardware spikes (display/power + WiFi/BLE coexistence) are done and proven. Firmware MVP not yet started. Conventions: requirement IDs are stable; priority is MoSCoW (MUST/SHOULD/COULD); each requirement has a Phase (see §7).
+> **Status (2026-06-08):** **P0 + P1 complete and running on-device** (in `firmware/beacon/`). Foundation (bring-up, frozen contracts + theme engine, swipe carousel/42 views, NVS persistence FR-PLAT-3, time service FR-PLAT-8 NTP+RTC, WiFi provisioning FR-SET-1) and the ambient screens (FR-HOME clock+weather, FR-FIN live FX→IDR/BTC/indices, FR-STATE screen-state model) are validated on hardware over real WiFi. Beyond spec: multi-network WiFi (WiFiMulti) + on-device Wi-Fi manager, IP-based auto-geolocation. **Deferred:** FR-SET-4 (on-device ticker/location editing, SHOULD), FR-PLAT-7 idle dim/sleep. **Next:** P2 (macOS hub + AI Usage / Coding Buddy over BLE). Conventions: requirement IDs are stable; priority is MoSCoW (MUST/SHOULD/COULD); each requirement has a Phase (see §7).
 
 ---
 
@@ -199,6 +199,8 @@ Each phase is independently buildable and reviewable; a session/agent can own on
 | **P3 — Input polish** | IMU gestures, long-press/quick-settings, motion-wake | FR-PLAT-5/6 | device | input layer |
 | **P4 — Now-Playing** | Spotify control + OAuth. **Prereq:** decide OAuth storage (on-device NVS vs proxy, §8) at phase start — not parallel-startable until decided | FR-NOW | device-direct | 1 screen + auth |
 | **Explore** | Hermes, voice | FR-HERMES, FR-VOICE | mixed | per-feature spec |
+
+**P0 progress (2026-06-07):** done — bring-up (power/display/LVGL/touch, pinned toolchain), `SAFE_INSET`/`partitions.csv` frozen on hardware (FR-PLAT-9), frozen contracts (FR-STATE-0) + theme engine with all 7 themes (FR-THEME-*), and the swipe carousel with six state-aware screens rendered bespoke-per-theme — 42 views (FR-PLAT-2/4, FR-THEME-3/4). Remaining — NVS persistence (FR-PLAT-3), idle dim/sleep (FR-PLAT-7), time service (FR-PLAT-8), WiFi provisioning + live Settings actions (FR-SET-1/2/3/5). The frozen contracts are landed, so P1/P2/P3/P4 are already unblocked.
 
 Dependencies: P1–P4 all depend on **P0 freezing the shared contracts** (FR-STATE-0: `DataStore`, `screen_state_t`, `HubLink`, config schemas) plus `SAFE_INSET` and `partitions.csv`. P2 implements the BLE protocol in `tech.md` §7. Once P0 lands and those contracts are frozen, P1 / P2 / P3 / P4 are parallelizable across separate agents/sessions.
 

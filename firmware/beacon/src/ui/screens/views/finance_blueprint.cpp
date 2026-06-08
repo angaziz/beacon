@@ -86,7 +86,7 @@ static void build(lv_obj_t* page) {
 
 static void update(void) {
   const beacon_theme_t* t = theme_active();
-  uint32_t now = (uint32_t)(millis() / 1000);
+  uint32_t now = now_s();
 
   // Header reflects worst non-live state across slots; default POLL label.
   bool any_chip = false;

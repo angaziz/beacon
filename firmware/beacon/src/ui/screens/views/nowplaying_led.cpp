@@ -12,7 +12,6 @@
 static lv_obj_t *s_device, *s_title, *s_artist;
 static lv_obj_t *s_bar, *s_elapsed, *s_state, *s_total;
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 static void fmt_ms(char* buf, size_t n, uint32_t ms) {
   uint32_t s = ms / 1000;

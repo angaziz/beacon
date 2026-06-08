@@ -5,21 +5,13 @@ A dark, futuristic desk command-center on a 2.16" AMOLED touch device — built 
 shows your Claude Code / Codex usage, live markets, weather, music, and a Claude coding
 "buddy" you can approve tool-prompts on — without breaking focus on your Mac.
 
-> **Status: early / prototype.** Hardware bring-up (display + power + touch + WiFi/BLE
-> coexistence) is proven, the specs are written, and **P0 foundation is largely built**: the
-> swipe carousel + all six screens render on-device in **7 bespoke themes**, on the frozen
-> DataStore + theme engine. Persistence (NVS), WiFi provisioning, and the time service (P0-D)
-> are next; live data fetchers come in P1/P2/P4. Expect things to move. See [Roadmap](#roadmap).
-
-<p>
-  <img src="docs/design/mockups/shots/editorial/edi-home.png" width="32%" alt="Home screen" />
-  <img src="docs/design/mockups/shots/editorial/edi-usage.png" width="32%" alt="AI usage screen" />
-  <img src="docs/design/mockups/shots/editorial/edi-buddy.png" width="32%" alt="Coding buddy screen" />
-</p>
-
-<sub>Design renders of the **Editorial** theme (1 of 7). On device, each theme renders these screens
-in its own visual language — see the full gallery in
-[`docs/design/mockups/directions.html`](docs/design/mockups/directions.html).</sub>
+> **Status: early / prototype.** Hardware bring-up is proven and **P0 + P1 run on-device**: the swipe
+> carousel + all six screens render in **7 bespoke per-theme layouts (42 views)**, on real data over
+> WiFi — NTP/RTC time, live weather (Open-Meteo, IP-geolocated), and live markets (FX→IDR, BTC,
+> indices) with the honest screen-state model (loading/live/stale/offline). Persistence (NVS),
+> multi-network WiFi (WiFiMulti) with a SoftAP captive-portal + on-device Wi-Fi manager, and the
+> time service all landed. **Next:** P2 (macOS hub + AI Usage / Coding Buddy over BLE). Expect things
+> to move. See [Roadmap](#roadmap).
 
 ## What it does
 
@@ -56,8 +48,7 @@ The UI is fully themeable — **7 themes**, each a **bespoke per-screen experien
 in a distinct visual language) composed from shared design tokens (color / type / gauge-style) +
 per-theme background chrome; default **Editorial Index**. The seven: Editorial Index, Aerospace HUD,
 Dot-Matrix, Blueprint, LED Matrix, Oscilloscope, Analog Neo. See the full gallery at
-[`docs/design/mockups/directions.html`](docs/design/mockups/directions.html) (open in a browser) or the
-rendered previews under [`docs/design/mockups/shots/`](docs/design/mockups/shots/).
+[`docs/design/mockups/directions.html`](docs/design/mockups/directions.html) (open in a browser).
 
 ## Repo layout
 
@@ -65,10 +56,14 @@ rendered previews under [`docs/design/mockups/shots/`](docs/design/mockups/shots
 beacon/
 ├── PRODUCT.md              # product strategy: users, purpose, principles
 ├── DESIGN.md               # visual design system + theme tokens (the 7 themes)
+├── firmware/beacon/        # product firmware (PlatformIO): bring-up, contracts, theme engine, carousel
+│   ├── src/                #   core/ (DataStore, HubLink, records) · hal/ · ui/ (carousel, screens, views, theme)
+│   └── test/               #   native unit tests (contracts, theme, datastore, carousel…)
 └── docs/
     ├── research/           # device + integrations research (hardware, APIs, prior art)
+    ├── plans/ · design/specs/ # P0 implementation plans + design specs (A/B/C)
     ├── design/
-    │   ├── mockups/        # HTML theme mockups + rendered PNG previews (shots/)
+    │   ├── mockups/        # HTML theme mockups (directions.html)
     │   └── tooling/        # Playwright screenshot helper (shoot.mjs)
     └── spikes/             # hardware spikes (throwaway), organized by topic
         ├── README.md       # index + outcomes
@@ -77,7 +72,7 @@ beacon/
         └── wifi-ble-coexistence/   # WiFi + BLE + HTTPS coexistence test
 ```
 
-The product firmware will live under a top-level `firmware/` once the build phase starts; `docs/spikes/` keeps the exploratory experiments separate from it.
+The product firmware lives under `firmware/beacon/` (build/flash instructions in its [`README`](firmware/beacon/README.md)); `docs/spikes/` keeps the exploratory experiments separate from it.
 
 ## Getting started (hardware)
 
@@ -98,8 +93,12 @@ The full phased plan (requirements, acceptance, dependencies) is in [`docs/prd.m
 - [x] Hardware spike: AXP2101 power + CO5300 display bring-up
 - [x] Hardware spike: WiFi + BLE coexistence + memory headroom
 - [x] Functional PRD + technical constitution ([`docs/prd.md`](docs/prd.md), [`docs/tech.md`](docs/tech.md))
-- [ ] **P0 — Foundation**: LVGL shell, swipe carousel, theme engine, settings, time service, and the frozen shared contracts (DataStore, HubLink, `SAFE_INSET`, partitions)
-- [ ] **P1 — Ambient screens**: Home, Finance (+ full screen-state model)
+- [x] **P0 — Foundation** — shell, carousel, themes, frozen contracts, persistence, WiFi, and time service, running on-device:
+  - [x] Bring-up: AXP2101 power + CO5300 display + LVGL 8.4 + touch; pinned PlatformIO toolchain; `SAFE_INSET`/corner-radius + `partitions.csv` frozen on hardware
+  - [x] Frozen shared contracts (DataStore, `screen_state_t`, HubLink, config schemas) + theme engine (7 themes, design tokens, gauge styles)
+  - [x] Swipe carousel + six state-aware screen shells, bespoke per-theme (6 × 7 = 42 views) + per-theme chrome + battery on Settings
+  - [x] Persistence (NVS: screen/brightness/theme/networks), time service (NTP + PCF85063 RTC + POSIX TZ), WiFi provisioning (SoftAP captive portal)
+- [x] **P1 — Ambient screens**: Home (clock + weather), Finance (live FX→IDR / BTC / indices), full screen-state model; live on hardware. Location is **auto-geolocated** (IP-based); on-device ticker/location *editing* (FR-SET-4, SHOULD) deferred. Also added: multi-network WiFi (WiFiMulti) + on-device Wi-Fi manager.
 - [ ] **P2 — Hub + AI**: macOS hub app (Swift) + AI Usage + Coding Buddy over BLE
 - [ ] **P3 — Input polish**: IMU + touch gestures
 - [ ] **P4 — Now-Playing**: Spotify control

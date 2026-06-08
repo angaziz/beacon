@@ -19,6 +19,9 @@ typedef struct {
 } theme_catalog_t;
 
 #define THEME_COUNT 7
+// Catalog order: 0=editorial 1=hud 2=dotmatrix 3=blueprint 4=led 5=oscilloscope 6=analog.
+#define DEFAULT_THEME_INDEX 2   // dotmatrix
+#define THEME_DEFAULT_VER   1   // bump when DEFAULT_THEME_INDEX changes to re-apply once (carousel migration)
 
 static const theme_catalog_t THEME_CATALOG[THEME_COUNT] = {
   // Editorial Index (default) — DESIGN.md exact values

@@ -125,7 +125,7 @@ static void show_prompt(bool on) {
 static void update(void) {
   const beacon_theme_t* t = theme_active();
   buddy_rec_t r = ds_get_buddy();
-  uint32_t now = (uint32_t)(millis() / 1000);
+  uint32_t now = now_s();
 
   char buf[32];
   if (sv_status(buf, sizeof(buf), &r.hdr, now)) lv_label_set_text(s_status, buf);

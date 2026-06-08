@@ -10,7 +10,6 @@
 #include <Arduino.h>
 static void update(void);
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 #define N_WIN 4   // claude.h5, claude.d7, codex.h5, codex.d7
 

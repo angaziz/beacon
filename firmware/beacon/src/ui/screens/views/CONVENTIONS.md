@@ -2,9 +2,8 @@
 
 You implement bespoke per-theme LAYOUTS for Beacon screens (ESP32-S3, LVGL 8.4, Arduino). Each file
 is one (screen x theme) "view". The visual target is `docs/design/mockups/directions.html` (per-theme
-Home + AI-Usage) and `docs/design/mockups/shots/editorial/*.png` (content structure for the other
-screens). Match your theme's lane in directions.html closely; extend that visual language to the
-other screens.
+Home + AI-Usage); for the other screens, take the content structure from the editorial lane in
+directions.html. Match your theme's lane closely; extend that visual language to the other screens.
 
 ## File contract
 File: `src/ui/screens/views/<screen>_<theme>.cpp`, where screen in
@@ -49,7 +48,7 @@ const screen_view_t home_hud_view = { build, update };
   view is per-theme). Set styles in build(); in update() only change text/values/show-hide.
 - update() is idempotent and read-only w.r.t. layout. Read snapshots: ds_get_weather(), 
   ds_get_finance_count()/ds_get_finance(i), ds_get_usage(), ds_get_buddy(), ds_get_nowplaying().
-- now: `static inline uint32_t now_s(){ return (uint32_t)(millis()/1000); }`
+- now: call the global `now_s()` (declared in ui/screen.h, defined in core/timekeep.cpp).
 - STATE handling (every data screen): use state_view.h helpers to reflect loading/live/stale/offline/
   error/hub-offline. Minimum: a small status chip (theme f_mono) in a corner showing
   `sv_status(buf,n,&rec.hdr,now)` text when non-live; dim the values when `sv_dim(state)`; show

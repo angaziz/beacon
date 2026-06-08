@@ -1,6 +1,7 @@
 #include "ui/theme.h"
 #include "ui/theme_catalog.h"
 #include "ui/fonts/fonts.h"
+#include "core/nvs.h"
 
 // Per-theme font selection (MANIFEST.md). mono is shared (JetBrains Mono) across all themes.
 typedef struct { const lv_font_t *hero, *disp, *body, *mono; } theme_fonts_t;
@@ -49,6 +50,7 @@ void theme_set(uint8_t idx) {
   s_theme.stroke_med  = t->stroke_med;
 
   if (s_apply) s_apply(&s_theme);   // screen tears down + rebuilds from the new tokens
+  nvs_set_theme(idx);               // selection persists (FR-THEME-2); boot restores via carousel
 }
 
 const beacon_theme_t* theme_active(void) { return s_theme.id ? &s_theme : nullptr; }

@@ -11,7 +11,6 @@
 // Prompt present => eyebrow + tool figure + thin-stroke hint box + DENY|APPROVE rule; else
 // idle => recent entry or "idle". Approve/Deny is a LOCAL STUB. Actions lock on hub-offline.
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 static lv_obj_t *s_status, *s_stat;
 static lv_obj_t *s_eyebrow, *s_tool, *s_hintbox, *s_hint;

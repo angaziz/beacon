@@ -10,7 +10,6 @@
 // A thin progress rule (bar) = progress_ms/duration_ms with elapsed/total times and a playing/
 // paused mark beneath. has_device==false => "no active device". Controls are P4 placeholders.
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 static lv_obj_t *s_status, *s_title, *s_artist, *s_bar, *s_elapsed, *s_total, *s_play, *s_empty;
 

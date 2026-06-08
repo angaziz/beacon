@@ -17,7 +17,6 @@ static inline const char* fin_name(int i, const finance_rec_t& r) {
 // id (mono dim) | value (display, tabular) | change (up/down color + ^/v glyph). Hairline
 // rule between rows. >6 rows scroll vertically. Per-row state via each slot's hdr.
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 #define MAX_ROWS 12
 

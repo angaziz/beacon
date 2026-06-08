@@ -9,10 +9,14 @@
 #include "core/datastore.h"
 #include "hal/display.h"
 #include "hal/power.h"
+#include "core/net.h"
+#include "core/nvs.h"
+#include "ui/screens/screen_common.h"
+#include "ui/wifi_panel.h"
 #include "src/misc/lv_async.h"   // lv_async_call (not pulled in by <lvgl.h>)
 #include <Arduino.h>
 
-static lv_obj_t *s_theme_val, *s_bright_val, *s_tickers_val, *s_batt_val;
+static lv_obj_t *s_theme_val, *s_bright_val, *s_tickers_val, *s_batt_val, *s_wifi_val;
 
 static const uint8_t BRIGHT_PCT[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;   // 80%
@@ -21,10 +25,13 @@ static void do_next_theme(void*) { theme_set((theme_index() + 1) % THEME_COUNT);
 
 static void theme_tap_cb(lv_event_t*) { lv_async_call(do_next_theme, NULL); }
 
+static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
+
 static void bright_tap_cb(lv_event_t* e) {
   s_bright_idx = (uint8_t)((s_bright_idx + 1) % (sizeof(BRIGHT_PCT) / sizeof(BRIGHT_PCT[0])));
   uint8_t pct = BRIGHT_PCT[s_bright_idx];
   display_brightness((uint8_t)((uint16_t)pct * 255 / 100));
+  nvs_set_brightness((uint8_t)((uint16_t)pct * 255 / 100));
   char b[8]; snprintf(b, sizeof(b), "%u%%", pct);
   lv_label_set_text(s_bright_val, b);
 }
@@ -82,10 +89,13 @@ static void build(lv_obj_t* page) {
 
   const int top = SAFE_INSET + 36;
   const int pitch = 48;
+  s_bright_idx = bright_step_for_nvs(BRIGHT_PCT, sizeof(BRIGHT_PCT) / sizeof(BRIGHT_PCT[0]));
   char bb[8]; snprintf(bb, sizeof(bb), "%u%%", BRIGHT_PCT[s_bright_idx]);
   char tk[24]; snprintf(tk, sizeof(tk), "%u assets >", (unsigned)ds_get_finance_count());
 
-  make_row(page, t, top + 0 * pitch, "Wi-Fi", "not set", false, NULL);
+  s_wifi_val    = make_row(page, t, top + 0 * pitch, "Wi-Fi", "not set", false, NULL);
+  lv_obj_t* wrow = lv_obj_get_parent(s_wifi_val); lv_obj_add_flag(wrow, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(wrow, wifi_open_cb, LV_EVENT_CLICKED, NULL);
   s_batt_val    = make_row(page, t, top + 1 * pitch, "Battery", "--", false, NULL);
   s_bright_val  = make_row(page, t, top + 2 * pitch, "Brightness", bb, false, bright_tap_cb);
   s_theme_val   = make_row(page, t, top + 3 * pitch, "Theme",
@@ -96,6 +106,7 @@ static void build(lv_obj_t* page) {
 }
 
 static void update(void) {
+  char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text(s_wifi_val, wbuf);
   lv_label_set_text(s_theme_val, THEME_CATALOG[theme_index()].id);
   char tk[24]; snprintf(tk, sizeof(tk), "%u assets >", (unsigned)ds_get_finance_count());
   lv_label_set_text(s_tickers_val, tk);

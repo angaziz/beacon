@@ -16,7 +16,6 @@ static lv_obj_t *s_prompt_box, *s_prompt_lead, *s_tool, *s_hint;
 static lv_obj_t *s_actions, *s_deny, *s_approve;
 static lv_obj_t *s_idle;
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 static void decide(bool approve) {
   buddy_rec_t r = ds_get_buddy();

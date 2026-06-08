@@ -4,14 +4,16 @@
 #include "ui/theme.h"
 #include "config/layout.h"
 #include "core/datastore.h"
+#include "core/timekeep.h"
 #include <Arduino.h>
 #include <math.h>
+#include <time.h>
+#include <ctype.h>
 
 // Analog Neo home: a drawn analog clock face (tick ring + hands + hub) with small digital
-// temp/humidity readouts below. The clock is STATIC at a pleasant ~10:08 position (no real
-// time source yet, per CONVENTIONS). Only the readouts + status chip update from the store.
+// temp/humidity readouts below. Hands track the time service when available, falling back to a
+// pleasant ~10:08 position until the clock is known. Readouts + the date chip update from update().
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 #define DIAL_SIZE 240          // clock face box (well inside SAFE_INSET on 466)
 #define HAND_H_LEN 62          // hour hand length (px from center)
@@ -25,6 +27,16 @@ static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 #define ANG_SEC    216
 
 static lv_obj_t *s_dial, *s_temp, *s_hum, *s_status;
+
+// Live date for the top-right chip; lowercase to match this lane's mono eyebrow style.
+// Falls back to "--" until the time service has a fix (FR-HOME-3).
+static void render_date(lv_obj_t* date) {
+  if (!timekeep_has_time()) { lv_label_set_text(date, "--"); return; }
+  struct tm lt; timekeep_localtime(&lt);
+  char dt[24]; strftime(dt, sizeof(dt), "%a %d %b", &lt);
+  for (char* p = dt; *p; ++p) *p = (char)tolower((unsigned char)*p);
+  lv_label_set_text(date, dt);
+}
 
 // Endpoint of a hand from center (cx,cy), given angle from 12 o'clock and length.
 static void hand_end(int cx, int cy, int deg, int len, lv_point_t* out) {
@@ -42,6 +54,15 @@ static void draw_face(lv_event_t* e) {
   int cx = (a.x1 + a.x2) / 2;
   int cy = (a.y1 + a.y2) / 2;
   int r  = (a.x2 - a.x1) / 2;
+
+  // Live hand angles from the time service; fall back to the pleasant static pose until known.
+  int ang_hour = ANG_HOUR, ang_min = ANG_MIN, ang_sec = ANG_SEC;
+  if (timekeep_has_time()) {
+    struct tm lt; timekeep_localtime(&lt);
+    ang_hour = (lt.tm_hour % 12) * 30 + lt.tm_min / 2;
+    ang_min  = lt.tm_min * 6;
+    ang_sec  = lt.tm_sec * 6;
+  }
 
   // Tick ring: 60 minute ticks (short, dim), with bolder hour ticks every 5th.
   lv_draw_line_dsc_t td; lv_draw_line_dsc_init(&td);
@@ -65,19 +86,19 @@ static void draw_face(lv_event_t* e) {
   lv_draw_line_dsc_t hd; lv_draw_line_dsc_init(&hd);
   hd.opa = LV_OPA_COVER; hd.round_start = 1; hd.round_end = 1;
   hd.color = t->ink; hd.width = 6;
-  lv_point_t he; hand_end(cx, cy, ANG_HOUR, HAND_H_LEN, &he);
+  lv_point_t he; hand_end(cx, cy, ang_hour, HAND_H_LEN, &he);
   lv_point_t hpts[2] = { center, he };
   lv_draw_line(ctx, &hd, &hpts[0], &hpts[1]);
 
   // Minute hand (ink, medium).
   hd.color = t->ink; hd.width = 4;
-  lv_point_t me; hand_end(cx, cy, ANG_MIN, HAND_M_LEN, &me);
+  lv_point_t me; hand_end(cx, cy, ang_min, HAND_M_LEN, &me);
   lv_point_t mpts[2] = { center, me };
   lv_draw_line(ctx, &hd, &mpts[0], &mpts[1]);
 
   // Second hand (accent, thin).
   hd.color = t->accent; hd.width = 2;
-  lv_point_t se; hand_end(cx, cy, ANG_SEC, HAND_S_LEN, &se);
+  lv_point_t se; hand_end(cx, cy, ang_sec, HAND_S_LEN, &se);
   lv_point_t spts[2] = { center, se };
   lv_draw_line(ctx, &hd, &spts[0], &spts[1]);
 
@@ -148,6 +169,7 @@ static void build(lv_obj_t* page) {
 
 static void update(void) {
   const beacon_theme_t* t = theme_active(); if (!t) return;
+  lv_obj_invalidate(s_dial);  // repaint drawn hands from the live time
   weather_rec_t w = ds_get_weather();
   uint32_t now = now_s();
 
@@ -156,7 +178,7 @@ static void update(void) {
     lv_label_set_text(s_status, chip);
     lv_obj_set_style_text_color(s_status, sv_severe(w.hdr.state) ? t->down : t->ink_dim, 0);
   } else {
-    lv_label_set_text(s_status, "wed 05 jun");
+    render_date(s_status);
     lv_obj_set_style_text_color(s_status, t->ink_dim, 0);
   }
 
