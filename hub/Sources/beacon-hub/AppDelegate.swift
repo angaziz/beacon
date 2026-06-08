@@ -46,6 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             b.onClaudeUsage = { [weak self] c in
                 Task { @MainActor in self?.onStatuslineClaude(c) }
             }
+            b.onPromptUndeliverable = { [weak self] reason in
+                Task { @MainActor in self?.menubar.setAlert("Auto-denied: \(reason)") }
+            }
             b.start()
             bridge = b
         } catch {
@@ -56,11 +59,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // --- central ---
 
     private func startCentral() {
-        central.onStatusChange = { [weak self] in
-            Task { @MainActor in self?.refreshLink() }
+        central.onStatusChange = { [weak self] connected, name in
+            Task { @MainActor in self?.refreshLink(connected: connected, name: name) }
         }
         central.onReady = { [weak self] in
-            Task { @MainActor in self?.refreshLink(); self?.sendFullFrame() }
+            // Link state is refreshed by the isConnected didSet's onStatusChange (fires just before
+            // this); onReady only resends the full frame to a freshly-(re)subscribed device.
+            Task { @MainActor in self?.sendFullFrame() }
         }
         central.onCommand = { [weak self] cmd in
             Task { @MainActor in self?.handle(cmd) }
@@ -68,12 +73,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         central.start()
     }
 
-    private func refreshLink() {
-        if central.isConnected, let name = central.connectedName {
+    // `connected`/`name` are a snapshot captured on BeaconCentral's queue (no cross-thread read).
+    private func refreshLink(connected: Bool, name: String?) {
+        if connected, let name = name {
             menubar.setLink(.connected(name))
+            menubar.setAlert(nil)   // device reachable again => clear any undeliverable-prompt alert.
         } else {
             menubar.setLink(.scanning)
         }
+        bridge?.setDeviceConnected(connected)
     }
 
     private func handle(_ cmd: DeviceCommand) {

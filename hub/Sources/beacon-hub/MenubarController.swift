@@ -14,7 +14,9 @@ final class MenubarController {
     private var lastSync: Date?
     private var usage: Usage = Usage(claude: .unavailable, codex: .unavailable)
     private var errors: [String] = []
+    private var alert: String?   // persistent loud surface for an undeliverable prompt; nil => none.
 
+    private let alertLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let syncLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let claudeLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -30,6 +32,9 @@ final class MenubarController {
     }
 
     private func buildMenu() {
+        // The alert sits at the very top and is hidden until set, so an undeliverable prompt is the
+        // first thing the user sees on opening the menu.
+        alertLine.isEnabled = false; alertLine.isHidden = true; menu.addItem(alertLine)
         for item in [statusLine, syncLine] { item.isEnabled = false; menu.addItem(item) }
         menu.addItem(.separator())
         for item in [claudeLine, codexLine] { item.isEnabled = false; menu.addItem(item) }
@@ -42,6 +47,7 @@ final class MenubarController {
     }
 
     func setLink(_ link: Link) { self.link = link; render() }
+    func setAlert(_ message: String?) { self.alert = message; render() }
     func setUsage(_ usage: Usage, errors: [String]) {
         self.usage = usage
         self.errors = errors
@@ -50,6 +56,13 @@ final class MenubarController {
     }
 
     private func render() {
+        if let alert = alert {
+            alertLine.title = "! \(alert) -- couldn't show prompt"
+            alertLine.isHidden = false
+        } else {
+            alertLine.isHidden = true
+        }
+
         switch link {
         case .scanning: statusLine.title = "Scanning..."
         case .connected(let name): statusLine.title = "Connected \(name)"
@@ -84,6 +97,8 @@ final class MenubarController {
     }
 
     private func barTitle() -> String {
+        // An active alert overrides the link state in the bar so it's visible without opening the menu.
+        if alert != nil { return "Beacon !" }
         switch link {
         case .connected: return "Beacon"
         case .scanning: return "Beacon..."

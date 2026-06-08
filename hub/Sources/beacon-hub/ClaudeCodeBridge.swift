@@ -9,6 +9,7 @@ import BeaconHubKit
 final class ClaudeCodeBridge {
     var onBuddyUpdate: ((BuddyState) -> Void)?
     var onClaudeUsage: ((ProviderUsage) -> Void)?   // Claude 5h/7d from statusline rate_limits
+    var onPromptUndeliverable: ((String) -> Void)?  // a prompt couldn't be shown (device offline)
 
     // Fixed localhost port so Claude Code's native http hooks use a static URL
     // (http://127.0.0.1:8765/hook). Also written to ~/.beacon-hub/port for the statusline shim.
@@ -34,6 +35,7 @@ final class ClaudeCodeBridge {
     private var pending: [String: Pending] = [:]
     private var activeId: String?
     private var idCounter: UInt32 = 0
+    private var deviceConnected = false   // mirrored from BeaconCentral; mutated only on `queue`.
 
     init() throws {
         let params = NWParameters.tcp
@@ -57,6 +59,12 @@ final class ClaudeCodeBridge {
     // resolve a held permission by the short id; approve=false denies. Safe to call from any thread.
     func resolve(id: String, approve: Bool) {
         queue.async { [weak self] in self?.finish(id: id, approve: approve, capped: false) }
+    }
+
+    // Mirror the BLE link state so an arriving prompt can be denied as "offline" instead of held
+    // invisibly until the cap. Safe to call from any thread.
+    func setDeviceConnected(_ connected: Bool) {
+        queue.async { [weak self] in self?.deviceConnected = connected }
     }
 
     // --- port file ---
@@ -139,10 +147,21 @@ final class ClaudeCodeBridge {
         let tool = (body["tool_name"] as? String) ?? (body["tool"] as? String) ?? "Tool"
         let hint = Self.commandHint(from: body["tool_input"]) ?? tool
 
+        // Device offline => the prompt can't be shown. Deny immediately (named) rather than hold it
+        // invisibly until the cap. Checked before busy: a disconnected device is undeliverable
+        // regardless of any pending prompt. Respond first, THEN raise the alert, so the contract-
+        // critical 2xx isn't gated on the callback's latency.
+        if !deviceConnected {
+            log(id: "-", decision: "auto-deny-offline")
+            respondDecision(conn, allow: false, event: event, message: "Beacon device offline")
+            onPromptUndeliverable?("Beacon device offline")
+            return
+        }
+
         // One active prompt at a time: auto-deny a second concurrent permission (labeled).
         if activeId != nil {
             log(id: "-", decision: "auto-deny-busy")
-            respondDecision(conn, allow: false, event: event)
+            respondDecision(conn, allow: false, event: event, message: "another prompt is pending")
             return
         }
 
@@ -281,10 +300,10 @@ final class ClaudeCodeBridge {
 
     // --- raw HTTP write ---
 
-    private func respondDecision(_ conn: NWConnection, allow: Bool, event: String) {
+    private func respondDecision(_ conn: NWConnection, allow: Bool, event: String, message: String? = nil) {
         // PreToolUse and PermissionRequest need DIFFERENT decision shapes (HookResponse picks the right
-        // one by event); the wrong shape silently fails to gate the tool.
-        respond(conn, status: "200 OK", json: HookResponse.permission(event: event, allow: allow))
+        // one by event); the wrong shape silently fails to gate the tool. `message` names a deny cause.
+        respond(conn, status: "200 OK", json: HookResponse.permission(event: event, allow: allow, message: message))
     }
 
     private func respondJSON(_ conn: NWConnection, _ obj: [String: Any]) {
