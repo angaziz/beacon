@@ -82,7 +82,7 @@ void setup() {
   if (!power_begin())   { LOGE("halt: power");   return; }
   delay(120);
   if (!display_begin()) { LOGE("halt: display"); return; }
-  display_brightness(nvs_get_brightness(180));   // restore persisted brightness (FR-SET-2)
+  display_brightness(nvs_get_brightness(204));   // restore persisted brightness (FR-SET-2); 204 = 80% default
   touch_begin();
   // Escape hatch: holding a finger on the screen during boot forces the setup portal even with stored
   // creds (recovery when you're on a new network and can't reach the saved one). ~0.6s sample window.

@@ -9,6 +9,7 @@
 #include "hal/power.h"
 #include "core/net.h"
 #include "core/nvs.h"
+#include "ui/screens/screen_common.h"
 #include "ui/wifi_panel.h"
 #include <Arduino.h>
 
@@ -101,7 +102,9 @@ static void build(lv_obj_t* page) {
   lv_obj_t* wrow = lv_obj_get_parent(s_wifi_val); lv_obj_add_flag(wrow, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(wrow, wifi_open_cb, LV_EVENT_CLICKED, NULL);
   s_batt_val     = make_row(list, t, "Battery", "--", NULL);
-  s_bright_val   = make_row(list, t, "Brightness", "80%", bright_tap);
+  s_bright_idx = bright_step_for_nvs(BRIGHT_STEPS, sizeof(BRIGHT_STEPS) / sizeof(BRIGHT_STEPS[0]));
+  char bb[8]; snprintf(bb, sizeof(bb), "%u%%", (unsigned)BRIGHT_STEPS[s_bright_idx]);
+  s_bright_val   = make_row(list, t, "Brightness", bb, bright_tap);
   s_theme_val    = make_row(list, t, "Theme", THEME_CATALOG[theme_index()].id, theme_tap);
   char tk[16];
   snprintf(tk, sizeof(tk), "%u assets", (unsigned)ds_get_finance_count());

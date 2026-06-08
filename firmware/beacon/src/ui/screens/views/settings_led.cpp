@@ -9,6 +9,7 @@
 #include "hal/power.h"
 #include "core/net.h"
 #include "core/nvs.h"
+#include "ui/screens/screen_common.h"
 #include "ui/wifi_panel.h"
 #include <Arduino.h>
 #include <ctype.h>
@@ -88,6 +89,7 @@ static void build(lv_obj_t* page) {
   lv_obj_t* bt = make_row(list, t, "BATTERY", "--", t->ink);
   s_batt_val = (lv_obj_t*)lv_obj_get_user_data(bt);
 
+  s_bright_idx = bright_step_for_nvs(BRIGHT_STEPS, sizeof(BRIGHT_STEPS) / sizeof(BRIGHT_STEPS[0]));
   char buf[12];
   snprintf(buf, sizeof(buf), "%u%%", (unsigned)BRIGHT_STEPS[s_bright_idx]);
   lv_obj_t* br = make_row(list, t, "BRIGHTNESS", buf, t->ink);

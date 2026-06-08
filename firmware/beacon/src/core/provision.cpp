@@ -14,12 +14,30 @@ static bool         s_restart_pending = false;
 static uint32_t     s_restart_at = 0;
 static String       s_options;   // <option> list, scanned ONCE at begin (cheap to serve per request)
 
+// Escape an SSID before it lands in the value="..." attribute below: a nearby AP can name itself with
+// quotes/angle-brackets/ampersands, which would otherwise break the form or inject markup on the portal.
+static String html_attr_escape(const String& s) {
+  String o; o.reserve(s.length() + 8);
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    switch (c) {
+      case '&': o += "&amp;";  break;
+      case '"': o += "&quot;"; break;
+      case '<': o += "&lt;";   break;
+      case '>': o += "&gt;";   break;
+      default:  o += c;
+    }
+  }
+  return o;
+}
+
 // Scan visible networks once and cache them as datalist <option>s. Done at begin(), not per request,
 // so serving the page on every captive-probe stays fast (a scan blocks ~2 s).
 static void scan_networks(void) {
   int n = WiFi.scanNetworks();
   s_options = "";
-  for (int i = 0; i < n && i < 20; i++) s_options += "<option value=\"" + WiFi.SSID(i) + "\">";
+  for (int i = 0; i < n && i < 20; i++)
+    s_options += "<option value=\"" + html_attr_escape(WiFi.SSID(i)) + "\">";
   WiFi.scanDelete();
 }
 

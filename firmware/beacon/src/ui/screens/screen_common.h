@@ -5,6 +5,19 @@
 #include "ui/styles.h"
 #include "ui/state_view.h"
 #include "ui/screen.h"
+#include "core/nvs.h"
+
+// Settings views cache a brightness step index; snap it to the persisted backlight on (re)build so the
+// shown step and the next tap match the restored value instead of a hardcoded default. Steps are PERCENT;
+// 204 (=80%) is the boot default, matching the value main.cpp restores when the key is unset.
+static inline uint8_t bright_step_for_nvs(const uint8_t* steps_pct, uint8_t n) {
+  int raw = nvs_get_brightness(204), best = 0, bd = 1 << 30;
+  for (uint8_t i = 0; i < n; i++) {
+    int d = raw - (int)steps_pct[i] * 255 / 100; if (d < 0) d = -d;
+    if (d < bd) { bd = d; best = i; }
+  }
+  return (uint8_t)best;
+}
 
 // Idempotent conditional style: remove first (no-op if absent) then add if on. Calling this
 // every update() never accumulates duplicate style refs (LVGL add_style appends unconditionally).

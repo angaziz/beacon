@@ -11,6 +11,7 @@
 #include "hal/power.h"
 #include "core/net.h"
 #include "core/nvs.h"
+#include "ui/screens/screen_common.h"
 #include "ui/wifi_panel.h"
 #include "src/misc/lv_async.h"   // lv_async_call (not pulled in by <lvgl.h>)
 #include <Arduino.h>
@@ -88,6 +89,7 @@ static void build(lv_obj_t* page) {
 
   const int top = SAFE_INSET + 36;
   const int pitch = 48;
+  s_bright_idx = bright_step_for_nvs(BRIGHT_PCT, sizeof(BRIGHT_PCT) / sizeof(BRIGHT_PCT[0]));
   char bb[8]; snprintf(bb, sizeof(bb), "%u%%", BRIGHT_PCT[s_bright_idx]);
   char tk[24]; snprintf(tk, sizeof(tk), "%u assets >", (unsigned)ds_get_finance_count());
 

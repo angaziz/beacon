@@ -14,6 +14,7 @@
 #include "hal/power.h"
 #include "core/net.h"
 #include "core/nvs.h"
+#include "ui/screens/screen_common.h"
 #include "ui/wifi_panel.h"
 #include <Arduino.h>
 static void update(void);
@@ -103,6 +104,7 @@ static void build(lv_obj_t* page) {
 
   s_batt_val = mk_row(page, t, y, "Battery", "--", t->ink_dim, NULL); y += dy;
 
+  s_bright_idx = bright_step_for_nvs(BRIGHT_PCT, sizeof(BRIGHT_PCT) / sizeof(BRIGHT_PCT[0]));
   char b[8];
   snprintf(b, sizeof(b), "%u%%", (unsigned)BRIGHT_PCT[s_bright_idx]);
   s_bright_val = mk_row(page, t, y, "Brightness", b, t->ink_dim, on_bright_tap); y += dy;

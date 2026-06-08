@@ -35,6 +35,7 @@ static void fetch_task(void*) {
   const int slots = 1 + DEFAULT_TICKERS_COUNT;
   for (int i = 0; i < slots; i++) s_next_due[i] = 0;   // all due at first connect
   bool was_up = false;
+  bool dn_marked = false;    // device-plane already flipped offline for the current down stretch
   bool geo_pending = true;   // resolve location once per (re)connect, before weather
   int  hk = 0;
 
@@ -45,11 +46,14 @@ static void fetch_task(void*) {
 
     bool up = net_is_up();
     if (!up) {
-      if (was_up) { LOGW("net down; device-plane offline"); mark_offline(); }
+      // Mark offline on the FIRST observed down too (boot with bad creds / WiFi disabled), not only on
+      // an up->down transition; net_service blocks on run() so a good-creds boot is already up here.
+      if (!dn_marked) { LOGW("net down; device-plane offline"); mark_offline(); dn_marked = true; }
       was_up = false;
     } else {
       if (!was_up) { for (int i = 0; i < slots; i++) s_next_due[i] = now; geo_pending = true; }  // reconnect => refetch soon
       was_up = true;
+      dn_marked = false;
 
       if (timekeep_has_time()) {                 // hold fetches until the clock is real (consistent stamps)
         if (geo_pending) {

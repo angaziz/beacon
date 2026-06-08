@@ -1,5 +1,6 @@
 #include "core/timekeep.h"
 #include "core/tz_map.h"
+#include "core/nvs.h"
 #include "config/location.h"
 #include "util/log.h"
 #include <Arduino.h>
@@ -61,7 +62,11 @@ static void on_sntp_sync(struct timeval* tv) {
 }
 
 void timekeep_init(void) {
-  apply_tz(DEFAULT_LOCATION.tz_id, true);     // localtime is correct the moment time is known
+  // Prefer the tz geoip last saved (nvs already open) so an offline reboot keeps the resolved zone;
+  // fall back to the default when unset or unmapped. localtime is correct the moment time is known.
+  float lat, lon; char tz[40];
+  bool have = nvs_get_location(&lat, &lon, tz, sizeof(tz));
+  apply_tz(have && tz[0] && timekeep_tz_supported(tz) ? tz : DEFAULT_LOCATION.tz_id, true);
   s_rtc_ok = s_rtc.begin(Wire);              // shared bus, already begun by power_begin()
   if (!s_rtc_ok) { LOGE("rtc PCF85063 init failed"); return; }
   RTC_DateTime d = s_rtc.getDateTime();
