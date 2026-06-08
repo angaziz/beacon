@@ -1,13 +1,13 @@
 // Calm Futurism SETTINGS view. Sparse list: big Doto row label on the left, dim value on the
 // right, hairline rules between rows. Rows: Wi-Fi, Brightness, Theme, Tickers, Sleep, About.
-// Interactive: Theme tap cycles theme (deferred via lv_async_call so theme_set does not delete
-// this object mid-event); Brightness tap cycles 40/60/80/100% (display_brightness inline).
+// Interactive: Theme tap opens the theme picker (theme_panel); Brightness tap cycles
+// 40/60/80/100% (display_brightness inline).
 // Background + chrome drawn by the carousel.
 #include "ui/screen.h"
 #include "ui/styles.h"
 #include "ui/state_view.h"
 #include "ui/theme.h"
-#include "ui/theme_catalog.h"
+#include "ui/theme_panel.h"
 #include "config/layout.h"
 #include "core/datastore.h"
 #include "hal/display.h"
@@ -24,9 +24,7 @@ static lv_obj_t *s_theme_val, *s_bright_val, *s_tickers_val, *s_batt_val, *s_wif
 static const uint8_t BRIGHT_PCT[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;  // default 80%
 
-static void do_next_theme(void*) { theme_set((theme_index() + 1) % THEME_COUNT); }
-
-static void on_theme_tap(lv_event_t* e) { (void)e; lv_async_call(do_next_theme, NULL); }
+static void on_theme_tap(lv_event_t* e) { (void)e; theme_panel_open(); }
 
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
 
@@ -97,7 +95,7 @@ static void build(lv_obj_t* page) {
   int y = SAFE_INSET + 36;
   const int dy = 48;
 
-  s_wifi_val = mk_row(page, t, y, "Wi-Fi", "not set", t->ink_dim, NULL); y += dy;
+  s_wifi_val = mk_row(page, t, y, "Wi-Fi", "not set >", t->ink_dim, NULL); y += dy;
   lv_obj_t* wifi_row = lv_obj_get_parent(s_wifi_val);   // tap the whole row (big touch target)
   lv_obj_add_flag(wifi_row, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(wifi_row, wifi_open_cb, LV_EVENT_CLICKED, NULL);
@@ -109,7 +107,8 @@ static void build(lv_obj_t* page) {
   snprintf(b, sizeof(b), "%u%%", (unsigned)BRIGHT_PCT[s_bright_idx]);
   s_bright_val = mk_row(page, t, y, "Brightness", b, t->ink_dim, on_bright_tap); y += dy;
 
-  s_theme_val = mk_row(page, t, y, "Theme", t->id ? t->id : "--", t->accent, on_theme_tap); y += dy;
+  char thv[20]; snprintf(thv, sizeof(thv), "%s >", t->id ? t->id : "--");
+  s_theme_val = mk_row(page, t, y, "Theme", thv, t->accent, on_theme_tap); y += dy;
 
   char tk[20];
   snprintf(tk, sizeof(tk), "%u assets >", (unsigned)ds_get_finance_count());
@@ -124,8 +123,8 @@ static void build(lv_obj_t* page) {
 
 static void update(void) {
   const beacon_theme_t* t = theme_active();
-  char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text(s_wifi_val, wbuf);
-  lv_label_set_text(s_theme_val, t->id ? t->id : "--");
+  char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text_fmt(s_wifi_val, "%s >", wbuf);
+  lv_label_set_text_fmt(s_theme_val, "%s >", t->id ? t->id : "--");
 
   char tk[20];
   snprintf(tk, sizeof(tk), "%u assets >", (unsigned)ds_get_finance_count());
