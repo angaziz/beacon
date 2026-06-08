@@ -71,7 +71,6 @@ public struct StatusFrame: Codable {
 // device->hub commands (tech.md §7.1). Parsed from a reassembled RX line.
 public enum DeviceCommand: Equatable {
     case permission(id: String, approve: Bool)
-    case launch(text: String)
 
     public static func parse(_ data: Data) -> DeviceCommand? {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -80,9 +79,6 @@ public enum DeviceCommand: Equatable {
         case "permission":
             guard let id = obj["id"] as? String, let dec = obj["decision"] as? String else { return nil }
             return .permission(id: id, approve: dec == "approve")
-        case "launch":
-            guard let text = obj["text"] as? String else { return nil }
-            return .launch(text: text)
         default:
             return nil
         }

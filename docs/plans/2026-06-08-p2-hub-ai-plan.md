@@ -19,7 +19,7 @@ package (CLI-buildable + Xcode-openable; a hand-generated `.xcodeproj` would not
 - `core/hublink_ble.{h,cpp}` — NUS GATT peripheral, bonded LESC (passkey, `-DHUBLINK_JUSTWORKS`
   fallback), inbound/outbound stream buffers, callback-enqueue + loop()-dispatch (rev-2/3).
 - `core/hub_task.{h,cpp}` — Core-0 wiring: `onFrame` -> `ds_set_usage`/`ds_set_buddy`,
-  edge-triggered `ds_set_hub_offline`, running-min heap tracker; `hub_send_permission`/`hub_send_launch`.
+  edge-triggered `ds_set_hub_offline`, running-min heap tracker; `hub_send_permission`.
 - 7 buddy views wired (3 callback shapes, send()-gated clear), `ui/pair_overlay.{h,cpp}`,
   `main.cpp` (`hub_task_start`), `lvgl_port.cpp` `-DBEACON_LVGL_PSRAM` flag.
 - **Toolchain reality:** the pioarduino esp32s3 libs back the Arduino BLE API with **NimBLE**, not
@@ -33,7 +33,7 @@ package (CLI-buildable + Xcode-openable; a hand-generated `.xcodeproj` would not
   reassembly, MTU-chunked writes, auto-reconnect), `UsagePoller` (Keychain Claude + `~/.codex` Codex),
   `ClaudeCodeBridge` (localhost `NWListener` HTTP, blocking permission hooks -> short-id prompt ->
   ~25 s fail-closed deny, session/statusline), `MenubarController`, `AppDelegate` (frame build +
-  heartbeat + reconnect resend + launch via `claude -p`), `main.swift` (`.accessory` agent).
+  heartbeat + reconnect resend), `main.swift` (`.accessory` agent).
 - `hub/CONTRACT.md` (frame/command FROZEN; upstream shapes DRAFT pending P2-0), `statusline-shim/`.
 
 ### On-hardware bring-up (2026-06-08) — VERIFIED on the Waveshare board + a real Mac
@@ -58,18 +58,29 @@ First end-to-end run; these findings + fixes are binding:
    every 45 s; `ClaudeUsageProvider` now caches the token (re-reads only on 401). "Always Allow"
    persists per build (ad-hoc signing changes identity each rebuild => one prompt after each rebuild).
 5. **Confirmed at runtime:** MTU negotiates to 247; bonding `OK (bonded)`; NimBLE host task healthy;
-   NTP+RTC time; `up=1 time=1`.
+   NTP+RTC time; `up=1 time=1`. **Codex usage relays to the device live.**
+6. **Claude `oauth/usage` 429s => Claude usage now comes from the statusline `rate_limits`.** The
+   unofficial oauth endpoint returns HTTP 429 (Anthropic's subscription-limits change). Claude Code's
+   statusline JSON carries `rate_limits.five_hour/seven_day` (first-party, no token), so the hub reads
+   Claude 5h/7d from there: `ClaudeCodeBridge` emits `onClaudeUsage`, `AppDelegate` prefers it over the
+   poller (oauth kept as best-effort fallback + a `User-Agent` header). Codex unchanged. `tech.md`
+   §7.2/§7.3 + spec §4.1/§4.3 + `CONTRACT.md` §C.1/§C.4 updated.
+7. **Claude Code wiring (native http hooks + fixed port).** `ClaudeCodeBridge` binds a fixed
+   `127.0.0.1:8765` so Claude Code's native `http` hooks use a static URL. `PreToolUse` (scoped, e.g.
+   `Bash`) drives approve/deny; session hooks drive idle. The **statusline shim wraps the user's
+   existing renderer** (forwards JSON to the hub, then delegates) so the status bar is unchanged.
+   Config: `hub/claude-code-settings.snippet.json`; `~/.claude/settings.json` `statusLine` points at the
+   wrapping shim. Permission response is `hookSpecificOutput.permissionDecision` (`timeout` in seconds).
 
 **Remaining (human-gated):**
-- **Buddy round-trip acceptance** (`prd.md` §9 / FR-BUDDY-2/3): wire Claude Code's permission hook to
-  the hub (`~/.beacon-hub/port`) + the statusline shim, then confirm a real tool prompt
-  approves/denies on the device within the hook timeout, and kill-hub => `ST_HUB_OFFLINE`. (Usage path
-  is already accepted; the buddy path is the last unverified MUST.)
+- **Buddy permission round-trip acceptance** (`prd.md` §9 / FR-BUDDY-2/3): with the `PreToolUse` http
+  hook configured, confirm a real tool prompt approves/denies on the device within the hook timeout,
+  and kill-hub => `ST_HUB_OFFLINE`. (Usage path - Codex live, Claude via statusline - is accepted; the
+  permission round-trip is the last unverified MUST.)
 - **P2-0** capture — replace the DRAFT upstream shapes in `hub/CONTRACT.md` with real redacted
   captures; settles the `TODO(P2-0)` stubs (Claude/Codex 401 refresh, Codex local fallback, exact
   hook/statusline field names + permission-hook response shape).
-- **P2-F (optional):** a device-side launch affordance calling `hub_send_launch` (FR-BUDDY-4, SHOULD;
-  the hub side already runs `claude -p`).
+- **P2-F (optional):** menubar polish (per-provider mirror, pairing/forget-bond UX).
 
 ## 0. BLUF
 
@@ -80,7 +91,7 @@ hit a stub. P2 builds the **hub plane** that feeds them real data:
 
 1. **Device:** a Bluedroid `HubLink` impl (NUS peripheral, bonded LESC, `\n`-framed JSON) + a Core-0
    wiring task that parses inbound frames into `ds_set_usage`/`ds_set_buddy`, flips to
-   `ST_HUB_OFFLINE` on disconnect, and sends Approve/Deny/launch via `HubLink::send`.
+   `ST_HUB_OFFLINE` on disconnect, and sends Approve/Deny via `HubLink::send`.
 2. **Hub (`hub/`, Swift):** a macOS menubar app that polls Claude+Codex usage (tokens stay on the
    Mac), ingests Claude Code hooks for buddy state + permission prompts, and bridges both to the
    device over BLE — with auto-reconnect and a clear connection status.
@@ -97,7 +108,7 @@ screen-side edits are in the 7 buddy views' existing decide paths (3 distinct ca
 |---|---|---|
 | Contracts | `core/hublink.h` (iface), `records.h` (`usage_rec_t`/`buddy_rec_t`), `datastore.{h,cpp}` setters incl. `ds_set_hub_offline` | (none — build against them) |
 | Device BLE | none (P0 spike was advertising-only, separate sketch) | `core/hub_proto.{h,cpp}` (codec), `core/hublink_ble.{h,cpp}` (Bluedroid), `core/hub_task.{h,cpp}` (wiring) |
-| Device screens | 7 usage + 7 buddy views render records + state; buddy decide paths are stubs (3 shapes) | 7 bespoke decide-path edits => `hub_send_permission`; optional preset launch; a Settings pair overlay |
+| Device screens | 7 usage + 7 buddy views render records + state; buddy decide paths are stubs (3 shapes) | 7 bespoke decide-path edits => `hub_send_permission`; a Settings pair overlay |
 | Hub | none | `hub/` Xcode app: `UsagePoller`, `ClaudeCodeBridge`, `BeaconCentral`, `StatusFrameBuilder`, menubar |
 | Fixtures | none | `hub/CONTRACT.md` recorded usage + hook payloads (captured P2-0) |
 | Proof | spike: 160 KB free under advertising + insecure TLS | heap re-measure under bonded link + cert TLS + LVGL |
@@ -179,7 +190,7 @@ features. **P2-0 gates P2-A.**
 ### P2-A — Device protocol codec + Bluedroid HubLink + pair overlay  (`tech.md` §7.0/§7.1, FR-HUB-3)
 - **`core/hub_proto.{h,cpp}`** (Arduino-free): `hub_reassembler` (split on `\n`, cap+drop overflow);
   `hub_parse_status` (`v==1` gate, null=>`pct=-1`, prompt present/absent => idle, truncate to `*_LEN`);
-  `hub_build_permission(buf,id,approve)` / `hub_build_launch(buf,text)` (newline-terminated, id-echo).
+  `hub_build_permission(buf,id,approve)` (newline-terminated, id-echo).
   Add to `[env:native]` `build_src_filter`. Built against the **P2-0** fixtures.
 - **`core/hublink_ble.{h,cpp}`** (device-only): `class HubLinkBle : public HubLink`. Bluedroid GATT
   server, NUS UUIDs (`tech.md` §7.1), advertise `Beacon-<chipid>`; LESC + bonding + allowlist, IO cap
@@ -250,10 +261,8 @@ features. **P2-0 gates P2-A.**
 - **Human test:** a real CC tool prompt appears on the device; Approve/Deny resolves it within the
   hook timeout; idle state reflects live counts.
 
-### P2-F — Launch + polish  (FR-BUDDY-4, FR-HUB-4 — SHOULD, optional last)
-- **Launch (D7, preset-only):** device affordance => `hub_send_launch(preset)` => hub runs
-  `claude -p "<preset>"` in a configured working dir. No free-form text (no device keyboard).
-- Menubar polish: per-provider usage mirror, launch working-dir picker, pairing/forget-bond UX.
+### P2-F — Polish  (optional last)
+- Menubar polish: per-provider usage mirror, pairing/forget-bond UX.
 - Finalize `hub/CONTRACT.md`; update `tech.md` §2 (heap number), README P2 box, `prd.md` status.
 
 ## 4. New / touched files

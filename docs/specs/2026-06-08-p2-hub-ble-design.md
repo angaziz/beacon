@@ -27,7 +27,7 @@ P2 adds the **hub plane** end to end:
   | ClaudeCodeBridge  http hooks server    |                  |  loop(): reassemble \n         |
   |   - PreToolUse(blocking) -> prompt     |                  |   -> onFrame -> parse JSON     |
   |   - statusline/Session  -> idle state  | <--RX write----  |   -> ds_set_usage/ds_set_buddy |
-  | StatusFrameBuilder  merge -> NDJSON    |   command frame  | decide/launch -> HubLink.send  |
+  | StatusFrameBuilder  merge -> NDJSON    |   command frame  | decide -> HubLink.send         |
   | Menubar: link status / pairing         |                  | disconnect -> ds_set_hub_offline|
   +--------------------------------------+                  | hub_task (Core-0) pumps loop() |
    holds ALL provider secrets (Keychain / ~/.codex);         +--------------------------------+
@@ -42,7 +42,7 @@ Nothing on the device holds a provider token. The protocol, characteristics, and
 | In P2 | Out (later / non-goal) |
 |---|---|
 | Device Bluedroid `HubLink` impl (NUS peripheral, bonded LESC, framing, send queue) | NimBLE (banned, `tech.md` §5); LAN-WS fallback (kept abstract, not built) |
-| Device wiring: `onFrame` => DataStore; disconnect => hub-offline; buddy decide/launch => `send()` | New device screens or view layouts (the 14 views already exist) |
+| Device wiring: `onFrame` => DataStore; disconnect => hub-offline; buddy decide => `send()` | New device screens or view layouts (the 14 views already exist) |
 | macOS hub: usage pollers, Claude Code hook bridge, BLE central, menubar | STT/voice (FR-VOICE, Explore); Windows/Linux hub |
 | Heap re-measure under active bonded BLE + cert TLS + LVGL (`tech.md` §8, closes the coexistence proof) | Battery-current power profiling (deferred, `tech.md` §8) |
 | `hub/CONTRACT.md` recorded fixtures (usage + hook payloads), captured at P2-0 | Answering `AskUserQuestion`, "don't ask again", typing into a live TUI (FR-BUDDY-5) |
@@ -52,13 +52,12 @@ Nothing on the device holds a provider token. The protocol, characteristics, and
 | # | Decision | Choice | Rationale / alternative |
 |---|---|---|---|
 | **D1** | Codex usage source | **Network** `GET chatgpt.com/backend-api/wham/usage` primary; local `~/.codex/sessions/**/rollout-*.jsonl` `rate_limits` as offline fallback | Network is freshest + matches the Claude path; the local cache only updates when Codex runs (`research` §2.1). |
-| **D2** (confirmed) | Claude/Codex token expiry | **Retry once, else show error.** Use the stored access token; on **401**, attempt **one** refresh via the stored refresh-token. If refresh fails: emit that provider's windows as `null` (device shows "--") AND surface the actionable reason in the **menubar** (e.g. "Claude token expired - re-login") | Owner chose retry-once + honest error. OAuth tokens expire ~hourly; without refresh, usage blanks whenever the CLI is idle. **Refresh field names + endpoint are unverified - capture in P2-0 before implementing (§4.2).** The device record has one hdr (no per-provider error state), so "unavailable" is expressed as `null` windows on-device + the error reason on the Mac (where it's actionable). |
+| **D2** | Claude usage source | Read Claude 5h/7d from Claude Code's statusline `rate_limits` (first-party, no token, no endpoint, §4.1/§4.3). The `oauth/usage` endpoint is a best-effort fallback only (it 429s): cached Keychain token, retry once on 401, else `null` windows (device "--") + a menubar reason. | Statusline is the reliable Claude source while a CC session is open; between sessions Claude shows last-synced + age. |
 | **D3** (confirmed) | BLE pairing UX | **Best standard security that stays seamless.** Mandatory: **LE Secure Connections + bonding** (allowlist, encrypted chars). Preferred: **passkey** (device = DisplayOnly, Settings "Pair" overlay shows a 6-digit code; macOS pairing is OS-mediated - CoreBluetooth triggers encryption and macOS shows the system dialog, the hub does not handle the passkey in code). **P2-A proves the device-DisplayOnly + Mac-passkey UX on real hardware and decides**: keep passkey if seamless; **fall back to Just-Works bonding** (still bonded + encrypted, no MITM) if the passkey flow is clunky on core 3.3.x / macOS | Owner chose "best standard practice balanced with seamless UX". LESC+bonding is the modern BLE standard either way; the passkey is the MITM upgrade, gated on it not wrecking the UX. |
 | **D4** (confirmed) | Swift project shape | **Xcode project** under `hub/` producing a `.app` bundle (`LSUIElement`, SwiftUI `MenuBarExtra`, macOS 13+) | Owner chose the most seamless build/run experience. `MenuBarExtra` agent app needs a bundle + Info.plist; Xcode is the path of least resistance. Needs Xcode on the owner's Mac (present). |
 | **D5** | Claude Code -> hub transport | Claude Code **`http` hooks** POST to `http://127.0.0.1:<port>` on the hub's local server; the permission hook is held open (blocking) until the device decides — **design target < 5 s round-trip** (`tech.md` §8) — with a **fail-closed cap at ~25 s** (sits below Claude Code's ~30 s hook timeout) => returns `permissionDecision`; cap reached => `deny` + label. Handle **both** `PreToolUse` and `PermissionRequest` hook names | `research` §2.2 / `tech.md` §7.3/§8, FR-BUDDY-3. The ~25 s is the ceiling, not the SLA. Localhost only; no inbound network. Statusline via a shim script (D6). |
 | **D6** | Token/context metrics | Hub ships a tiny **statusline shim** the owner sets as their Claude Code `statusLine` command; it forwards the statusline JSON to the hub and prints the original line. Session/idle via `SessionStart`/`Stop`/`Notification` http hooks | Statusline is the only surface with live token/context (`research` §2.2). |
-| **D7** | Launch (FR-BUDDY-4, SHOULD) | **Preset commands only** in v1 (device has no keyboard); device sends `{cmd:"launch","text":"<preset>"}`, hub runs `claude -p` in a configured working dir. Free-form/dictation deferred to P3+ | Avoids an on-device keyboard; matches FR-BUDDY-4 "text/dictated later". Last, optional chunk. |
-| **D8** | `loop()` pump + callback context | Dedicated **Core-0 `hub` task** at ~50 Hz pumps `HubLink::loop()`. Bluedroid GATT RX/notify callbacks run in the **BT stack task** and may ONLY copy bytes into a queue + return; `loop()` reassembles frames and invokes `onFrame` (and parses JSON / writes the DataStore) on the `hub` task | Keeps BLE off Core-1 (LVGL) AND honors `hublink.h:9` ("`onFrame` ... Called from loop() context"). `fetch_task` (device-plane) stays separate; both Core-0. |
+| **D7** | `loop()` pump + callback context | Dedicated **Core-0 `hub` task** at ~50 Hz pumps `HubLink::loop()`. Bluedroid GATT RX/notify callbacks run in the **BT stack task** and may ONLY copy bytes into a queue + return; `loop()` reassembles frames and invokes `onFrame` (and parses JSON / writes the DataStore) on the `hub` task | Keeps BLE off Core-1 (LVGL) AND honors `hublink.h:9` ("`onFrame` ... Called from loop() context"). `fetch_task` (device-plane) stays separate; both Core-0. |
 
 ## 3. Device side
 
@@ -81,9 +80,9 @@ parse/format TUs are Arduino-free, only `<ArduinoJson.h>` + `records.h` + libc):
     Code hook request ids can be longer; the **hub** synthesizes a short BLE-safe id (<= 23 chars) and
     maps it internally to the full hook id (documented in `hub/CONTRACT.md`). The device echoes the
     short id verbatim; the hub resolves it back. The device never sees the full hook id.
-- **Outbound build** `hub_build_permission(buf, id, approve)` / `hub_build_launch(buf, text)` => the
-  exact §7.1 command JSON, newline-terminated. Echoes the originating (short) `prompt.id` (the hub
-  rejects stale/unknown ids with `err`).
+- **Outbound build** `hub_build_permission(buf, id, approve)` => the exact §7.1 command JSON,
+  newline-terminated. Echoes the originating (short) `prompt.id` (the hub rejects stale/unknown ids
+  with `err`).
 - **Ack handling** `hub_parse_ack(...)`: `{ack,ok}` / `{err,id}` — logged; v1 does not retry on `err`.
 
 ### 3.2 `core/hublink_ble.{h,cpp}` — Bluedroid `HubLink` implementation
@@ -98,7 +97,7 @@ uses only the stack-agnostic wrapper, no raw `esp_ble_*`):
   `mtu-3` and rely on `\n` framing (a frame may span notifies; a notify may hold a fragment).
 - **Security:** LESC, bonding, encrypted RX/TX (`esp_ble_gap_set_security_param`); IO cap DisplayOnly
   (passkey shown on device, D3). Allowlist bonded peers; a non-bonded central cannot write RX.
-- **Inbound (callback-context rule, D8):** the RX-write callback runs in the **BT stack task** and may
+- **Inbound (callback-context rule, D7):** the RX-write callback runs in the **BT stack task** and may
   only **copy the bytes into an inbound FreeRTOS queue and return** — it does NOT reassemble, parse,
   or touch the DataStore. `loop()` (Core-0 `hub` task) drains the queue, feeds `hub_reassembler`, and
   invokes the registered `hub_frame_cb` for each whole frame. This honors `hublink.h:9` ("`onFrame`
@@ -153,8 +152,6 @@ call it — 7 bespoke edits across the 3 shapes, not a mechanical find-replace. 
   ~25 s cap, so the device never runs a permission timer.
 - keeps the existing guard that ignores taps while `ST_HUB_OFFLINE`/`ST_RECONNECTING`.
 
-**Launch (D7, optional):** a preset-command affordance => `hub_send_launch(preset)`. Last chunk.
-
 **No view layout changes**, and FR-BUDDY-5 stays satisfied: the views expose only Approve/Deny + idle
 stats — no multiple-choice, no "don't ask again", no text entry (verified as an explicit acceptance
 check in the plan).
@@ -168,9 +165,13 @@ force-unwraps outside tests; isolate token handling; never log token contents).
 
 - **`UsagePoller`** — every 30–60 s (`tech.md` §6; <= 60 s connected per FR-USAGE-2), behind a
   `UsageProvider` protocol (isolate the unofficial endpoints, `tech.md` §13):
-  - **Claude:** OAuth token from Keychain (service `Claude Code-credentials`);
-    `GET api.anthropic.com/api/oauth/usage` (`Authorization: Bearer`, `anthropic-beta: oauth-2025-04-20`).
-    Map `five_hour.utilization`->`h5.pct`, `resets_at` (ISO)->`h5.reset` (epoch); `seven_day`->`d7`.
+  - **Claude (primary = statusline; oauth = fallback):** the OAuth endpoint
+    `GET api.anthropic.com/api/oauth/usage` (Keychain token + `anthropic-beta` + `User-Agent`) now
+    **429s in practice** (Anthropic's subscription-limits change, hardware-confirmed), so it is only a
+    best-effort fallback. **Live Claude 5h/7d come from Claude Code's statusline `rate_limits`**
+    (ClaudeCodeBridge, below) — first-party, no token, no endpoint, 429-proof. When the oauth endpoint
+    does answer: `five_hour.utilization`->`h5.pct`, `resets_at`->reset; `seven_day`->`d7`.
+    The Keychain token is cached (read once, re-read on 401) so macOS prompts once per run, not per poll.
   - **Codex (D1):** `~/.codex/auth.json` -> `wham/usage` (`Authorization` + `chatgpt-account-id`);
     `primary_window`->`h5`, `secondary_window`->`d7` (`reset_at` already epoch). Local fallback per D1.
   - **Normalize** to §7.2: `pct` int 0–100 or `null`; `reset` epoch seconds. Unavailable
@@ -178,8 +179,8 @@ force-unwraps outside tests; isolate token handling; never log token contents).
     menubar error reason — the actionable surface is the Mac, the device just shows "--"). **The
     frame's usage block reflects the last successful poll; on prolonged failure emit `null`, never a
     re-asserted stale number** (§3.3).
-- **`ClaudeCodeBridge`** — a local HTTP server bound to `127.0.0.1` (ephemeral port, written to a
-  known config path the hooks read):
+- **`ClaudeCodeBridge`** — a local HTTP server bound to `127.0.0.1:8765` (**fixed port** so Claude
+  Code's native `http` hooks use a static URL; also written to `~/.beacon-hub/port` for the shim):
   - **Permission hook (blocking, `PreToolUse` and/or `PermissionRequest`, D5):** on POST, mint a short
     BLE-safe `id` (mapped to the full hook request id), build `prompt{id,tool,hint}`, publish it into
     the buddy block, and **hold the HTTP response open** until the device returns a matching decision
@@ -190,7 +191,9 @@ force-unwraps outside tests; isolate token handling; never log token contents).
     FIFO**; if the queue would stack two long holds, the second is **auto-denied + labeled** (default;
     document the exact policy in `hub/CONTRACT.md`). The device side needs no change.
   - **Session/idle:** `SessionStart`/`Stop`/`Notification` http hooks => running/waiting + entries.
-    **Token/context:** the statusline shim (D6) POSTs statusline JSON => `tokens`/`context_pct`.
+    **Token/context + Claude usage:** the statusline shim (D6) POSTs the statusline JSON =>
+    `context_window.{used_percentage,total_*_tokens}` (buddy ctx/tokens) AND
+    `rate_limits.{five_hour,seven_day}` (=> Claude `h5`/`d7` usage — the 429-proof source above).
   - **Logging:** hub logs only `id` + decision + timestamp (`tech.md` §9) — **never the `hint`/command
     string** (which carries the actual command, e.g. `rm -rf ...`) and never token contents.
 - **`BeaconCentral`** (CoreBluetooth `CBCentralManager`) — scan for the `Beacon` name prefix +
@@ -203,7 +206,7 @@ force-unwraps outside tests; isolate token handling; never log token contents).
   serializes to newline-delimited JSON, chunks to the negotiated MTU, writes via `BeaconCentral`.
   Sends on change + a heartbeat; **resends a full frame on (re)connect** (the device relies on this).
 - **Menubar (`MenuBarExtra`)** — connection status (scanning / connected `<name>` / disconnected),
-  last-sync age, the four usage values (mirror), a **Pair** action, Launch working-dir setting, Quit.
+  last-sync age, the four usage values (mirror), a **Pair** action, Quit.
 
 ### 4.2 `hub/CONTRACT.md` — recorded fixtures (captured at **P2-0**, before P2-A; `tech.md` §7.3)
 
@@ -229,6 +232,16 @@ Findings from the first on-hardware run, now binding:
 - **RX writes use `.withResponse`** (acknowledged/flow-controlled). `.withoutResponse` drops under
   WiFi+BLE coexistence congestion and corrupts multi-chunk frames (device logs `bad/ignored frame`).
 - **Keychain token is cached** (read once, re-read on 401) so macOS prompts once per run, not per poll.
+- **Claude usage comes from the statusline (rate_limits), not the oauth endpoint.** `oauth/usage` 429s
+  in practice; Claude Code's statusline carries `rate_limits.five_hour/seven_day`, so the hub reads
+  Claude usage from there (works while a CC session is open; between sessions the device shows
+  last-synced + age). Codex stays on its `~/.codex` endpoint.
+- **Bridge binds a fixed `127.0.0.1:8765`** so Claude Code's native `http` hooks use a static URL.
+  Hooks: `PreToolUse` (scoped, e.g. `Bash`) for approve/deny; `SessionStart`/`Stop`/`Notification` for
+  idle. Config snippet: `hub/claude-code-settings.snippet.json`.
+- **The statusline shim WRAPS the user's existing renderer** — it forwards the JSON to the hub then
+  delegates to the real statusline command (passed as args), so the user's status bar is unchanged.
+  Set in `~/.claude/settings.json` `statusLine.command`.
 - **Device firmware ships with `-DBEACON_LVGL_PSRAM`** (LVGL buffers in PSRAM) — required for the BLE +
   WiFi + TLS coexistence to hold the internal-heap floor (§7 / `tech.md` §2).
 
@@ -288,7 +301,7 @@ TLS fetch + the full LVGL UI with a heavy theme**.
 - **Host (`pio test -e native`):** `test_hub_proto` — table-driven over the **P2-0** `hub/CONTRACT.md`
   fixtures (real field names): frame reassembly (split across chunk boundaries, partial + overflow),
   status parse (null windows, missing provider, prompt present/absent, `v != 1` reject, id truncation),
-  command build (short-id echo, launch). All Arduino-free; added to `[env:native]` `build_src_filter`.
+  command build (short-id echo). All Arduino-free; added to `[env:native]` `build_src_filter`.
 - **Device:** advertise + **bond from nRF Connect** and prove, before any Swift exists: encrypted
   write is **rejected** before bonding and accepted after; TX subscribe + notify chunking; allowlist;
   reconnect. Then the hub app drives a live link.

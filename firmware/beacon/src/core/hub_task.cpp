@@ -59,11 +59,3 @@ bool hub_send_permission(const char* id, bool approve) {
   LOGI("buddy decide -> hub id=%s approve=%d sent=%d", id, approve, ok);
   return ok;
 }
-
-bool hub_send_launch(const char* text) {
-  if (!g_link) return false;
-  char buf[160];
-  size_t n = hub_build_launch(buf, sizeof(buf), text);
-  if (!n) return false;
-  return g_link->send(buf, n);
-}

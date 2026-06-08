@@ -1,27 +1,29 @@
 #!/usr/bin/env bash
-# Beacon statusline shim (P2, D6). Set this as your Claude Code `statusLine` command so the hub gets
-# live token/context metrics (the only surface that exposes them, docs/research §2.2). It forwards the
-# statusline JSON (stdin) to the hub's local HTTP server and still prints a status line to stdout so
-# Claude Code's statusline keeps working. No tokens are involved; localhost only.
+# Beacon statusline shim (P2, D6). Taps Claude Code's statusline JSON: forwards it to the hub (so the
+# hub gets live Claude usage rate_limits + context/tokens -- docs/research §2.2), then DELEGATES to your
+# real statusline renderer passed as args, so your status line is unchanged. No tokens involved;
+# localhost only; never blocks the render.
 #
-# Install: in ~/.claude/settings.json -> "statusLine": { "type": "command",
-#   "command": "/absolute/path/to/hub/statusline-shim/beacon-statusline" }
+# Configure in ~/.claude/settings.json (wraps your existing renderer):
+#   "statusLine": { "type": "command",
+#     "command": "/abs/path/hub/statusline-shim/beacon-statusline bash /Users/you/.claude/statusline-command.sh" }
+# With no args it prints a minimal line.
 
 input="$(cat)"
 
-# Forward to the hub if it is running (it writes its ephemeral port here at launch). Fire-and-forget,
-# 1s cap, never block Claude Code's statusline render.
-port_file="$HOME/.beacon-hub/port"
-if [ -r "$port_file" ]; then
-  port="$(cat "$port_file" 2>/dev/null)"
-  [ -n "$port" ] && curl -s -m 1 -X POST "http://127.0.0.1:${port}/statusline" \
-    -H 'Content-Type: application/json' --data-binary "$input" >/dev/null 2>&1 &
-fi
+# Forward to the hub if it is running. Fixed port 8765 (ClaudeCodeBridge), with the port file as a
+# fallback. Fire-and-forget, 1s cap, so a stopped hub never delays your prompt.
+port="$(cat "$HOME/.beacon-hub/port" 2>/dev/null || echo 8765)"
+curl -s -m 1 -X POST "http://127.0.0.1:${port}/statusline" \
+  -H 'Content-Type: application/json' --data-binary "$input" >/dev/null 2>&1 &
 
-# Print a minimal status line (customize freely). Best-effort model name from the payload.
-model="$(printf '%s' "$input" | /usr/bin/python3 -c 'import sys,json
+if [ "$#" -gt 0 ]; then
+  printf '%s' "$input" | "$@"        # delegate to your real renderer (same JSON on its stdin)
+else
+  model="$(printf '%s' "$input" | /usr/bin/python3 -c 'import sys,json
 try:
-    d=json.load(sys.stdin); print(d.get("model",{}).get("display_name","claude"))
+    print(json.load(sys.stdin).get("model",{}).get("display_name","claude"))
 except Exception:
     print("claude")' 2>/dev/null)"
-printf '%s' "${model:-claude}"
+  printf '%s' "${model:-claude}"
+fi

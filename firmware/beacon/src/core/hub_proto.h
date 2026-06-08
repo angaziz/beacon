@@ -44,7 +44,6 @@ bool hub_parse_status(const char* json, size_t len,
 // Write a newline-terminated command frame into buf. Returns bytes written (incl. the '\n', excl. the
 // NUL), or 0 on overflow / invalid args. `id` echoes the originating (short) prompt id.
 size_t hub_build_permission(char* buf, size_t cap, const char* id, bool approve);
-size_t hub_build_launch(char* buf, size_t cap, const char* text);
 
 // --- Inbound: hub -> device ack/err (after a command) ---
 typedef struct { char id[BUDDY_ID_LEN]; bool ok; bool is_err; } hub_ack_t;

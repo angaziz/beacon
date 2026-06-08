@@ -28,7 +28,6 @@ the device keeps an absent block's last values). A null/omitted window `pct` => 
 
 ```json
 {"v":1,"cmd":"permission","id":"p07","decision":"approve"}   // or "deny"
-{"v":1,"cmd":"launch","text":"run the tests"}
 {"v":1,"ack":"p07","ok":true}
 {"v":1,"err":"unknown_prompt_id","id":"p07"}
 ```
@@ -36,15 +35,14 @@ the device keeps an absent block's last values). A null/omitted window `pct` => 
 
 ## C. Upstream shapes (DRAFT from research — REPLACE with real captures in P2-0)
 
-### C.1 Claude usage — `GET api.anthropic.com/api/oauth/usage`
-Headers: `Authorization: Bearer <tok>`, `anthropic-beta: oauth-2025-04-20`. Token: Keychain
-`Claude Code-credentials` (JSON; access token at `claudeAiOauth.accessToken`; refresh token + expiry
-also present — **capture the exact key names for D2 refresh**). Draft body:
-```json
-{"five_hour":{"utilization":24.0,"resets_at":"2026-06-05T14:20:00Z"},
- "seven_day":{"utilization":51.0,"resets_at":"2026-06-07T23:59:00Z"}}
-```
-Normalizes to `usage.claude` (`utilization`->`pct`, ISO `resets_at`->epoch).
+### C.1 Claude usage — statusline `rate_limits` (PRIMARY); `oauth/usage` (FALLBACK, 429s)
+**Hardware finding:** `GET api.anthropic.com/api/oauth/usage` now **returns 429** (Anthropic's
+subscription-limits change), so it is only a best-effort fallback. **Live Claude usage comes from the
+statusline `rate_limits` (§C.4)** — first-party, no token. Fallback endpoint headers:
+`Authorization: Bearer <tok>`, `anthropic-beta: oauth-2025-04-20`, `User-Agent`. Token: Keychain
+`Claude Code-credentials` (access token at `claudeAiOauth.accessToken`; refresh/expiry also present).
+Fallback body (when it answers): `{"five_hour":{"utilization":24.0,"resets_at":"...ISO"},"seven_day":{...}}`
+=> `usage.claude` (`utilization`->`pct`, ISO `resets_at`->epoch).
 
 ### C.2 Codex usage — `GET chatgpt.com/backend-api/wham/usage`
 Headers: `Authorization: Bearer <tok>`, `chatgpt-account-id: <id>`. Token: `~/.codex/auth.json`
@@ -56,21 +54,31 @@ Headers: `Authorization: Bearer <tok>`, `chatgpt-account-id: <id>`. Token: `~/.c
 ```
 Normalizes to `usage.codex`.
 
-### C.3 Claude Code permission hook (`PreToolUse` / `PermissionRequest` http hook) — DRAFT
-**Capture both hook names in P2-0** and confirm whether they alias + the exact request-id, tool, and
-command-hint field names, and the exact **response** shape the hook expects. Draft request body:
+### C.3 Claude Code permission hook (`PreToolUse` / `PermissionRequest`) — CONFIRMED (CC v2.1.x docs)
+Claude Code supports native **`"type":"http"`** hooks (no curl forwarder needed). `PreToolUse` and
+`PermissionRequest` are **distinct** events; use **`PreToolUse`** to intercept early. Request body:
 ```json
-{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/build"}}
+{"session_id":"abc","tool_use_id":"toolu_01","hook_event_name":"PreToolUse",
+ "tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/build","description":"..."}}
 ```
-Draft response (fail-closed default is `deny`):
+Hint = `tool_input.command` (Bash) | `file_path` | `description`. Correlation id = `tool_use_id`/
+`session_id` (the hub mints its own short BLE id and maps it). Response (exit 0 + 2xx body):
 ```json
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow",
+ "permissionDecisionReason":"Approved on Beacon device"}}
 ```
+`permissionDecision` in {`allow`,`deny`,`ask`}; precedence `deny`>`ask`>`allow`. Hook `timeout` is in
+**seconds** (config: 35 for PreToolUse to cover the device's ~25 s window). Non-2xx/timeout =
+non-blocking (CC proceeds) -- so the hub MUST return `deny` within the window; never let it hang.
 
-### C.4 Session / statusline — DRAFT
-`SessionStart`/`Stop`/`Notification` http hooks => buddy idle (running/waiting/entries). Statusline
-shim POSTs the statusline JSON => `tokens`/`context_pct`. **Capture the exact statusline + session
-field names in P2-0** (`docs/research` §2.2).
+### C.4 Session / statusline — CONFIRMED (CC v2.1.x docs)
+`SessionStart`(matcher startup/resume/clear/compact)/`Stop`/`Notification` http hooks => buddy idle.
+Stop body has `stop_reason`; Notification has `message`. **Statusline** (`statusLine` = `type:command`)
+receives JSON with `context_window.{used_percentage,total_input_tokens,total_output_tokens}` (=> buddy
+`context_pct`/`tokens`) and `rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}` (=> **Claude
+`usage.h5`/`d7`** — now the PRIMARY Claude source, §C.1). The shim **wraps the user's existing
+statusline renderer** (forwards the JSON to `127.0.0.1:8765/statusline`, then delegates to the real
+command passed as args), so the user's status bar is unchanged. Bind port is the fixed **8765**.
 
 ## D. Hub-side policies
 

@@ -10,7 +10,7 @@
 
 ## 1. Vision & scope
 
-**BLUF:** Beacon is a 2.16" AMOLED desk device that, at a glance, shows a developer their Claude Code / Codex usage, live markets, weather/time, and now-playing music, and lets them approve Claude tool-permission prompts and launch tasks — without breaking focus on their Mac. It is a **companion to the Mac** (private AI data over BLE) and **independent over WiFi** (public data direct), themeable, gesture-driven.
+**BLUF:** Beacon is a 2.16" AMOLED desk device that, at a glance, shows a developer their Claude Code / Codex usage, live markets, weather/time, and now-playing music, and lets them approve Claude tool-permission prompts — without breaking focus on their Mac. It is a **companion to the Mac** (private AI data over BLE) and **independent over WiFi** (public data direct), themeable, gesture-driven.
 
 **In scope (MVP):** six on-device screens (Home, Finance, AI Usage, Coding Buddy, Now-Playing, Settings), the 7-theme engine, and a macOS hub app that feeds the two BLE-fed screens.
 
@@ -39,7 +39,7 @@ Single owner-user: a developer at their desk. Beacon is **peripheral** — glanc
    DEVICE-DIRECT PLANE (WiFi+TLS)              HUB PLANE (BLE)
    - Finance (FX/crypto/indices/ETF)           - Claude usage (5h + 7d)
    - Weather + time (NTP)                       - Codex usage (5h + 7d)
-   - Now-Playing (Spotify Web API)              - Coding Buddy (state, approve/deny, launch)
+   - Now-Playing (Spotify Web API)              - Coding Buddy (state, approve/deny)
    - Hermes (device -> VPS) [Explore]           - Hub holds Claude/Codex secrets (never reach device)
                          \                      /
                           [ Beacon device ] --- local NVS: settings, theme, WiFi, tickers
@@ -120,7 +120,6 @@ Priority = MUST / SHOULD / COULD. Phase per §7.
 | FR-BUDDY-1 | MUST | P2 | **Idle state:** show Claude Code session state pushed by the Hub — running/waiting counts, tokens, context %, recent activity. |
 | FR-BUDDY-2 | MUST | P2 | **Prompt state:** when a tool-permission prompt arrives, surface it (tool name + command hint) and let the user **Approve** or **Deny** by tap/gesture; the decision returns to the Hub and resolves the prompt. |
 | FR-BUDDY-3 | MUST | P2 | Approve/Deny round-trip must complete well within the Claude Code hook timeout (~30s); design for a <5s human action; on timeout the prompt is treated as denied (fail-closed) and labeled. |
-| FR-BUDDY-4 | SHOULD | P2 | **Launch:** start a new Claude Code task from the device (text/dictated later) via the Hub running `claude -p`. |
 | FR-BUDDY-5 | MUST | P2 | The buddy must NOT imply unsupported actions: it **cannot** answer Claude's `AskUserQuestion` multiple-choice prompts, persist "don't ask again", or type into a live TUI session. |
 
 **Acceptance:** a real Claude Code tool prompt appears on the device and an Approve/Deny tap resolves it in Claude Code; idle state reflects live session counts; unsupported actions are absent from the UI.
@@ -156,10 +155,9 @@ Priority = MUST / SHOULD / COULD. Phase per §7.
 | FR-HUB-1 | MUST | P2 | A macOS menubar app that reads Claude usage (Keychain) + Codex usage (`~/.codex`) and pushes normalized usage to the device over BLE. Tokens never leave the Mac. |
 | FR-HUB-2 | MUST | P2 | Ingest Claude Code session/hook events (state + permission prompts) and relay buddy state + prompts to the device; relay Approve/Deny decisions back. |
 | FR-HUB-3 | MUST | P2 | Pair/bond with one device securely; reconnect automatically; expose connection status in the menubar. |
-| FR-HUB-4 | SHOULD | P2 | Launch new Claude Code tasks (`claude -p`) on request from the device. |
 | FR-HUB-5 | COULD | later | Mac-side STT for voice → text (Explore, with §5.11). |
 
-**Acceptance:** with the hub running, AI Usage + Coding Buddy populate over BLE and approvals work; the device bonds once and **auto-reconnects** after the hub restarts; **launching** a task from the device starts a `claude -p` session; killing the hub leaves the device in last-synced state.
+**Acceptance:** with the hub running, AI Usage + Coding Buddy populate over BLE and approvals work; the device bonds once and **auto-reconnects** after the hub restarts; killing the hub leaves the device in last-synced state.
 
 ### 5.10 Cross-cutting: data freshness & states — `FR-STATE`
 
@@ -177,7 +175,7 @@ Priority = MUST / SHOULD / COULD. Phase per §7.
 | ID | Priority | Phase | Requirement |
 |---|---|---|---|
 | FR-HERMES-1 | COULD | Explore | Interact with a self-hosted Nous Research **Hermes** agent: device → VPS (direct plane). Send a command/query, show the response. Interface TBD (ntfy / thin HTTP shim) — decide at phase start. |
-| FR-VOICE-1 | COULD | Explore | Push-to-talk voice as the input for Hermes (and possibly buddy task launch): capture audio, STT on Mac/VPS (no on-device wake word in scope). |
+| FR-VOICE-1 | COULD | Explore | Push-to-talk voice as the input for Hermes: capture audio, STT on Mac/VPS (no on-device wake word in scope). |
 
 **Acceptance:** deferred; each gets its own spec when its phase starts.
 

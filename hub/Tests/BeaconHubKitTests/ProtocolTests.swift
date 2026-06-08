@@ -40,13 +40,11 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil((obj["buddy"] as! [String: Any])["prompt"])  // absence of prompt => idle
     }
 
-    func testParsePermissionAndLaunch() {
+    func testParsePermission() {
         let approve = DeviceCommand.parse(Data(#"{"v":1,"cmd":"permission","id":"req_abc","decision":"approve"}"#.utf8))
         XCTAssertEqual(approve, .permission(id: "req_abc", approve: true))
         let deny = DeviceCommand.parse(Data(#"{"v":1,"cmd":"permission","id":"x","decision":"deny"}"#.utf8))
         XCTAssertEqual(deny, .permission(id: "x", approve: false))
-        let launch = DeviceCommand.parse(Data(#"{"v":1,"cmd":"launch","text":"run the tests"}"#.utf8))
-        XCTAssertEqual(launch, .launch(text: "run the tests"))
     }
 
     func testParseRejectsBadVersionOrCmd() {

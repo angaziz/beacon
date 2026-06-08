@@ -105,15 +105,6 @@ size_t hub_build_permission(char* buf, size_t cap, const char* id, bool approve)
   return finish_frame(doc, buf, cap);
 }
 
-size_t hub_build_launch(char* buf, size_t cap, const char* text) {
-  if (!buf || !text || cap == 0) return 0;
-  JsonDocument doc;
-  doc["v"] = 1;
-  doc["cmd"] = "launch";
-  doc["text"] = text;
-  return finish_frame(doc, buf, cap);
-}
-
 bool hub_parse_ack(const char* json, size_t len, hub_ack_t* out) {
   JsonDocument doc;
   if (deserializeJson(doc, json, len)) return false;

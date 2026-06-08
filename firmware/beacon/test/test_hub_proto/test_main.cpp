@@ -182,15 +182,6 @@ static void test_build_overflow_returns_zero(void) {
   TEST_ASSERT_EQUAL_size_t(0, hub_build_permission(buf, sizeof(buf), "req_abc", true));
 }
 
-static void test_build_launch(void) {
-  char buf[128];
-  size_t n = hub_build_launch(buf, sizeof(buf), "run the tests");
-  TEST_ASSERT_GREATER_THAN_size_t(0, n);
-  TEST_ASSERT_EQUAL_CHAR('\n', buf[n - 1]);
-  TEST_ASSERT_NOT_NULL(strstr(buf, "\"cmd\":\"launch\""));
-  TEST_ASSERT_NOT_NULL(strstr(buf, "\"text\":\"run the tests\""));
-}
-
 // ===== ack / err =====
 
 static void test_parse_ack_ok(void) {
@@ -233,7 +224,6 @@ int main(int, char**) {
   RUN_TEST(test_build_permission_roundtrips);
   RUN_TEST(test_build_permission_deny);
   RUN_TEST(test_build_overflow_returns_zero);
-  RUN_TEST(test_build_launch);
   RUN_TEST(test_parse_ack_ok);
   RUN_TEST(test_parse_err);
   RUN_TEST(test_parse_ack_neither);

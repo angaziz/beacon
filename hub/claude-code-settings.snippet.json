@@ -1,0 +1,43 @@
+{
+  "_comment": "Merge these keys into ~/.claude/settings.json to wire Claude Code to the Beacon hub. The hub listens on 127.0.0.1:8765 (ClaudeCodeBridge). ESSENTIAL for the buddy round-trip: the PreToolUse hook + statusLine. The Session/Stop/Notification hooks are optional (idle state). timeout is in SECONDS; PreToolUse is 35 to cover the device's ~25s decision window.",
+
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "http", "url": "http://127.0.0.1:8765/hook", "timeout": 35 }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          { "type": "http", "url": "http://127.0.0.1:8765/hook", "timeout": 5 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "http", "url": "http://127.0.0.1:8765/hook", "timeout": 5 }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "http", "url": "http://127.0.0.1:8765/hook", "timeout": 5 }
+        ]
+      }
+    ]
+  },
+
+  "statusLine": {
+    "type": "command",
+    "command": "/Users/angaziz/work/personal/beacon/hub/statusline-shim/beacon-statusline"
+  }
+}

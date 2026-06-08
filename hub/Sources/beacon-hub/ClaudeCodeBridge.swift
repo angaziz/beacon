@@ -8,6 +8,11 @@ import BeaconHubKit
 // id + decision + timestamp -- NEVER the hint/command string (tech.md 9).
 final class ClaudeCodeBridge {
     var onBuddyUpdate: ((BuddyState) -> Void)?
+    var onClaudeUsage: ((ProviderUsage) -> Void)?   // Claude 5h/7d from statusline rate_limits
+
+    // Fixed localhost port so Claude Code's native http hooks use a static URL
+    // (http://127.0.0.1:8765/hook). Also written to ~/.beacon-hub/port for the statusline shim.
+    static let port: UInt16 = 8765
 
     private let listener: NWListener
     private let queue = DispatchQueue(label: "beacon.bridge")
@@ -32,9 +37,10 @@ final class ClaudeCodeBridge {
 
     init() throws {
         let params = NWParameters.tcp
-        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
-        listener = try NWListener(using: params)
-        // Port is assigned by the OS; resolved from listener.port on .ready (start()).
+        params.allowLocalEndpointReuse = true
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(
+            host: "127.0.0.1", port: NWEndpoint.Port(rawValue: Self.port)!)
+        listener = try NWListener(using: params)   // binds 127.0.0.1:8765 (loopback only)
     }
 
     func start() {
@@ -127,15 +133,16 @@ final class ClaudeCodeBridge {
     }
 
     private func handlePermission(_ conn: NWConnection, body: [String: Any]) {
-        // Best-effort extraction; exact field names confirmed in P2-0 (CONTRACT.md).
-        // TODO(P2-0): confirm tool_name / tool_input field names + the command-hint subfield.
+        // Confirmed Claude Code PreToolUse/PermissionRequest fields: tool_name, tool_input{command|
+        // file_path|description}, tool_use_id, session_id.
+        let event = (body["hook_event_name"] as? String) ?? "PreToolUse"
         let tool = (body["tool_name"] as? String) ?? (body["tool"] as? String) ?? "Tool"
         let hint = Self.commandHint(from: body["tool_input"]) ?? tool
 
         // One active prompt at a time: auto-deny a second concurrent permission (labeled).
         if activeId != nil {
             log(id: "-", decision: "auto-deny-busy")
-            respondDecision(conn, allow: false)
+            respondDecision(conn, allow: false, event: event)
             return
         }
 
@@ -144,7 +151,7 @@ final class ClaudeCodeBridge {
         cappedTimer.schedule(deadline: .now() + 25)   // ~25 s fail-closed cap (D5, under CC's ~30 s).
         cappedTimer.setEventHandler { [weak self] in self?.finish(id: shortId, approve: false, capped: true) }
 
-        let p = Pending(respond: { [weak self] allow in self?.respondDecision(conn, allow: allow) },
+        let p = Pending(respond: { [weak self] allow in self?.respondDecision(conn, allow: allow, event: event) },
                         timeout: cappedTimer)
         pending[shortId] = p
         activeId = shortId
@@ -186,14 +193,33 @@ final class ClaudeCodeBridge {
     }
 
     private func handleStatusline(_ body: [String: Any]) {
-        // TODO(P2-0): confirm statusline token/context field names. Best-effort common shapes.
-        if let tokens = Self.int(body["tokens"]) ?? Self.int((body["cost"] as? [String: Any])?["total_tokens"]) {
-            buddy.tokens = tokens
+        // Confirmed Claude Code statusline schema: context_window.{used_percentage,total_input_tokens,
+        // total_output_tokens}. (The payload also carries rate_limits.{five_hour,seven_day} -- a future
+        // path to Claude usage without the Keychain/oauth call.)
+        if let cw = body["context_window"] as? [String: Any] {
+            if let pct = Self.double(cw["used_percentage"]) {
+                buddy.contextPct = max(0, min(100, Int(pct.rounded())))
+            }
+            let inTok = Self.int(cw["total_input_tokens"]) ?? 0
+            let outTok = Self.int(cw["total_output_tokens"]) ?? 0
+            if inTok + outTok > 0 { buddy.tokens = inTok + outTok }
         }
-        if let pct = Self.int(body["context_pct"]) ?? Self.int(body["context_percent"]) {
-            buddy.contextPct = max(0, min(100, pct))
+        // Claude usage is also in the statusline (rate_limits) -- authoritative, no token/endpoint, so
+        // it survives the oauth/usage 429. AppDelegate prefers this over the poller's Claude value.
+        if let rl = body["rate_limits"] as? [String: Any] {
+            let claude = ProviderUsage(h5: Self.rlWindow(rl["five_hour"]),
+                                       d7: Self.rlWindow(rl["seven_day"]))
+            let cb = onClaudeUsage
+            DispatchQueue.main.async { cb?(claude) }
         }
         publishBuddy()
+    }
+
+    private static func rlWindow(_ any: Any?) -> UsageWindow {
+        let w = any as? [String: Any]
+        let pct = double(w?["used_percentage"]).map { max(0, min(100, Int($0.rounded()))) }
+        let reset = int(w?["resets_at"]) ?? 0
+        return UsageWindow(pct: pct, reset: reset)
     }
 
     private func publishBuddy() {
@@ -245,14 +271,23 @@ final class ClaudeCodeBridge {
         return nil
     }
 
+    private static func double(_ any: Any?) -> Double? {
+        if let d = any as? Double { return d }
+        if let i = any as? Int { return Double(i) }
+        if let s = any as? String, let d = Double(s) { return d }
+        return nil
+    }
+
     // --- raw HTTP write ---
 
-    private func respondDecision(_ conn: NWConnection, allow: Bool) {
-        // Claude Code permission-hook response shape (TODO(P2-0): confirm exact keys vs CC version).
+    private func respondDecision(_ conn: NWConnection, allow: Bool, event: String) {
+        // Confirmed Claude Code permission-hook response: hookSpecificOutput.{hookEventName,
+        // permissionDecision}. Echo the originating event so PermissionRequest is handled correctly.
         let payload: [String: Any] = [
             "hookSpecificOutput": [
-                "hookEventName": "PreToolUse",
+                "hookEventName": event,
                 "permissionDecision": allow ? "allow" : "deny",
+                "permissionDecisionReason": allow ? "Approved on Beacon device" : "Denied on Beacon device",
             ],
         ]
         let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data("{}".utf8)

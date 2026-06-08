@@ -102,6 +102,10 @@ final class ClaudeUsageProvider: UsageProvider {
         var req = URLRequest(url: url)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        // Some Anthropic edges 429 requests without a UA/Accept. Best-effort; the statusline rate_limits
+        // path (ClaudeCodeBridge) is the robust source if the oauth endpoint keeps 429-ing.
+        req.setValue("claude-cli/1.0 (beacon-hub)", forHTTPHeaderField: "User-Agent")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
 
         session.dataTask(with: req) { data, resp, err in
             if let err = err {

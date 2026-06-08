@@ -22,7 +22,7 @@ Six screens, navigated by swipe + motion gestures:
 | Home | clock, date, weather, humidity | WiFi (direct) |
 | Finance | configurable FX→IDR, crypto, indices, ETFs | WiFi (direct) |
 | AI Usage | Claude + Codex, **both** 5h and 7-day windows + reset | Mac hub (BLE) |
-| Coding Buddy | session state + approve/deny Claude tool-permission prompts + launch tasks | Mac hub (BLE) |
+| Coding Buddy | session state + approve/deny Claude tool-permission prompts | Mac hub (BLE) |
 | Now-Playing | Spotify control (remote for an active Connect device) | WiFi (direct) |
 | Settings | WiFi, brightness, theme picker, tickers, etc. | local (NVS) |
 
@@ -31,7 +31,7 @@ Six screens, navigated by swipe + motion gestures:
 ```
    Public internet (direct, WiFi+TLS)          Mac companion hub (BLE)
    - finance / weather / time                   - Claude + Codex usage
-   - Spotify control                            - coding buddy (approve/deny, launch)
+   - Spotify control                            - coding buddy (approve/deny)
    - Hermes agent (device -> VPS)               - holds Claude/Codex secrets; none reach the device
                        \                        /
                         \                      /

@@ -145,7 +145,7 @@ public:
   virtual void loop() = 0;                    // pumped from a core-0 task
 };
 ```
-Screens call `send()` for permission/launch and render from `DataStore` snapshots that the `onFrame` handler updates; on disconnect the store flips usage/buddy records to `ST_HUB_OFFLINE`.
+Screens call `send()` for permission decisions and render from `DataStore` snapshots that the `onFrame` handler updates; on disconnect the store flips usage/buddy records to `ST_HUB_OFFLINE`.
 
 ### 7.1 Hub ↔ Device (BLE) — P2 deliverable
 
@@ -169,7 +169,6 @@ Hub → device (status frame):
 Device → hub (commands, each acked):
 ```json
 {"v":1,"cmd":"permission","id":"req_abc","decision":"approve"}   // or "deny"
-{"v":1,"cmd":"launch","text":"run the tests"}
 ```
 Hub → device ack/error:
 ```json
@@ -186,8 +185,8 @@ The hub normalizes both providers to: `pct` = integer 0–100 (percent of limit 
 
 The hub gets buddy data from Claude Code via documented surfaces (`docs/research/` §2.2):
 - **Permission prompts:** `PreToolUse` / `PermissionRequest` **http hooks** → hub; hub forwards to device; device decision returns as the hook's `permissionDecision` (`allow`/`deny`). Blocking, ~30 s timeout ⇒ design for <5 s; on timeout treat as **deny** and label.
-- **Session/idle state + tokens/context:** statusline JSON + `SessionStart`/`Stop`/`Notification` hook payloads. The hub maps these to the `buddy` block (§7.1).
-- **Launch:** `claude -p "<text>"` spawned by the hub (new session). Cannot answer `AskUserQuestion` or type into a live TUI (out of scope, `prd.md` FR-BUDDY-5).
+- **Session/idle state + tokens/context + Claude usage:** statusline JSON (`context_window` + `rate_limits.{five_hour,seven_day}`) + `SessionStart`/`Stop`/`Notification` hook payloads. The hub maps these to the `buddy` block (§7.1) and, since `oauth/usage` now **429s** in practice (Anthropic limits-rule change), reads **Claude usage from the statusline `rate_limits`** (§7.2) — first-party, no token; the oauth endpoint is only a best-effort fallback. The statusline shim wraps the user's existing renderer (forward then delegate), so their status bar is unchanged.
+- **Out of scope (FR-BUDDY-5):** the buddy cannot answer `AskUserQuestion`, persist "don't ask again", or type into a live TUI.
 
 Exact hook event field names + statusline fields: capture into a `hub/CONTRACT.md` fixture set at P2 start (with recorded sample payloads) so device and hub are tested against the same fixtures.
 

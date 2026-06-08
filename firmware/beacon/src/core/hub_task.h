@@ -11,12 +11,11 @@ extern "C" {
 
 void hub_task_start(void);
 
-// Device->hub command helpers, safe to call from Core-1 (the buddy decide path). Build the §7.1
-// command frame and enqueue it via HubLink::send (which copies + is thread-safe). Return true if
-// accepted for transport. With no hub link initialized (BEACON_DEV), permission returns true so the
-// on-device UI still clears locally for testing; launch returns false (nothing to launch into).
+// Device->hub permission decision, safe to call from Core-1 (the buddy decide path). Builds the §7.1
+// command frame and enqueues it via HubLink::send (which copies + is thread-safe). Returns true if
+// accepted for transport. With no hub link initialized (BEACON_DEV), returns true so the on-device UI
+// still clears locally for testing.
 bool hub_send_permission(const char* id, bool approve);
-bool hub_send_launch(const char* text);
 
 #ifdef __cplusplus
 }

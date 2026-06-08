@@ -13,11 +13,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let poller = UsagePoller()
 
     // Latest known state -- the source of truth we (re)send on heartbeat/reconnect.
-    private var usage = Usage(claude: .unavailable, codex: .unavailable)
+    private var usage = Usage(claude: .unavailable, codex: .unavailable)   // merged; resent on heartbeat
     private var buddy = BuddyState()
     private var heartbeat: Timer?
 
-    private let launchDir = FileManager.default.homeDirectoryForCurrentUser
+    // Claude usage has two sources: the oauth poller (works without a CC session, but the endpoint can
+    // 429) and Claude Code's statusline rate_limits (authoritative, no token, only while a session runs
+    // with the shim). Statusline wins when present. Codex comes from the poller only.
+    private var pollerClaude: ProviderUsage = .unavailable
+    private var pollerCodex: ProviderUsage = .unavailable
+    private var statuslineClaude: ProviderUsage?
+    private var usageErrors: [String] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         startBridge()
@@ -36,6 +42,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let b = try ClaudeCodeBridge()
             b.onBuddyUpdate = { [weak self] state in
                 Task { @MainActor in self?.onBuddy(state) }
+            }
+            b.onClaudeUsage = { [weak self] c in
+                Task { @MainActor in self?.onStatuslineClaude(c) }
             }
             b.start()
             bridge = b
@@ -72,19 +81,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .permission(let id, let approve):
             bridge?.resolve(id: id, approve: approve)
             central.send(HubAck.ack(id: id, ok: true))
-        case .launch(let text):
-            runLaunch(text)
-        }
-    }
-
-    // Preset launch (D7): spawn `claude -p <text>` best-effort in the configured working dir.
-    private func runLaunch(_ text: String) {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        proc.arguments = ["claude", "-p", text]
-        proc.currentDirectoryURL = launchDir
-        do { try proc.run() } catch {
-            FileHandle.standardError.write(Data("[beacon-hub] launch failed: \(error.localizedDescription)\n".utf8))
         }
     }
 
@@ -98,7 +94,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func onUsage(_ usage: Usage, _ errors: [String]) {
-        self.usage = usage
+        pollerClaude = usage.claude
+        pollerCodex = usage.codex
+        usageErrors = errors
+        rebuildUsage()
+    }
+
+    // Claude usage from Claude Code's statusline rate_limits (overrides the poller; survives a 429).
+    private func onStatuslineClaude(_ c: ProviderUsage) {
+        statuslineClaude = c
+        rebuildUsage()
+    }
+
+    private func rebuildUsage() {
+        let claude = statuslineClaude ?? pollerClaude
+        usage = Usage(claude: claude, codex: pollerCodex)
+        // Drop the Claude poller error once the statusline is supplying usage.
+        let errors = statuslineClaude == nil ? usageErrors
+            : usageErrors.filter { !$0.lowercased().contains("claude") }
         menubar.setUsage(usage, errors: errors)
         sendFrame(StatusFrame(usage: usage))
     }
