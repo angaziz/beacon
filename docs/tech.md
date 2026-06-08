@@ -133,7 +133,7 @@ Each domain has its own typed record (`weather_rec_t`, `finance_rec_t` (array), 
 
 ### 7.0 `HubLink` interface (frozen in P0)
 
-Transport-agnostic interface the screens depend on; the BLE link (§7.1) and the LAN-WebSocket fallback both implement it. Freeze this signature in P0 (P2 provides the Bluedroid implementation):
+Transport-agnostic interface the screens depend on; the BLE link (§7.1) and the LAN-WebSocket fallback both implement it. Freeze this signature in P0 (P2 provides the BLE implementation — NimBLE-backed core `BLE*` wrapper, §5):
 ```c
 typedef void (*hub_frame_cb)(const char* json, size_t len);  // one reassembled status frame
 class HubLink {
