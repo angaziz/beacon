@@ -70,6 +70,10 @@ final class BeaconCentral: NSObject {
         connectedName = nil
         rx = nil
         tx = nil
+        // Error paths (service/char discovery, pairing failure) land here while still GATT-connected;
+        // releasing the reference alone leaves CoreBluetooth holding the link, so the device never
+        // re-advertises and the rescan below can't rediscover it. Cancel first (no-op if not connected).
+        if let p = peripheral { central.cancelPeripheralConnection(p) }
         peripheral = nil
         inbound.removeAll(keepingCapacity: true)
         beginScan()   // auto-reconnect (FR-HUB-3): rescan immediately.
