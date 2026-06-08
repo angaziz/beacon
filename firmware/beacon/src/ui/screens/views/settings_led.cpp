@@ -2,7 +2,7 @@
 #include "ui/styles.h"
 #include "ui/state_view.h"
 #include "ui/theme.h"
-#include "ui/theme_catalog.h"
+#include "ui/theme_panel.h"
 #include "config/layout.h"
 #include "core/datastore.h"
 #include "hal/display.h"
@@ -14,16 +14,14 @@
 #include <Arduino.h>
 #include <ctype.h>
 
-// LED Matrix / SETTINGS: lit-label rows. Theme tap cycles theme (deferred via lv_async_call;
-// theme_set deletes this object mid-event). Brightness tap cycles 40/60/80/100% inline.
+// LED Matrix / SETTINGS: lit-label rows. Theme tap opens the theme picker (theme_panel).
+// Brightness tap cycles 40/60/80/100% inline.
 
 static lv_obj_t *s_theme_val, *s_bright_val, *s_tickers_val, *s_batt_val, *s_wifi_val;
 static const uint8_t BRIGHT_STEPS[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;  // default 80%
 
-static void do_next_theme(void*) { theme_set((theme_index() + 1) % THEME_COUNT); }
-
-static void theme_cb(lv_event_t*) { lv_async_call(do_next_theme, NULL); }
+static void theme_cb(lv_event_t*) { theme_panel_open(); }
 
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
 
@@ -81,7 +79,7 @@ static void build(lv_obj_t* page) {
   lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(list, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-  lv_obj_t* wf = make_row(list, t, "WI-FI", "NOT SET", t->ink_dim);
+  lv_obj_t* wf = make_row(list, t, "WI-FI", "NOT SET >", t->ink_dim);
   s_wifi_val = (lv_obj_t*)lv_obj_get_user_data(wf);
   lv_obj_add_flag(wf, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(wf, wifi_open_cb, LV_EVENT_CLICKED, NULL);
@@ -97,7 +95,8 @@ static void build(lv_obj_t* page) {
   lv_obj_add_flag(br, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(br, bright_cb, LV_EVENT_CLICKED, NULL);
 
-  lv_obj_t* th = make_row(list, t, "THEME", t->id, t->accent);
+  char thv[20]; snprintf(thv, sizeof(thv), "%s >", t->id);
+  lv_obj_t* th = make_row(list, t, "THEME", thv, t->accent);
   s_theme_val = (lv_obj_t*)lv_obj_get_user_data(th);
   lv_obj_add_flag(th, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(th, theme_cb, LV_EVENT_CLICKED, NULL);
@@ -115,13 +114,13 @@ static void update(void) {
   const beacon_theme_t* t = theme_active();
   if (!t) return;
   if (s_wifi_val) {
-    char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text(s_wifi_val, wbuf);
+    char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text_fmt(s_wifi_val, "%s >", wbuf);
   }
   if (s_theme_val) {
     char id[16];
     snprintf(id, sizeof(id), "%s", t->id);
     for (char* p = id; *p; p++) *p = (char)toupper((unsigned char)*p);
-    lv_label_set_text(s_theme_val, id);
+    lv_label_set_text_fmt(s_theme_val, "%s >", id);
   }
   if (s_tickers_val) {
     char tk[20];

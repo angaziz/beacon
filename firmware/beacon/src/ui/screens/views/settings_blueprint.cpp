@@ -1,6 +1,6 @@
 // Blueprint / Schematic - SETTINGS. DWG header + dimension rows (label left, value right,
-// hairline rules). Theme row taps cycle theme (deferred via lv_async_call - theme_set deletes
-// this object mid-event). Brightness row taps cycle 40/60/80/100% (display_brightness inline).
+// hairline rules). Theme row taps open the theme picker (theme_panel). Brightness row taps
+// cycle 40/60/80/100% (display_brightness inline).
 #include "ui/screen.h"
 #include "ui/styles.h"
 #include "ui/theme.h"
@@ -13,7 +13,7 @@
 #include "core/nvs.h"
 #include "ui/screens/screen_common.h"
 #include "ui/wifi_panel.h"
-#include "src/misc/lv_async.h"   // lv_async_call (not pulled in by <lvgl.h>)
+#include "ui/theme_panel.h"
 #include <Arduino.h>
 
 static lv_obj_t *s_theme_val, *s_bright_val, *s_tickers_val, *s_batt_val, *s_wifi_val;
@@ -21,9 +21,7 @@ static lv_obj_t *s_theme_val, *s_bright_val, *s_tickers_val, *s_batt_val, *s_wif
 static const uint8_t BRIGHT_PCT[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;   // 80%
 
-static void do_next_theme(void*) { theme_set((theme_index() + 1) % THEME_COUNT); }
-
-static void theme_tap_cb(lv_event_t*) { lv_async_call(do_next_theme, NULL); }
+static void theme_tap_cb(lv_event_t*) { theme_panel_open(); }
 
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
 
@@ -93,21 +91,21 @@ static void build(lv_obj_t* page) {
   char bb[8]; snprintf(bb, sizeof(bb), "%u%%", BRIGHT_PCT[s_bright_idx]);
   char tk[24]; snprintf(tk, sizeof(tk), "%u assets >", (unsigned)ds_get_finance_count());
 
-  s_wifi_val    = make_row(page, t, top + 0 * pitch, "Wi-Fi", "not set", false, NULL);
+  s_wifi_val    = make_row(page, t, top + 0 * pitch, "Wi-Fi", "not set >", false, NULL);
   lv_obj_t* wrow = lv_obj_get_parent(s_wifi_val); lv_obj_add_flag(wrow, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(wrow, wifi_open_cb, LV_EVENT_CLICKED, NULL);
   s_batt_val    = make_row(page, t, top + 1 * pitch, "Battery", "--", false, NULL);
   s_bright_val  = make_row(page, t, top + 2 * pitch, "Brightness", bb, false, bright_tap_cb);
-  s_theme_val   = make_row(page, t, top + 3 * pitch, "Theme",
-                           THEME_CATALOG[theme_index()].id, true, theme_tap_cb);
+  char thv[20]; snprintf(thv, sizeof(thv), "%s >", THEME_CATALOG[theme_index()].id);
+  s_theme_val   = make_row(page, t, top + 3 * pitch, "Theme", thv, true, theme_tap_cb);
   s_tickers_val = make_row(page, t, top + 4 * pitch, "Tickers", tk, false, NULL);
   make_row(page, t, top + 5 * pitch, "Sleep", "5 min", false, NULL);
   make_row(page, t, top + 6 * pitch, "About", ">", false, NULL);
 }
 
 static void update(void) {
-  char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text(s_wifi_val, wbuf);
-  lv_label_set_text(s_theme_val, THEME_CATALOG[theme_index()].id);
+  char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text_fmt(s_wifi_val, "%s >", wbuf);
+  lv_label_set_text_fmt(s_theme_val, "%s >", THEME_CATALOG[theme_index()].id);
   char tk[24]; snprintf(tk, sizeof(tk), "%u assets >", (unsigned)ds_get_finance_count());
   lv_label_set_text(s_tickers_val, tk);
 

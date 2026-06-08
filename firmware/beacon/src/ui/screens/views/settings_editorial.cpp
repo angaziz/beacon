@@ -2,7 +2,7 @@
 #include "ui/screens/screen_common.h"
 #include "core/datastore.h"
 #include "ui/theme.h"
-#include "ui/theme_catalog.h"
+#include "ui/theme_panel.h"
 #include "hal/display.h"
 #include "hal/power.h"
 #include "core/net.h"
@@ -13,8 +13,7 @@ static lv_obj_t *s_theme_val, *s_bright_val, *s_tick_val, *s_batt_val, *s_wifi_v
 static const uint8_t BRIGHT[] = {102, 153, 204, 255};   // 40/60/80/100%
 static int s_bright_i = 2;
 
-static void do_next_theme(void*) { theme_set((theme_index() + 1) % THEME_COUNT); }
-static void theme_cb(lv_event_t*) { lv_async_call(do_next_theme, NULL); }   // defer: theme_set rebuilds this page
+static void theme_cb(lv_event_t*) { theme_panel_open(); }
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
 static void bright_cb(lv_event_t*) {
   s_bright_i = (s_bright_i + 1) % (int)(sizeof(BRIGHT)/sizeof(BRIGHT[0]));
@@ -40,7 +39,7 @@ static lv_obj_t* row(lv_obj_t* page, const char* name, int y, lv_event_cb_t cb) 
 
 static void build(lv_obj_t* page) {
   build_header(page, "SETTINGS");
-  s_wifi_val     = row(page, "Wi-Fi", 0, NULL);             lv_label_set_text(s_wifi_val, "not set");
+  s_wifi_val     = row(page, "Wi-Fi", 0, NULL);             lv_label_set_text(s_wifi_val, "not set >");
   lv_obj_t* wrow = lv_obj_get_parent(s_wifi_val); lv_obj_add_flag(wrow, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(wrow, wifi_open_cb, LV_EVENT_CLICKED, NULL);
   s_batt_val     = row(page, "Battery", 50, NULL);          lv_label_set_text(s_batt_val, "--");
@@ -56,8 +55,8 @@ static void build(lv_obj_t* page) {
 }
 
 static void update(void) {
-  char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text(s_wifi_val, wbuf);
-  if (theme_active()) lv_label_set_text(s_theme_val, theme_active()->id);
+  char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text_fmt(s_wifi_val, "%s >", wbuf);
+  if (theme_active()) lv_label_set_text_fmt(s_theme_val, "%s >", theme_active()->id);
   lv_label_set_text_fmt(s_tick_val, "%d assets", ds_get_finance_count());
 
   int pct = power_battery_pct();
