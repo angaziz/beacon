@@ -2,23 +2,36 @@
 #include "ui/styles.h"
 #include "ui/state_view.h"
 #include "ui/theme.h"
+#include "ui/batt_chip.h"
 #include "config/layout.h"
 #include "core/datastore.h"
+#include "core/timekeep.h"
 #include <Arduino.h>
 #include <math.h>
+#include <time.h>
+#include <ctype.h>
 
 // Oscilloscope / Signal HOME. Chrome (graticule + center axis) is drawn by the carousel.
-// Scope header (CH1 . 50ms/DIV | TRIG > AUTO), big phosphor clock, a glowing sine WAVEFORM
+// Scope header (CH1 . 50ms/DIV | BAT chip), big phosphor clock, a glowing sine WAVEFORM
 // trace drawn via custom DRAW_MAIN lv_draw_line, and corner readouts TEMP / HUMID / SKY
 // (each a dim eyebrow over a bright phosphor value).
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 static lv_obj_t *s_clock, *s_date, *s_trig;
 static lv_obj_t *s_wave;
 static lv_obj_t *s_temp, *s_humid, *s_sky;
 
 static void update(void);
+
+// Clock + date from the time service. RTC time is always "live" (FR-HOME-3); show "--" until known.
+static void render_clock(lv_obj_t* clock, lv_obj_t* date) {
+  if (!timekeep_has_time()) { lv_label_set_text(clock, "--:--"); lv_label_set_text(date, "--"); return; }
+  struct tm lt; timekeep_localtime(&lt);
+  char hm[8];  strftime(hm, sizeof(hm), "%H:%M", &lt);            lv_label_set_text(clock, hm);
+  char dt[24]; strftime(dt, sizeof(dt), "%a %d %b", &lt);
+  for (char* p = dt; *p; ++p) *p = (char)toupper((unsigned char)*p);
+  lv_label_set_text(date, dt);
+}
 
 static void wave_cb(lv_event_t* e) {
   lv_obj_t* o = lv_event_get_target(e);
@@ -86,7 +99,7 @@ static void build(lv_obj_t* page) {
   lv_obj_align(ch1, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET);
 
   s_trig = lv_label_create(page);
-  lv_label_set_text(s_trig, "TRIG > AUTO");
+  lv_label_set_text(s_trig, "BAT . --");
   lv_obj_set_style_text_color(s_trig, t->ink_dim, 0);
   lv_obj_set_style_text_font(s_trig, t->f_mono, 0);
   lv_obj_align(s_trig, LV_ALIGN_TOP_RIGHT, -SAFE_INSET, SAFE_INSET);
@@ -119,6 +132,7 @@ static void build(lv_obj_t* page) {
 
 static void update(void) {
   const beacon_theme_t* t = theme_active(); if (!t) return;
+  render_clock(s_clock, s_date);
   weather_rec_t w = ds_get_weather();
   uint32_t now = now_s();
 
@@ -127,8 +141,10 @@ static void update(void) {
     lv_label_set_text(s_trig, chip);
     lv_obj_set_style_text_color(s_trig, sv_severe(w.hdr.state) ? t->down : t->ink_dim, 0);
   } else {
-    lv_label_set_text(s_trig, "TRIG > AUTO");
-    lv_obj_set_style_text_color(s_trig, t->ink_dim, 0);
+    char bv[12]; lv_color_t bc = batt_chip(bv, sizeof(bv), true, t);
+    char out[20]; snprintf(out, sizeof(out), "BAT . %s", bv);
+    lv_label_set_text(s_trig, out);
+    lv_obj_set_style_text_color(s_trig, bc, 0);
   }
 
   bool ph = sv_placeholder(w.hdr.state);

@@ -10,7 +10,6 @@
 // as the bright phosphor figure, artist dim, a glowing progress trace (lv_bar) flanked by
 // elapsed/duration, transport PLAYING/PAUSED. Controls are non-functional placeholders.
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 static lv_obj_t *s_src, *s_title, *s_artist;
 static lv_obj_t *s_bar, *s_elapsed, *s_remain, *s_state;

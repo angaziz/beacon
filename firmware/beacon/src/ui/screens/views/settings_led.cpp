@@ -7,13 +7,16 @@
 #include "core/datastore.h"
 #include "hal/display.h"
 #include "hal/power.h"
+#include "core/net.h"
+#include "core/nvs.h"
+#include "ui/wifi_panel.h"
 #include <Arduino.h>
 #include <ctype.h>
 
 // LED Matrix / SETTINGS: lit-label rows. Theme tap cycles theme (deferred via lv_async_call;
 // theme_set deletes this object mid-event). Brightness tap cycles 40/60/80/100% inline.
 
-static lv_obj_t *s_theme_val, *s_bright_val, *s_tickers_val, *s_batt_val;
+static lv_obj_t *s_theme_val, *s_bright_val, *s_tickers_val, *s_batt_val, *s_wifi_val;
 static const uint8_t BRIGHT_STEPS[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;  // default 80%
 
@@ -21,10 +24,13 @@ static void do_next_theme(void*) { theme_set((theme_index() + 1) % THEME_COUNT);
 
 static void theme_cb(lv_event_t*) { lv_async_call(do_next_theme, NULL); }
 
+static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
+
 static void bright_cb(lv_event_t*) {
   s_bright_idx = (s_bright_idx + 1) % (sizeof(BRIGHT_STEPS) / sizeof(BRIGHT_STEPS[0]));
   uint8_t pct = BRIGHT_STEPS[s_bright_idx];
   display_brightness((uint8_t)((uint16_t)pct * 255 / 100));
+  nvs_set_brightness((uint8_t)((uint16_t)pct * 255 / 100));
   char buf[8]; snprintf(buf, sizeof(buf), "%u%%", (unsigned)pct);
   lv_label_set_text(s_bright_val, buf);
 }
@@ -74,7 +80,10 @@ static void build(lv_obj_t* page) {
   lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(list, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-  make_row(list, t, "WI-FI", "NOT SET", t->ink_dim);
+  lv_obj_t* wf = make_row(list, t, "WI-FI", "NOT SET", t->ink_dim);
+  s_wifi_val = (lv_obj_t*)lv_obj_get_user_data(wf);
+  lv_obj_add_flag(wf, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(wf, wifi_open_cb, LV_EVENT_CLICKED, NULL);
 
   lv_obj_t* bt = make_row(list, t, "BATTERY", "--", t->ink);
   s_batt_val = (lv_obj_t*)lv_obj_get_user_data(bt);
@@ -103,6 +112,9 @@ static void build(lv_obj_t* page) {
 static void update(void) {
   const beacon_theme_t* t = theme_active();
   if (!t) return;
+  if (s_wifi_val) {
+    char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text(s_wifi_val, wbuf);
+  }
   if (s_theme_val) {
     char id[16];
     snprintf(id, sizeof(id), "%s", t->id);

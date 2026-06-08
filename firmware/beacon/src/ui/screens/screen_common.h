@@ -4,9 +4,7 @@
 #include "config/layout.h"
 #include "ui/styles.h"
 #include "ui/state_view.h"
-
-// dev time base (P0-D swaps the RTC/NTP epoch). Seeds use the same base => ages are correct.
-static inline uint32_t now_s(void) { return (uint32_t)(millis() / 1000); }
+#include "ui/screen.h"
 
 // Idempotent conditional style: remove first (no-op if absent) then add if on. Calling this
 // every update() never accumulates duplicate style refs (LVGL add_style appends unconditionally).

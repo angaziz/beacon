@@ -1,27 +1,41 @@
 // Calm Futurism (Nothing-esque) HOME view.
-// directions.html lane 04: top row "[dot] beacon / wed --", centered big Doto clock,
+// directions.html lane 04: top row "[dot] beacon / bat NN%", centered big Doto clock,
 // dim dateline, two centered weather readouts (temp / humidity). Sparse, white-on-black,
 // one faint red accent. Background + chrome are drawn by the carousel.
 #include "ui/screen.h"
 #include "ui/styles.h"
 #include "ui/state_view.h"
 #include "ui/theme.h"
+#include "ui/batt_chip.h"
 #include "config/layout.h"
 #include "core/datastore.h"
+#include "core/timekeep.h"
+#include "fetch/geoip.h"
 #include <Arduino.h>
+#include <time.h>
+#include <ctype.h>
 static void update(void);
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 static lv_obj_t *s_dot, *s_brand, *s_topright;
-static lv_obj_t *s_clock, *s_date;
+static lv_obj_t *s_clock, *s_date, *s_city;
 static lv_obj_t *s_temp, *s_hum;
 static lv_obj_t *s_status;
+
+// Clock + date from the time service. RTC time is always "live" (FR-HOME-3); show "--" until known.
+static void render_clock(lv_obj_t* clock, lv_obj_t* date) {
+  if (!timekeep_has_time()) { lv_label_set_text(clock, "--:--"); lv_label_set_text(date, "--"); return; }
+  struct tm lt; timekeep_localtime(&lt);
+  char hm[8];  strftime(hm, sizeof(hm), "%H:%M", &lt);            lv_label_set_text(clock, hm);
+  char dt[24]; strftime(dt, sizeof(dt), "%a %d %b", &lt);
+  for (char* p = dt; *p; ++p) *p = (char)toupper((unsigned char)*p);
+  lv_label_set_text(date, dt);
+}
 
 static void build(lv_obj_t* page) {
   const beacon_theme_t* t = theme_active();
 
-  // Top row: [dot] beacon  ...  wed -- (placeholder day)
+  // Top row: [dot] beacon  ...  bat NN% (battery, updated in update())
   s_dot = lv_obj_create(page);
   lv_obj_remove_style_all(s_dot);
   lv_obj_set_size(s_dot, 8, 8);
@@ -38,7 +52,7 @@ static void build(lv_obj_t* page) {
   lv_obj_align(s_brand, LV_ALIGN_TOP_LEFT, SAFE_INSET + 20, SAFE_INSET + 8);
 
   s_topright = lv_label_create(page);
-  lv_label_set_text(s_topright, "wed --");
+  lv_label_set_text(s_topright, "bat --");
   lv_obj_set_style_text_font(s_topright, t->f_body, 0);
   lv_obj_set_style_text_color(s_topright, t->ink_dim, 0);
   lv_obj_set_style_text_letter_space(s_topright, 3, 0);
@@ -57,6 +71,14 @@ static void build(lv_obj_t* page) {
   lv_obj_set_style_text_color(s_date, t->ink_dim, 0);
   lv_obj_set_style_text_letter_space(s_date, 4, 0);
   lv_obj_align(s_date, LV_ALIGN_CENTER, 0, 36);
+
+  // Resolved area (IP geolocation), faint, below the dateline. Accent dot keeps the calm palette.
+  s_city = lv_label_create(page);
+  lv_label_set_text(s_city, "--");
+  lv_obj_set_style_text_font(s_city, t->f_body, 0);
+  lv_obj_set_style_text_color(s_city, t->accent, 0);
+  lv_obj_set_style_text_letter_space(s_city, 2, 0);
+  lv_obj_align(s_city, LV_ALIGN_CENTER, 0, 62);
 
   // Two centered weather readouts near the lower safe band.
   s_temp = lv_label_create(page);
@@ -95,9 +117,18 @@ static void build(lv_obj_t* page) {
 }
 
 static void update(void) {
+  render_clock(s_clock, s_date);
+  { char c[40]; strncpy(c, geoip_city(), sizeof(c) - 1); c[sizeof(c) - 1] = 0;
+    for (char* p = c; *p; ++p) *p = (char)tolower((unsigned char)*p);   // calm lane is lowercase
+    lv_label_set_text(s_city, c); }
   const beacon_theme_t* t = theme_active();
   weather_rec_t w = ds_get_weather();
   uint32_t now = now_s();
+
+  { char bv[12]; lv_color_t bc = batt_chip(bv, sizeof(bv), false, t);
+    char out[20]; snprintf(out, sizeof(out), "bat %s", bv);
+    lv_label_set_text(s_topright, out);
+    lv_obj_set_style_text_color(s_topright, bc, 0); }
 
   char buf[24];
   bool ph = sv_placeholder(w.hdr.state);

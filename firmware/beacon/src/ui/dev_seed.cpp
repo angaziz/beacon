@@ -8,9 +8,8 @@
 #include "core/stale.h"
 #include "config/tickers.h"
 #include "ui/carousel.h"
+#include "ui/screen.h"
 #include "util/log.h"
-
-static uint32_t now_s(void) { return (uint32_t)(millis() / 1000); }
 
 static void seed(void) {
   uint32_t now = now_s();

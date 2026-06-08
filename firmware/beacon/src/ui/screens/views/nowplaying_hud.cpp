@@ -11,7 +11,6 @@
 // (elapsed | PLAYING/PAUSED | duration). has_device==false => "no active device" state.
 // Transport controls are non-functional placeholders (P4).
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 static lv_obj_t *s_status;
 static lv_obj_t *s_device;

@@ -17,7 +17,6 @@ static lv_obj_t *s_pct[METER_COUNT];
 static lv_obj_t *s_rst[METER_COUNT];
 static lv_obj_t *s_cell[METER_COUNT][CELLS];
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 static const char* const METER_NAME[METER_COUNT] = {
   "CLAUDE 5H", "CLAUDE 7D", "CODEX 5H", "CODEX 7D"

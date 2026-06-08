@@ -12,10 +12,13 @@
 #include "core/datastore.h"
 #include "hal/display.h"
 #include "hal/power.h"
+#include "core/net.h"
+#include "core/nvs.h"
+#include "ui/wifi_panel.h"
 #include <Arduino.h>
 static void update(void);
 
-static lv_obj_t *s_theme_val, *s_bright_val, *s_tickers_val, *s_batt_val;
+static lv_obj_t *s_theme_val, *s_bright_val, *s_tickers_val, *s_batt_val, *s_wifi_val;
 
 static const uint8_t BRIGHT_PCT[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;  // default 80%
@@ -24,11 +27,14 @@ static void do_next_theme(void*) { theme_set((theme_index() + 1) % THEME_COUNT);
 
 static void on_theme_tap(lv_event_t* e) { (void)e; lv_async_call(do_next_theme, NULL); }
 
+static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
+
 static void on_bright_tap(lv_event_t* e) {
   (void)e;
   s_bright_idx = (s_bright_idx + 1) % (sizeof(BRIGHT_PCT) / sizeof(BRIGHT_PCT[0]));
   uint8_t pct = BRIGHT_PCT[s_bright_idx];
   display_brightness((uint8_t)((uint16_t)pct * 255 / 100));
+  nvs_set_brightness((uint8_t)((uint16_t)pct * 255 / 100));
   char b[8];
   snprintf(b, sizeof(b), "%u%%", (unsigned)pct);
   lv_label_set_text(s_bright_val, b);
@@ -90,7 +96,10 @@ static void build(lv_obj_t* page) {
   int y = SAFE_INSET + 36;
   const int dy = 48;
 
-  mk_row(page, t, y, "Wi-Fi", "not set", t->ink_dim, NULL); y += dy;
+  s_wifi_val = mk_row(page, t, y, "Wi-Fi", "not set", t->ink_dim, NULL); y += dy;
+  lv_obj_t* wifi_row = lv_obj_get_parent(s_wifi_val);   // tap the whole row (big touch target)
+  lv_obj_add_flag(wifi_row, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(wifi_row, wifi_open_cb, LV_EVENT_CLICKED, NULL);
 
   s_batt_val = mk_row(page, t, y, "Battery", "--", t->ink_dim, NULL); y += dy;
 
@@ -113,6 +122,7 @@ static void build(lv_obj_t* page) {
 
 static void update(void) {
   const beacon_theme_t* t = theme_active();
+  char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text(s_wifi_val, wbuf);
   lv_label_set_text(s_theme_val, t->id ? t->id : "--");
 
   char tk[20];

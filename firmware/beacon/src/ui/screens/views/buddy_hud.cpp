@@ -13,7 +13,6 @@
 // recent entries or "idle". Approve/Deny is a local stub (clears prompt + ds_set_buddy);
 // disabled when hub offline / reconnecting.
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 static lv_obj_t *s_status;       // top-right state chip
 static lv_obj_t *s_tele;         // telemetry line

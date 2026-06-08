@@ -151,7 +151,7 @@ static void apply_window(int idx, const usage_window_t* w, bool dim, bool ph,
 static void update(void) {
   const beacon_theme_t* t = theme_active();
   usage_rec_t u = ds_get_usage();
-  uint32_t now = (uint32_t)(millis() / 1000);
+  uint32_t now = now_s();
 
   char buf[32];
   if (sv_status(buf, sizeof(buf), &u.hdr, now)) lv_label_set_text(s_status, buf);

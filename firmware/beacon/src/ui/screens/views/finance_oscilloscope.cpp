@@ -17,7 +17,6 @@ static inline const char* fin_name(int i, const finance_rec_t& r) {
 // each ticker a "trace channel": id (left, dim eyebrow), value (mono figure), change
 // readout colored up/down. Scrolls vertically when >6 assets.
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 #define FIN_MAX_ROWS 16
 

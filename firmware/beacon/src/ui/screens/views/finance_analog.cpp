@@ -17,7 +17,6 @@ static inline const char* fin_name(int i, const finance_rec_t& r) {
 // accent, hairline rules. Each row: id (dim mono) | value (display, ink) | change (up/down + glyph).
 // Scrolls vertically when the ticker count exceeds the visible rows.
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 #define MAX_ROWS 16
 #define ROW_H    52

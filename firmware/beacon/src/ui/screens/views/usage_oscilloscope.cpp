@@ -11,7 +11,6 @@
 // DRAW_MAIN rect + glow top line), a percent figure, and a "rst <countdown>" line. pct<0 (or
 // loading) => "--" and NO fill. Dim values when stale/offline. HUB_OFFLINE via u.hdr.
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 #define N_CH 4
 

@@ -10,9 +10,9 @@
 #include "config/tickers.h"
 #include "core/datastore.h"
 #include <Arduino.h>
+#include <time.h>
 static void update(void);
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 static inline const char* fin_name(int i, const finance_rec_t& r) {
   return (i < DEFAULT_TICKERS_COUNT) ? DEFAULT_TICKERS[i].display_name : r.id;
 }
@@ -95,8 +95,10 @@ static void update(void) {
   const beacon_theme_t* t = theme_active();
   uint32_t now = now_s();
   bool any_chip = false;
+  uint32_t newest = 0;   // freshest fetch across tickers => "last updated" age
   for (uint8_t i = 0; i < s_rows; i++) {
     finance_rec_t r = ds_get_finance(i);
+    if (r.hdr.last_updated > newest) newest = r.hdr.last_updated;
     lv_label_set_text(s_name[i], fin_name(i, r));
     bool ph = sv_placeholder(r.hdr.state), dim = sv_dim(r.hdr.state);
     if (ph) {
@@ -114,7 +116,12 @@ static void update(void) {
       any_chip = true;
     }
   }
-  if (!any_chip) { lv_label_set_text(s_status, "live"); lv_obj_set_style_text_color(s_status, t->ink_dim, 0); }
+  if (!any_chip) {
+    char sb[20];   // last-update wall-clock time (static between fetches; no per-second ticking)
+    if (newest) { time_t tt = newest; struct tm lt; localtime_r(&tt, &lt); strftime(sb, sizeof(sb), "as of %H:%M", &lt); }
+    else        snprintf(sb, sizeof(sb), "live");
+    lv_label_set_text(s_status, sb); lv_obj_set_style_text_color(s_status, t->ink_dim, 0);
+  }
 }
 
 extern const screen_view_t finance_calm_view = { build, update };

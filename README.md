@@ -5,12 +5,13 @@ A dark, futuristic desk command-center on a 2.16" AMOLED touch device — built 
 shows your Claude Code / Codex usage, live markets, weather, music, and a Claude coding
 "buddy" you can approve tool-prompts on — without breaking focus on your Mac.
 
-> **Status: early / prototype.** Hardware bring-up (display + power + touch + WiFi/BLE
-> coexistence) is proven, the specs are written, and the **P0 foundation runs on-device**: the
-> swipe carousel + all six screens render in **7 bespoke per-theme layouts (42 views)** on the
-> frozen DataStore + HubLink contracts and the theme engine, with per-theme background chrome and
-> battery state. Still to land in P0: persistence (NVS), WiFi provisioning, and the time service
-> (NTP + RTC). Live data fetchers come in P1/P2/P4. Expect things to move. See [Roadmap](#roadmap).
+> **Status: early / prototype.** Hardware bring-up is proven and **P0 + P1 run on-device**: the swipe
+> carousel + all six screens render in **7 bespoke per-theme layouts (42 views)**, on real data over
+> WiFi — NTP/RTC time, live weather (Open-Meteo, IP-geolocated), and live markets (FX→IDR, BTC,
+> indices) with the honest screen-state model (loading/live/stale/offline). Persistence (NVS),
+> multi-network WiFi (WiFiMulti) with a SoftAP captive-portal + on-device Wi-Fi manager, and the
+> time service all landed. **Next:** P2 (macOS hub + AI Usage / Coding Buddy over BLE). Expect things
+> to move. See [Roadmap](#roadmap).
 
 ## What it does
 
@@ -92,12 +93,12 @@ The full phased plan (requirements, acceptance, dependencies) is in [`docs/prd.m
 - [x] Hardware spike: AXP2101 power + CO5300 display bring-up
 - [x] Hardware spike: WiFi + BLE coexistence + memory headroom
 - [x] Functional PRD + technical constitution ([`docs/prd.md`](docs/prd.md), [`docs/tech.md`](docs/tech.md))
-- [ ] **P0 — Foundation** — shell, carousel, themes, and frozen contracts built and running on-device; persistence, WiFi, and time service remain:
+- [x] **P0 — Foundation** — shell, carousel, themes, frozen contracts, persistence, WiFi, and time service, running on-device:
   - [x] Bring-up: AXP2101 power + CO5300 display + LVGL 8.4 + touch; pinned PlatformIO toolchain; `SAFE_INSET`/corner-radius + `partitions.csv` frozen on hardware
   - [x] Frozen shared contracts (DataStore, `screen_state_t`, HubLink, config schemas) + theme engine (7 themes, design tokens, gauge styles)
   - [x] Swipe carousel + six state-aware screen shells, bespoke per-theme (6 × 7 = 42 views) + per-theme chrome + battery on Settings
-  - [ ] Persistence (NVS), WiFi provisioning, time service (NTP + PCF85063 RTC), idle dim/sleep, live Settings actions
-- [ ] **P1 — Ambient screens**: Home, Finance (+ full screen-state model)
+  - [x] Persistence (NVS: screen/brightness/theme/networks), time service (NTP + PCF85063 RTC + POSIX TZ), WiFi provisioning (SoftAP captive portal)
+- [x] **P1 — Ambient screens**: Home (clock + weather), Finance (live FX→IDR / BTC / indices), full screen-state model; live on hardware. Location is **auto-geolocated** (IP-based); on-device ticker/location *editing* (FR-SET-4, SHOULD) deferred. Also added: multi-network WiFi (WiFiMulti) + on-device Wi-Fi manager.
 - [ ] **P2 — Hub + AI**: macOS hub app (Swift) + AI Usage + Coding Buddy over BLE
 - [ ] **P3 — Input polish**: IMU + touch gestures
 - [ ] **P4 — Now-Playing**: Spotify control

@@ -115,16 +115,17 @@ Each domain has its own typed record (`weather_rec_t`, `finance_rec_t` (array), 
   ```
   Canonical default set + exact endpoints/cadences live in `docs/research/` §2.3; e.g. S&P 500 = `{source:"yahoo", symbol:"%5EGSPC", display_name:"S&P 500", kind:"index", change_basis:"prev_close"}`.
 - **Weather/time** (`config` + NVS): `{ lat, lon, units:"metric", tz_id (IANA), wmo_map (code→label/icon), ntp_server }`. Default Jakarta `lat -6.2, lon 106.8, tz "Asia/Jakarta"`. WMO map is a fixed table in firmware.
-- **WiFi:** SSID/pass in NVS; provisioning = **first-boot SoftAP captive portal** (device hosts `Beacon-setup` AP → user submits creds → stored in NVS → reboot to STA). Re-provision from Settings. No on-screen keyboard required for v1.
+- **WiFi (P1, multi-network):** up to `WIFI_MAX_SAVED` networks `{ssid,pass}` in one NVS blob; `WiFiMulti` auto-joins the strongest available. Provisioning = **SoftAP captive portal** (`Beacon-setup` AP, **appends** to the saved list) reached on first boot (empty list) or a **touch-hold-at-boot hatch**. On-device **Wi-Fi manager** (Settings → tap Wi-Fi): list saved networks, forget, Connect/Disconnect toggle. WiFi (dis)connect/scan run only on the Core-0 fetch task; the UI mutates the saved list (locked) + reads a published status snapshot — no `WiFi.*` on Core-1. No on-screen keyboard (entering creds is on the portal).
 
-**Networking.** WiFi STA + BLE coexist. TLS via `WiFiClientSecure` with a bundled root-CA set (DigiCert Global Root G2, ISRG Root X1, GTS Root R1) + rotation handling; **never `setInsecure()` in product**. One TLS socket at a time. Cadences:
+**Networking.** WiFi STA (multi-network via `WiFiMulti` — auto-joins the strongest saved net, see §6 below) + BLE coexist. TLS via `WiFiClientSecure` with a bundled root-CA set + rotation handling; **never `setInsecure()` in product**. One TLS socket at a time, serialized; the Core-0 fetch task is the only caller. Bundled roots (P1, verified against live chains): **ISRG Root X1, DigiCert Global Root G2, GTS Root R1, GlobalSign Root CA, Starfield Services Root CA G2** — covering Open-Meteo / ipwho.is / Frankfurter / Binance-data-mirror / Yahoo / BigDataCloud. Cadences:
 
 | Source | Cadence | Stale at |
 |---|---|---|
 | Time (NTP) | 1/day + RTC offline; resync on connect | n/a (RTC live) |
-| Weather (Open-Meteo) | 10–15 min | 30 min |
-| FX → IDR (Frankfurter) | 1–4×/day | 24 h |
-| Crypto/indices/ETF (Binance/Yahoo) | 1–5 min, staggered | 10 min |
+| Location (IP geo: ipwho.is + BigDataCloud) | once per (re)connect | n/a |
+| Weather (Open-Meteo, geo lat/lon) | 10 min | 30 min |
+| FX → IDR (**Yahoo `<X>IDR=X`** — near-live; Frankfurter kept as a daily-ECB option) | 5 min | 10 min |
+| Crypto (**`data-api.binance.vision`** mirror) / indices/ETF (Yahoo) | 1–5 min, staggered | 10 min |
 | AI usage (Hub/BLE) | ≤60 s connected | 5 min / hub-offline |
 | Spotify now-playing | 1–5 s, only on that screen | 15 s |
 

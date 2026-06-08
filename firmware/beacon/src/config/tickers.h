@@ -22,11 +22,13 @@ typedef struct {
 // === EDIT HERE to add/remove/reorder instruments. id must stay unique + stable. ===
 // Fields: id, source, symbol, display_name, kind, cadence_s, stale_s, change_basis
 static const ticker_cfg_t DEFAULT_TICKERS[] = {
-  {"usd_idr", SRC_FRANKFURTER, "USD",     "USD/IDR", KIND_FX_IDR, 21600, 86400, CHG_PREV_CLOSE},
-  {"eur_idr", SRC_FRANKFURTER, "EUR",     "EUR/IDR", KIND_FX_IDR, 21600, 86400, CHG_PREV_CLOSE},
-  {"sgd_idr", SRC_FRANKFURTER, "SGD",     "SGD/IDR", KIND_FX_IDR, 21600, 86400, CHG_PREV_CLOSE},
-  {"jpy_idr", SRC_FRANKFURTER, "JPY",     "JPY/IDR", KIND_FX_IDR, 21600, 86400, CHG_PREV_CLOSE},
-  {"cny_idr", SRC_FRANKFURTER, "CNY",     "CNY/IDR", KIND_FX_IDR, 21600, 86400, CHG_PREV_CLOSE},
+  // FX via Yahoo (<X>IDR=X): near-live market rate + daily prev-close change. Frankfurter (SRC_FRANKFURTER)
+  // is still supported but serves only once-daily ECB reference rates, which lag the live market.
+  {"usd_idr", SRC_YAHOO, "USDIDR=X", "USD/IDR", KIND_FX_IDR, 300, 600, CHG_PREV_CLOSE},
+  {"eur_idr", SRC_YAHOO, "EURIDR=X", "EUR/IDR", KIND_FX_IDR, 300, 600, CHG_PREV_CLOSE},
+  {"sgd_idr", SRC_YAHOO, "SGDIDR=X", "SGD/IDR", KIND_FX_IDR, 300, 600, CHG_PREV_CLOSE},
+  {"jpy_idr", SRC_YAHOO, "JPYIDR=X", "JPY/IDR", KIND_FX_IDR, 300, 600, CHG_PREV_CLOSE},
+  {"cny_idr", SRC_YAHOO, "CNYIDR=X", "CNY/IDR", KIND_FX_IDR, 300, 600, CHG_PREV_CLOSE},
   {"btc",     SRC_BINANCE,     "BTCUSDT", "BTC",     KIND_CRYPTO, 60,    600,   CHG_24H},
   {"sp500",   SRC_YAHOO,       "%5EGSPC", "S&P 500", KIND_INDEX,  300,   600,   CHG_PREV_CLOSE},
   {"nasdaq",  SRC_YAHOO,       "%5EIXIC", "NASDAQ",  KIND_INDEX,  300,   600,   CHG_PREV_CLOSE},

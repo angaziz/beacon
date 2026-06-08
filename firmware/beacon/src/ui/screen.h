@@ -1,5 +1,11 @@
 #pragma once
 #include <lvgl.h>
+#include <stdint.h>
+
+// Single epoch clock for the UI (FR-PLAT-8 unification). Returns timekeep_now() so screen staleness
+// ages use the SAME epoch the Core-0 fetchers stamp into hdr.last_updated. Defined in timekeep.cpp.
+// Every view reads time through this; there are no per-view millis() clocks (would split-brain ages).
+uint32_t now_s(void);
 
 // A per-theme view of a screen: build() lays it out into the page, update() refreshes it from
 // the DataStore. Each (screen x theme) pair provides one of these; the screen module dispatches

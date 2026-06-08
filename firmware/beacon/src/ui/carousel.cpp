@@ -3,7 +3,9 @@
 #include "ui/screen.h"
 #include "ui/styles.h"
 #include "ui/theme.h"
+#include "ui/theme_catalog.h"
 #include "ui/chrome.h"
+#include "core/nvs.h"
 #include "config/layout.h"
 #include "ui/screens/screen_home.h"
 #include "ui/screens/screen_finance.h"
@@ -33,6 +35,7 @@ static void show(int idx) {
   s_current = idx;
   set_dots(idx);
   if (MODULES[idx]->update) MODULES[idx]->update();
+  nvs_set_screen((uint8_t)idx);   // persist last screen (FR-PLAT-3)
 }
 
 // Theme hook: per-theme LAYOUTS differ, so a theme switch rebuilds every page (clear + chrome +
@@ -119,10 +122,28 @@ void carousel_init(void) {
   }
 
   theme_on_apply(on_theme);
-  theme_set(0);             // Editorial: builds all pages via on_theme
-  show(0);
+  // One-time: apply the compiled default theme when it changes (THEME_DEFAULT_VER bump), without
+  // stomping a later manual choice (that updates the theme but leaves the version satisfied).
+  if (nvs_get_byte("thmver", 0) < THEME_DEFAULT_VER) {
+    nvs_set_theme(DEFAULT_THEME_INDEX);
+    nvs_set_byte("thmver", THEME_DEFAULT_VER);
+  }
+  uint8_t theme0 = nvs_get_theme(DEFAULT_THEME_INDEX); if (theme0 >= THEME_COUNT) theme0 = DEFAULT_THEME_INDEX;
+  theme_set(theme0);        // restore persisted theme; builds all pages via on_theme
+
+  int start = nvs_get_screen(0); if (start >= COUNT) start = 0;   // restore last screen
+  if (start != 0) {
+    lv_obj_update_layout(s_pager);                                  // positions must exist before scroll
+    lv_obj_scroll_to_x(s_pager, start * SCREEN_W, LV_ANIM_OFF);
+  }
+  show(start);
   lv_timer_create(tick_cb, 500, NULL);
 }
 
 int carousel_current(void) { return s_current; }
 lv_obj_t* carousel_root(void) { return s_pager; }
+
+void carousel_set_swipe_enabled(bool en) {
+  if (en) { lv_obj_set_scroll_dir(s_pager, LV_DIR_HOR); lv_obj_add_flag(s_pager, LV_OBJ_FLAG_SCROLLABLE); }
+  else    { lv_obj_clear_flag(s_pager, LV_OBJ_FLAG_SCROLLABLE); }
+}

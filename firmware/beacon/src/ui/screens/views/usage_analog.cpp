@@ -10,7 +10,6 @@
 // a full-circle arc filled to pct in accent over a faint track, with the percent CENTERED inside
 // the dial and a "rst <countdown>" line below. pct<0 => "--" and no fill (never feed <0 to the arc).
 
-static inline uint32_t now_s() { return (uint32_t)(millis() / 1000); }
 
 #define SUB_SIZE 116
 #define N_DIAL 4

@@ -48,7 +48,7 @@ const screen_view_t home_hud_view = { build, update };
   view is per-theme). Set styles in build(); in update() only change text/values/show-hide.
 - update() is idempotent and read-only w.r.t. layout. Read snapshots: ds_get_weather(), 
   ds_get_finance_count()/ds_get_finance(i), ds_get_usage(), ds_get_buddy(), ds_get_nowplaying().
-- now: `static inline uint32_t now_s(){ return (uint32_t)(millis()/1000); }`
+- now: call the global `now_s()` (declared in ui/screen.h, defined in core/timekeep.cpp).
 - STATE handling (every data screen): use state_view.h helpers to reflect loading/live/stale/offline/
   error/hub-offline. Minimum: a small status chip (theme f_mono) in a corner showing
   `sv_status(buf,n,&rec.hdr,now)` text when non-live; dim the values when `sv_dim(state)`; show
