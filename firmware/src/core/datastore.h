@@ -34,3 +34,9 @@ nowplaying_rec_t ds_get_nowplaying(void);
 // record_age_s(hdr, now) >= stale_s(source), promote to ST_STALE. Inclusive boundary.
 // Never overwrites ST_OFFLINE / ST_ERROR / ST_HUB_OFFLINE (state-priority rule).
 void ds_tick_staleness(uint32_t now);
+
+// Buddy-prompt lifecycle tick (~1/s, Core-0). `now` is MONOTONIC uptime (uptime_s()), not wall clock.
+// Mutates prompt only, never hdr.state, so it cannot erase ST_HUB_OFFLINE. Atomic under the lock:
+// a SENT_OK beat past BUDDY_CONFIRM_HOLD_S clears (present=false); an undecided (IDLE) prompt past
+// BUDDY_PROMPT_EXPIRY_S becomes PROMPT_TOO_LATE (reuses the dismiss affordance, no new state).
+void ds_tick_buddy_prompt(uint32_t now);

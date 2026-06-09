@@ -127,7 +127,7 @@ Every data screen has explicit non-happy states (Principle: honest data). Never 
 | Offline (WiFi down) | banner/eyebrow flag; ambient screens keep last-known with age |
 | Error / rate-limited | terse cause ("rate-limited", "no route"), retry with backoff, no fake data |
 | Mac hub disconnected (BLE) | AI Usage + Coding Buddy show "hub offline — last synced HH:MM"; buddy actions disabled |
-| Reconnecting | show reconnecting state; re-enable actions only once the link is confirmed |
+| Reconnecting | Mac-menu-bar concern only; the peripheral cannot observe the link mid-reconnect, so there is no on-device reconnecting state (it sees connected or hub-offline) |
 
 Per-source freshness: finance/weather minutes-scale; usage 30-60s poll; clock from RTC (always live). Each screen owns a `lastUpdated` timestamp.
 

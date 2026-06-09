@@ -7,8 +7,7 @@ typedef enum {
   ST_STALE,       // last value older than the source's stale_s
   ST_OFFLINE,     // transport down (WiFi for device-plane)
   ST_ERROR,       // fetch failed / rate-limited (see data_err_t)
-  ST_HUB_OFFLINE, // BLE hub disconnected (usage/buddy only)
-  ST_RECONNECTING // transport re-establishing; actions stay disabled until confirmed (DESIGN.md)
+  ST_HUB_OFFLINE  // BLE hub disconnected (usage/buddy only)
 } screen_state_t;
 
 typedef enum {

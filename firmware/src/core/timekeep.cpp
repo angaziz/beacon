@@ -109,6 +109,10 @@ time_t timekeep_now(void) { return time(nullptr); }
 // Single UI clock (declared in ui/screen.h). Same epoch the fetchers stamp => consistent staleness.
 uint32_t now_s(void) { return (uint32_t)time(nullptr); }
 
+// Monotonic uptime (declared in ui/screen.h). Used for prompt lifecycle timeouts so an NTP/RTC jump
+// to the wall clock cannot expire a prompt instantly.
+uint32_t uptime_s(void) { return (uint32_t)(millis() / 1000); }
+
 void timekeep_localtime(struct tm* out) {
   time_t now = time(nullptr);
   localtime_r(&now, out);

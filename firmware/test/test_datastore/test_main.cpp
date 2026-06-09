@@ -81,6 +81,53 @@ static void test_explicit_failure_preserves_payload(void) {
   TEST_ASSERT_EQUAL_FLOAT(28.0f, g.temp_c);                      // value preserved
 }
 
+// ds_tick_buddy_prompt: state-preserving prompt lifecycle (monotonic uptime). `now`/stamps share the
+// uptime epoch. The tick mutates prompt only, never hdr.state.
+static void mk_prompt(uint8_t decision, uint32_t shown_at, uint32_t decided_at) {
+  buddy_rec_t b; memset(&b, 0, sizeof(b));
+  b.prompt.present = true;
+  b.prompt.decision_state = decision;
+  b.prompt.shown_at = shown_at;
+  b.prompt.decided_at = decided_at;
+  b.hdr.last_updated = 1000;
+  ds_set_buddy(&b);   // forces ST_LIVE
+}
+
+static void test_tick_buddy_prompt_transitions(void) {
+  struct {
+    const char* name;
+    uint8_t  decision;
+    uint32_t shown_at, decided_at, now;
+    bool     expect_present;
+    uint8_t  expect_decision;
+  } cases[] = {
+    // IDLE prompt: expires to TOO_LATE at/after BUDDY_PROMPT_EXPIRY_S (25), else unchanged.
+    {"idle_before_expiry", PROMPT_IDLE_DECISION, 100, 0, 100 + 24, true, PROMPT_IDLE_DECISION},
+    {"idle_at_expiry",     PROMPT_IDLE_DECISION, 100, 0, 100 + 25, true, PROMPT_TOO_LATE},
+    // SENT_OK beat: clears (present=false) at/after BUDDY_CONFIRM_HOLD_S (2), else held.
+    {"sent_before_hold",   PROMPT_SENT_OK, 100, 200, 200 + 1, true,  PROMPT_SENT_OK},
+    {"sent_at_hold",       PROMPT_SENT_OK, 100, 200, 200 + 2, false, PROMPT_SENT_OK},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    datastore_init();
+    mk_prompt(cases[i].decision, cases[i].shown_at, cases[i].decided_at);
+    ds_tick_buddy_prompt(cases[i].now);
+    buddy_rec_t g = ds_get_buddy();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(cases[i].expect_present, g.prompt.present, cases[i].name);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(cases[i].expect_decision, g.prompt.decision_state, cases[i].name);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ST_LIVE, g.hdr.state, cases[i].name);   // tick never touches hdr.state
+  }
+}
+
+static void test_tick_buddy_prompt_preserves_hub_offline(void) {
+  mk_prompt(PROMPT_IDLE_DECISION, 100, 0);
+  ds_set_hub_offline();                 // flips buddy hdr.state, leaves the prompt
+  ds_tick_buddy_prompt(100 + 100);      // well past expiry
+  buddy_rec_t g = ds_get_buddy();
+  TEST_ASSERT_EQUAL_INT(ST_HUB_OFFLINE, g.hdr.state);          // never erased by the tick
+  TEST_ASSERT_EQUAL_UINT8(PROMPT_TOO_LATE, g.prompt.decision_state);   // prompt still ages
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_init_seeds_finance);
@@ -90,5 +137,7 @@ int main(int, char**) {
   RUN_TEST(test_sweep_never_clobbers_explicit_states);
   RUN_TEST(test_hub_offline_flip_and_recovery);
   RUN_TEST(test_explicit_failure_preserves_payload);
+  RUN_TEST(test_tick_buddy_prompt_transitions);
+  RUN_TEST(test_tick_buddy_prompt_preserves_hub_offline);
   return UNITY_END();
 }

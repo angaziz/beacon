@@ -7,6 +7,11 @@
 // Every view reads time through this; there are no per-view millis() clocks (would split-brain ages).
 uint32_t now_s(void);
 
+// Monotonic uptime in seconds (millis()/1000). Unlike now_s()/timekeep_now() (wall clock, which
+// JUMPS on NTP/RTC sync), this never moves backward => safe for prompt lifecycle timeouts. Defined
+// in timekeep.cpp.
+uint32_t uptime_s(void);
+
 // A per-theme view of a screen: build() lays it out into the page, update() refreshes it from
 // the DataStore. Each (screen x theme) pair provides one of these; the screen module dispatches
 // to the active theme's view. Theme switch => the carousel rebuilds the page with the new view.

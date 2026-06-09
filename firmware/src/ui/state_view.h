@@ -34,8 +34,7 @@ static inline bool sv_status(char* buf, size_t n, const record_hdr_t* h, uint32_
     case ST_LOADING:     snprintf(buf, n, "..."); return true;
     case ST_STALE:       age_str(age, sizeof(age), record_age_s(h, now)); snprintf(buf, n, "STALE %s", age); return true;
     case ST_OFFLINE:     snprintf(buf, n, "OFFLINE"); return true;
-    case ST_HUB_OFFLINE: snprintf(buf, n, "HUB OFFLINE"); return true;
-    case ST_RECONNECTING:snprintf(buf, n, "RECONNECTING"); return true;
+    case ST_HUB_OFFLINE: age_str(age, sizeof(age), record_age_s(h, now)); snprintf(buf, n, "HUB OFFLINE %s", age); return true;
     case ST_ERROR:
       switch (h->err) {
         case ERR_RATE_LIMITED: snprintf(buf, n, "RATE LIMIT"); break;
@@ -50,11 +49,19 @@ static inline bool sv_status(char* buf, size_t n, const record_hdr_t* h, uint32_
 
 // Value should render as dim (stale/offline/error keep last value, dimmed).
 static inline bool sv_dim(screen_state_t s) {
-  return s == ST_STALE || s == ST_OFFLINE || s == ST_ERROR || s == ST_HUB_OFFLINE || s == ST_RECONNECTING;
+  return s == ST_STALE || s == ST_OFFLINE || s == ST_ERROR || s == ST_HUB_OFFLINE;
 }
 // Value should render as placeholder dashes (no usable value yet).
 static inline bool sv_placeholder(screen_state_t s) { return s == ST_LOADING; }
 // Severe states color the chip with the down/alert color (vs ink_dim for stale age).
 static inline bool sv_severe(screen_state_t s) {
   return s == ST_OFFLINE || s == ST_ERROR || s == ST_HUB_OFFLINE;
+}
+
+// Seconds left before a still-undecided prompt expires. `now` is MONOTONIC uptime (uptime_s()),
+// matching prompt.shown_at's epoch. Elapsed-first avoids uint32 underflow (e never exceeds expiry
+// before clamping). Only meaningful while decision_state == PROMPT_IDLE_DECISION.
+static inline uint32_t buddy_prompt_secs_left(const buddy_rec_t* b, uint32_t now) {
+  uint32_t e = now - b->prompt.shown_at;
+  return e >= BUDDY_PROMPT_EXPIRY_S ? 0 : BUDDY_PROMPT_EXPIRY_S - e;
 }

@@ -154,11 +154,17 @@ static void update(void) {
     lv_label_set_text(s_tool, b.prompt.tool[0] ? b.prompt.tool : "--");
     lv_label_set_text(s_hint, b.prompt.hint[0] ? b.prompt.hint : "--");
 
-    bool locked = (b.hdr.state == ST_HUB_OFFLINE || b.hdr.state == ST_RECONNECTING);
+    bool locked = (b.hdr.state == ST_HUB_OFFLINE);
     switch (b.prompt.decision_state) {
     case PROMPT_PENDING:   // sent; both actions dim while we wait for the truthful ack (issue #8).
       lv_label_set_text(s_eyebrow, "SENT - AWAITING");
       lv_obj_set_style_text_color(s_eyebrow, t->accent2, 0);
+      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
+      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
+      break;
+    case PROMPT_SENT_OK:   // applied; held briefly before the tick clears (issue #12).
+      lv_label_set_text(s_eyebrow, "SENT OK");
+      lv_obj_set_style_text_color(s_eyebrow, t->up, 0);
       lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
       lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
       break;
@@ -169,13 +175,16 @@ static void update(void) {
       lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
       lv_obj_set_style_text_color(s_deny, t->ink, 0);
       break;
-    default:
-      lv_label_set_text(s_eyebrow, "PERMISSION - APPROVE?");
+    default: {
+      char eb[32];
+      snprintf(eb, sizeof(eb), "PERMISSION %us", (unsigned)buddy_prompt_secs_left(&b, uptime_s()));
+      lv_label_set_text(s_eyebrow, eb);
       lv_obj_set_style_text_color(s_eyebrow, t->accent2, 0);
       lv_label_set_text(s_deny, "< DENY");
       lv_obj_set_style_text_color(s_approve, locked ? t->ink_dim : t->accent, 0);
       lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
       break;
+    }
     }
   } else {
     lv_obj_add_flag(s_prompt_box, LV_OBJ_FLAG_HIDDEN);

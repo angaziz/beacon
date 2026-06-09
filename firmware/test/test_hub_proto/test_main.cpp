@@ -250,12 +250,12 @@ static void mk_pending_prompt(buddy_rec_t* b, const char* id) {
   strncpy(b->prompt.id, id, BUDDY_ID_LEN - 1);
 }
 
-static void test_apply_ack_ok_clears_prompt(void) {
+static void test_apply_ack_ok_holds_prompt(void) {
   buddy_rec_t b; mk_pending_prompt(&b, "req_abc");
   hub_ack_t a = { "req_abc", true, false };
   TEST_ASSERT_TRUE(hub_apply_ack(&b, &a));
   TEST_ASSERT_EQUAL_UINT8(PROMPT_SENT_OK, b.prompt.decision_state);
-  TEST_ASSERT_FALSE(b.prompt.present);                  // applied => prompt cleared
+  TEST_ASSERT_TRUE(b.prompt.present);                   // kept: the device tick clears it after the confirm-hold beat (issue #12)
 }
 
 static void test_apply_ack_not_ok_keeps_prompt(void) {
@@ -312,7 +312,7 @@ int main(int, char**) {
   RUN_TEST(test_parse_ack_not_ok);
   RUN_TEST(test_parse_err);
   RUN_TEST(test_parse_ack_neither);
-  RUN_TEST(test_apply_ack_ok_clears_prompt);
+  RUN_TEST(test_apply_ack_ok_holds_prompt);
   RUN_TEST(test_apply_ack_not_ok_keeps_prompt);
   RUN_TEST(test_apply_ack_err_keeps_prompt);
   RUN_TEST(test_apply_ack_mismatched_id_ignored);

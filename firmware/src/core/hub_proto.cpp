@@ -137,8 +137,7 @@ bool hub_apply_ack(buddy_rec_t* buddy, const hub_ack_t* ack) {
   if (!p->present || p->decision_state != PROMPT_PENDING) return false;   // nothing awaiting an ack
   if (strncmp(p->id, ack->id, BUDDY_ID_LEN) != 0) return false;           // stale/mismatched id
   if (ack->ok && !ack->is_err) {
-    p->decision_state = PROMPT_SENT_OK;
-    p->present = false;                                                   // applied => clear the prompt
+    p->decision_state = PROMPT_SENT_OK;                                   // keep present: the device tick clears it after the confirm-hold beat
   } else {
     p->decision_state = PROMPT_TOO_LATE;                                  // keep present so the UI can warn
   }
