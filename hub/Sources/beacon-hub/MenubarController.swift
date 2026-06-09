@@ -24,6 +24,9 @@ final class MenubarController: NSObject {
     // URL the fixLine remediation item opens; set per-state in render, read by openLink.
     private var fixURL: URL?
 
+    // Re-opens the first-run status window; AppDelegate wires it to FirstRunWindowController.show().
+    var onOpenSetup: (() -> Void)?
+
     // Absolute HH:MM avoids a stale relative age with no refresh timer.
     private let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -81,6 +84,9 @@ final class MenubarController: NSObject {
         muteLine.state = promptSoundMuted ? .on : .off
         menu.addItem(muteLine)
         menu.addItem(.separator())
+        let setupLine = NSMenuItem(title: "Setup…", action: #selector(openSetup), keyEquivalent: "")
+        setupLine.target = self
+        menu.addItem(setupLine)
         menu.addItem(NSMenuItem(title: "Quit Beacon", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
     }
@@ -126,12 +132,11 @@ final class MenubarController: NSObject {
         switch link {
         case .bluetoothOff:
             fixLine.title = "Open Bluetooth settings…"
-            // macOS 13+ pane id; the pre-Ventura "com.apple.Bluetooth" no longer resolves.
-            fixURL = URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings")
+            fixURL = SettingsLinks.bluetooth
             fixLine.isEnabled = true; fixLine.isHidden = false
         case .unauthorized:
             fixLine.title = "Open Privacy settings…"
-            fixURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth")
+            fixURL = SettingsLinks.privacyBluetooth
             fixLine.isEnabled = true; fixLine.isHidden = false
         default:
             fixURL = nil
@@ -215,16 +220,15 @@ final class MenubarController: NSObject {
         promptSound?.play()
     }
 
+    @objc private func openSetup() { onOpenSetup?() }
+
     @objc private func toggleMute() {
         promptSoundMuted.toggle()
         muteLine.state = promptSoundMuted ? .on : .off
     }
 
     @objc private func openLink() {
-        // Fall back to System Settings root if the pane id has drifted and the deep link fails to open.
-        let fallback = URL(string: "x-apple.systempreferences:")!
-        if let url = fixURL, NSWorkspace.shared.open(url) { return }
-        NSWorkspace.shared.open(fallback)
+        SettingsLinks.open(fixURL ?? SettingsLinks.fallback)
     }
 
     private func fmt(_ pct: Int?) -> String { pct.map { "\($0)%" } ?? "--" }

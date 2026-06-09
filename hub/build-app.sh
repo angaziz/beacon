@@ -19,8 +19,9 @@ if [ "${1:-}" = "install-hooks" ]; then
   # Step 0 -- dep check. jq is the only hard requirement; everything else is coreutils.
   command -v jq >/dev/null 2>&1 || { echo "error: jq not found. Install it: brew install jq" >&2; exit 1; }
 
-  # Step 1 -- shim path. $PWD is hub/ (we cd'd to dirname $0), so this resolves correctly anywhere.
-  SHIM="$PWD/statusline-shim/beacon-statusline"
+  # Step 1 -- shim path. The app passes a stable no-space path via BEACON_SHIM (it copies the bundled
+  # shim to ~/.beacon/beacon-statusline first); dev fallback is the in-repo shim under $PWD (hub/).
+  SHIM="${BEACON_SHIM:-$PWD/statusline-shim/beacon-statusline}"
   [ -f "$SHIM" ] || { echo "error: shim not found at $SHIM" >&2; exit 1; }
   [ -x "$SHIM" ] || { echo "error: shim not executable: $SHIM (chmod +x it)" >&2; exit 1; }
   case "$SHIM" in
@@ -112,6 +113,12 @@ cp "$BIN" "$APP/Contents/MacOS/beacon-hub"
 cp Info.plist "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources"
 cp Resources/beacon-prompt.wav "$APP/Contents/Resources/"   # prompt-arrival chime (MenubarController loads via Bundle.main)
+# Bundle the installer assets so the in-app "Install" button works from the shipped .app (HooksInstaller
+# resolves these via Bundle.main, dev-fallback to the repo). Keep the shim executable (+x) on copy.
+cp build-app.sh "$APP/Contents/Resources/"
+cp claude-code-settings.snippet.json "$APP/Contents/Resources/"
+cp statusline-shim/beacon-statusline "$APP/Contents/Resources/"
+chmod +x "$APP/Contents/Resources/beacon-statusline"
 
 # Ad-hoc signature gives TCC a stable identity to attach the Bluetooth grant to.
 codesign --force --sign - "$APP"
