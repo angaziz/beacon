@@ -69,6 +69,7 @@ final class FirstRunWindowController: NSObject, NSWindowDelegate {
     // Called back by AppDelegate after the Process completes (it hops to @MainActor).
     func finishInstall(installed: RowState, error: String?) {
         hooksRow.action.title = "Install"
+        hooksRow.action.isEnabled = true   // beginInstall disabled it; re-enable so a failed install can be retried
         hooks = installed
         if installed == .ok {
             showNote("Hooks installed. Restart Claude Code for them to take effect.")
