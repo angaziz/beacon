@@ -87,8 +87,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handle(_ cmd: DeviceCommand) {
         switch cmd {
         case .permission(let id, let approve):
-            bridge?.resolve(id: id, approve: approve)
-            central.send(HubAck.ack(id: id, ok: true))
+            // Ack the truth (issue #8): only ok:true when the decision actually applied. A late/
+            // superseded decision => ok:false; an id we never minted (or no bridge) => err.
+            switch bridge?.resolve(id: id, approve: approve) {
+            case .applied:
+                central.send(HubAck.ack(id: id, ok: true))
+            case .late:
+                central.send(HubAck.ack(id: id, ok: false))
+            case .unknown, nil:
+                central.send(HubAck.err(id: id, reason: "unknown_prompt_id"))
+            }
         }
     }
 

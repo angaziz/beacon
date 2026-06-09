@@ -5,12 +5,12 @@
 #include "config/layout.h"
 #include "core/datastore.h"
 #include "core/hub_task.h"
-#include "util/log.h"
 #include <Arduino.h>
 #include <string.h>
 
 // LED Matrix / CLAUDE: status line + permission prompt (tool lit, hint in a box, DENY|APPROVE)
-// or idle activity entries. Approve/Deny are LOCAL stubs (clear prompt in the datastore).
+// or idle activity entries. Decide routes through buddy_decide; the prompt waits on the hub ack
+// ("SENT -- AWAITING") and clears only on ok:true, else warns "TOO LATE" with a dismiss.
 
 static lv_obj_t *s_status, *s_stats;
 static lv_obj_t *s_prompt_box, *s_prompt_lead, *s_tool, *s_hint;
@@ -18,18 +18,8 @@ static lv_obj_t *s_actions, *s_deny, *s_approve;
 static lv_obj_t *s_idle;
 
 
-static void decide(bool approve) {
-  buddy_rec_t r = ds_get_buddy();
-  if (r.hdr.state == ST_HUB_OFFLINE || r.hdr.state == ST_RECONNECTING) return;
-  if (!r.prompt.present) return;
-  if (!hub_send_permission(r.prompt.id, approve)) return;   // keep prompt visible if not enqueued
-  r.prompt.present = false;
-  ds_set_buddy(&r);
-  LOGI("buddy: %s", approve ? "APPROVE" : "DENY");
-}
-
-static void deny_cb(lv_event_t*)    { decide(false); }
-static void approve_cb(lv_event_t*) { decide(true); }
+static void deny_cb(lv_event_t*)    { if (!buddy_dismiss()) buddy_decide(false); }
+static void approve_cb(lv_event_t*) { buddy_decide(true); }
 
 static void build(lv_obj_t* page) {
   const beacon_theme_t* t = theme_active();
@@ -152,8 +142,29 @@ static void update(void) {
     lv_label_set_text(s_tool, b.prompt.tool[0] ? b.prompt.tool : "--");
     lv_label_set_text(s_hint, b.prompt.hint[0] ? b.prompt.hint : "--");
     bool locked = (b.hdr.state == ST_HUB_OFFLINE || b.hdr.state == ST_RECONNECTING);
-    lv_obj_set_style_text_color(s_approve, locked ? t->ink_dim : t->accent, 0);
-    lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);  // deny stays dim either way
+    switch (b.prompt.decision_state) {
+    case PROMPT_PENDING:   // sent; both actions dim until the truthful ack (issue #8).
+      lv_label_set_text(s_prompt_lead, "SENT -- AWAITING");
+      lv_obj_set_style_text_color(s_prompt_lead, t->accent, 0);
+      lv_label_set_text(s_deny, "< DENY");
+      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
+      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
+      break;
+    case PROMPT_TOO_LATE:   // did not apply; deny becomes the dismiss affordance.
+      lv_label_set_text(s_prompt_lead, "TOO LATE -- DIDN'T APPLY");
+      lv_obj_set_style_text_color(s_prompt_lead, t->down, 0);
+      lv_label_set_text(s_deny, "< DISMISS");
+      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
+      lv_obj_set_style_text_color(s_deny, t->ink, 0);
+      break;
+    default:
+      lv_label_set_text(s_prompt_lead, "PERMISSION -- APPROVE?");
+      lv_obj_set_style_text_color(s_prompt_lead, t->accent, 0);
+      lv_label_set_text(s_deny, "< DENY");
+      lv_obj_set_style_text_color(s_approve, locked ? t->ink_dim : t->accent, 0);
+      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);  // deny stays dim either way
+      break;
+    }
   } else {
     if (b.entry_count == 0) {
       lv_label_set_text(s_idle, "idle");

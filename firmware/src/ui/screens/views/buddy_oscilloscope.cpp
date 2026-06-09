@@ -5,13 +5,13 @@
 #include "config/layout.h"
 #include "core/datastore.h"
 #include "core/hub_task.h"
-#include "util/log.h"
 #include <Arduino.h>
 #include <string.h>
 
 // Oscilloscope / Signal CLAUDE. Scope-instrument language: status telemetry line, then either
 // a permission PROMPT (tool name as the signal, hint in a bordered scope box, DENY|APPROVE
-// readouts) or idle activity log. Approve/Deny are LOCAL STUBS. Actions disabled on HUB_OFFLINE.
+// readouts) or idle activity log. Decide routes through buddy_decide; the prompt waits on the hub
+// ack and clears only on ok:true, else warns "too late" with a dismiss. Actions disabled on HUB_OFFLINE.
 
 
 static lv_obj_t* s_telem;
@@ -26,13 +26,8 @@ static void update(void);
 
 static void decide_cb(lv_event_t* e) {
   bool approve = (bool)(intptr_t)lv_event_get_user_data(e);
-  buddy_rec_t r = ds_get_buddy();
-  if (r.hdr.state == ST_HUB_OFFLINE || r.hdr.state == ST_RECONNECTING) return;
-  if (!r.prompt.present) return;
-  if (!hub_send_permission(r.prompt.id, approve)) return;   // keep prompt visible if not enqueued
-  r.prompt.present = false;
-  ds_set_buddy(&r);
-  LOGI("buddy %s prompt %s", approve ? "APPROVE" : "DENY", r.prompt.id);
+  if (!approve && buddy_dismiss()) { update(); return; }   // deny doubles as dismiss for "too late"
+  if (buddy_decide(approve)) update();
 }
 
 static void build(lv_obj_t* page) {
@@ -128,11 +123,32 @@ static void update(void) {
   }
 
   if (b.prompt.present) {
-    lv_label_set_text(s_eyebrow, "PERMISSION - APPROVE?");
     lv_label_set_text(s_tool, b.prompt.tool[0] ? b.prompt.tool : "TOOL");
+    lv_obj_set_style_text_font(s_tool, t->f_display, 0);
     lv_obj_clear_flag(s_box, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(s_hint, b.prompt.hint[0] ? b.prompt.hint : "--");
-    show_actions(true, !offline, t);
+    switch (b.prompt.decision_state) {
+    case PROMPT_PENDING:   // sent; both readouts dim until the truthful ack (issue #8).
+      lv_label_set_text(s_eyebrow, "SENT - AWAITING");
+      lv_obj_set_style_text_color(s_eyebrow, t->ink_dim, 0);
+      lv_label_set_text(s_deny, "< DENY");
+      show_actions(true, false, t);
+      break;
+    case PROMPT_TOO_LATE:   // did not apply; deny becomes the dismiss readout.
+      lv_label_set_text(s_eyebrow, "TOO LATE - DIDN'T APPLY");
+      lv_obj_set_style_text_color(s_eyebrow, t->down, 0);
+      lv_label_set_text(s_deny, "< DISMISS");
+      lv_obj_clear_flag(s_deny, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_approve, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_style_text_color(s_deny, t->ink, 0);
+      break;
+    default:
+      lv_label_set_text(s_eyebrow, "PERMISSION - APPROVE?");
+      lv_obj_set_style_text_color(s_eyebrow, t->accent, 0);
+      lv_label_set_text(s_deny, "< DENY");
+      show_actions(true, !offline, t);
+      break;
+    }
   } else {
     lv_label_set_text(s_eyebrow, "ACTIVITY");
     lv_obj_add_flag(s_box, LV_OBJ_FLAG_HIDDEN);

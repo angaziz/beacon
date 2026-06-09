@@ -172,10 +172,11 @@ Device → hub (commands, each acked):
 ```
 Hub → device ack/error:
 ```json
-{"v":1,"ack":"req_abc","ok":true}
+{"v":1,"ack":"req_abc","ok":true}                 // decision applied
+{"v":1,"ack":"req_abc","ok":false}                // decision did NOT apply (late/superseded)
 {"v":1,"err":"unknown_prompt_id","id":"req_xyz"}
 ```
-Rules: a `permission` decision MUST echo the originating `prompt.id`; the hub rejects stale/unknown ids (`err`). On disconnect the device shows `ST_HUB_OFFLINE` with last values + age; on reconnect the hub resends a full status frame. `usage` may carry `null` for an unavailable window/provider.
+Rules: a `permission` decision MUST echo the originating `prompt.id`; the hub rejects stale/unknown ids (`err`). `ok:false` means the device decided but the hub had already resolved the prompt (e.g. the 25 s fail-closed cap fired first, or it was superseded) — the device surfaces this as "did not apply", not success. On disconnect the device shows `ST_HUB_OFFLINE` with last values + age; on reconnect the hub resends a full status frame. `usage` may carry `null` for an unavailable window/provider.
 
 ### 7.2 Normalized AI-usage schema (Hub-produced)
 

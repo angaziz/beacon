@@ -28,10 +28,13 @@ the device keeps an absent block's last values). A null/omitted window `pct` => 
 
 ```json
 {"v":1,"cmd":"permission","id":"p07","decision":"approve"}   // or "deny"
-{"v":1,"ack":"p07","ok":true}
-{"v":1,"err":"unknown_prompt_id","id":"p07"}
+{"v":1,"ack":"p07","ok":true}                                // decision applied
+{"v":1,"ack":"p07","ok":false}                               // decision did NOT apply (late/superseded)
+{"v":1,"err":"unknown_prompt_id","id":"p07"}                 // id the hub never minted
 ```
 - `id` echoes the hub-minted short id (see §D). The hub maps it back to the real hook request id.
+- `ok:false` = the device decided but the hub had already resolved the prompt (e.g. the 25s fail-closed
+  cap fired first, or it was superseded). The device must surface this, not treat it as success.
 
 ## C. Upstream shapes (DRAFT from research — REPLACE with real captures in P2-0)
 

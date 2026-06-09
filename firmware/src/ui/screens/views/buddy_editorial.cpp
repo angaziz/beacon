@@ -2,18 +2,13 @@
 #include "ui/screens/screen_common.h"
 #include "core/datastore.h"
 #include "core/hub_task.h"
-#include "util/log.h"
 
 static lv_obj_t *s_slot, *s_status, *s_kicker, *s_tool, *s_cmdbox, *s_cmd, *s_deny, *s_approve, *s_idle;
 
 static void decide_cb(lv_event_t* e) {
   long approve = (long)lv_event_get_user_data(e);
-  buddy_rec_t b = ds_get_buddy();
-  // guard a stale click: don't resurrect ST_LIVE over hub-offline/reconnecting (ds_set_* forces LIVE)
-  if (!b.prompt.present || b.hdr.state == ST_HUB_OFFLINE || b.hdr.state == ST_RECONNECTING) return;
-  // Send to the hub; clear locally only if accepted for transport (keep the prompt visible otherwise).
-  if (!hub_send_permission(b.prompt.id, approve != 0)) return;
-  b.prompt.present = false; ds_set_buddy(&b);
+  if (approve == 0 && buddy_dismiss()) return;   // deny doubles as dismiss for a "too late" warning
+  buddy_decide(approve != 0);
 }
 
 static lv_obj_t* mk_btn(lv_obj_t* page, const char* txt, lv_align_t al, long approve) {
@@ -61,6 +56,30 @@ static void update(void) {
     show_prompt(true);
     lv_label_set_text(s_tool, b.prompt.tool);
     lv_label_set_text(s_cmd, b.prompt.hint);
+    const beacon_theme_t* t = theme_active();
+    switch (b.prompt.decision_state) {
+    case PROMPT_PENDING:   // sent; both actions dim until the truthful ack (issue #8).
+      lv_label_set_text(s_kicker, "SENT -- AWAITING");
+      lv_obj_set_style_text_color(s_kicker, t->accent, 0);
+      lv_label_set_text(s_deny, "< DENY");
+      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
+      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
+      break;
+    case PROMPT_TOO_LATE:   // did not apply; deny becomes the dismiss affordance.
+      lv_label_set_text(s_kicker, "TOO LATE -- DIDN'T APPLY");
+      lv_obj_set_style_text_color(s_kicker, t->down, 0);
+      lv_label_set_text(s_deny, "< DISMISS");
+      lv_obj_set_style_text_color(s_deny, t->ink, 0);
+      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
+      break;
+    default:
+      lv_label_set_text(s_kicker, "PERMISSION -- APPROVE?");
+      lv_obj_set_style_text_color(s_kicker, t->accent, 0);
+      lv_label_set_text(s_deny, "< DENY");
+      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
+      lv_obj_set_style_text_color(s_approve, t->accent, 0);
+      break;
+    }
   } else {
     show_prompt(false);
     if (disabled) lv_label_set_text(s_idle, "hub offline");

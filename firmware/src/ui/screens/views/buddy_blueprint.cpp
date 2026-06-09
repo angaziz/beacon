@@ -1,6 +1,7 @@
 // Blueprint / Schematic - CLAUDE (coding buddy). Technical DWG header + status dimension
 // line. Prompt present => tool figure + hint box (schematic frame) + DENY|APPROVE; else idle
-// => recent entries or "idle". Approve/Deny is a LOCAL STUB. Grid/reticle drawn by chrome.
+// => recent entries or "idle". Decide routes through buddy_decide; the prompt waits on the hub ack
+// and clears only on ok:true, else warns "too late" with a dismiss. Grid/reticle drawn by chrome.
 #include "ui/screen.h"
 #include "ui/styles.h"
 #include "ui/state_view.h"
@@ -8,7 +9,6 @@
 #include "config/layout.h"
 #include "core/datastore.h"
 #include "core/hub_task.h"
-#include "util/log.h"
 #include <Arduino.h>
 
 static lv_obj_t *s_status, *s_stat;          // header chip + status dimension line
@@ -22,12 +22,8 @@ static bool actions_locked(screen_state_t st) {
 
 static void decide_cb(lv_event_t* e) {
   bool approve = (bool)(intptr_t)lv_event_get_user_data(e);
-  buddy_rec_t r = ds_get_buddy();
-  if (actions_locked(r.hdr.state) || !r.prompt.present) return;
-  if (!hub_send_permission(r.prompt.id, approve)) return;   // keep prompt visible if not enqueued
-  r.prompt.present = false;
-  ds_set_buddy(&r);
-  LOGI("buddy %s prompt %s", approve ? "APPROVE" : "DENY", r.prompt.id);
+  if (!approve && buddy_dismiss()) return;   // deny doubles as dismiss for a "too late" warning
+  buddy_decide(approve);
 }
 
 static void build(lv_obj_t* page) {
@@ -150,14 +146,39 @@ static void update(void) {
     lv_label_set_text(s_tool, r.prompt.tool);
     lv_label_set_text(s_hint, r.prompt.hint);
     bool locked = actions_locked(r.hdr.state);
-    lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
-    lv_obj_set_style_text_color(s_approve, locked ? t->ink_dim : t->accent, 0);
-    if (locked) {
+    switch (r.prompt.decision_state) {
+    case PROMPT_PENDING:   // sent; both actions dim + non-clickable until the truthful ack (issue #8).
+      lv_label_set_text(s_eyebrow, "SENT - AWAITING");
+      lv_obj_set_style_text_color(s_eyebrow, t->accent, 0);
+      lv_label_set_text(s_deny, "< DENY");
+      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
+      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
       lv_obj_clear_flag(s_deny, LV_OBJ_FLAG_CLICKABLE);
       lv_obj_clear_flag(s_approve, LV_OBJ_FLAG_CLICKABLE);
-    } else {
+      break;
+    case PROMPT_TOO_LATE:   // did not apply; deny becomes the dismiss affordance.
+      lv_label_set_text(s_eyebrow, "TOO LATE - DIDN'T APPLY");
+      lv_obj_set_style_text_color(s_eyebrow, t->down, 0);
+      lv_label_set_text(s_deny, "< DISMISS");
+      lv_obj_set_style_text_color(s_deny, t->ink, 0);
+      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
       lv_obj_add_flag(s_deny, LV_OBJ_FLAG_CLICKABLE);
-      lv_obj_add_flag(s_approve, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_clear_flag(s_approve, LV_OBJ_FLAG_CLICKABLE);
+      break;
+    default:
+      lv_label_set_text(s_eyebrow, "PERMISSION - APPROVE?");
+      lv_obj_set_style_text_color(s_eyebrow, t->accent, 0);
+      lv_label_set_text(s_deny, "< DENY");
+      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
+      lv_obj_set_style_text_color(s_approve, locked ? t->ink_dim : t->accent, 0);
+      if (locked) {
+        lv_obj_clear_flag(s_deny, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_clear_flag(s_approve, LV_OBJ_FLAG_CLICKABLE);
+      } else {
+        lv_obj_add_flag(s_deny, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(s_approve, LV_OBJ_FLAG_CLICKABLE);
+      }
+      break;
     }
   } else {
     if (r.entry_count > 0) lv_label_set_text(s_idle, r.entries[0]);

@@ -202,10 +202,69 @@ static void test_parse_err(void) {
   TEST_ASSERT_EQUAL_STRING("req_xyz", a.id);
 }
 
+static void test_parse_ack_not_ok(void) {
+  // ok:false = decision did not apply (late/superseded); parses true, is_err=false, ok=false (issue #8).
+  const char* j = "{\"v\":1,\"ack\":\"req_abc\",\"ok\":false}";
+  hub_ack_t a; memset(&a, 0, sizeof(a));
+  TEST_ASSERT_TRUE(hub_parse_ack(j, strlen(j), &a));
+  TEST_ASSERT_FALSE(a.is_err);
+  TEST_ASSERT_FALSE(a.ok);
+  TEST_ASSERT_EQUAL_STRING("req_abc", a.id);
+}
+
 static void test_parse_ack_neither(void) {
   const char* j = "{\"v\":1,\"usage\":{}}";        // a status frame is not an ack
   hub_ack_t a; memset(&a, 0, sizeof(a));
   TEST_ASSERT_FALSE(hub_parse_ack(j, strlen(j), &a));
+}
+
+// ===== ack state transition (hub_apply_ack, issue #8) =====
+
+static void mk_pending_prompt(buddy_rec_t* b, const char* id) {
+  memset(b, 0, sizeof(*b));
+  b->prompt.present = true;
+  b->prompt.decision_state = PROMPT_PENDING;
+  strncpy(b->prompt.id, id, BUDDY_ID_LEN - 1);
+}
+
+static void test_apply_ack_ok_clears_prompt(void) {
+  buddy_rec_t b; mk_pending_prompt(&b, "req_abc");
+  hub_ack_t a = { "req_abc", true, false };
+  TEST_ASSERT_TRUE(hub_apply_ack(&b, &a));
+  TEST_ASSERT_EQUAL_UINT8(PROMPT_SENT_OK, b.prompt.decision_state);
+  TEST_ASSERT_FALSE(b.prompt.present);                  // applied => prompt cleared
+}
+
+static void test_apply_ack_not_ok_keeps_prompt(void) {
+  buddy_rec_t b; mk_pending_prompt(&b, "req_abc");
+  hub_ack_t a = { "req_abc", false, false };            // ok:false (late/superseded)
+  TEST_ASSERT_TRUE(hub_apply_ack(&b, &a));
+  TEST_ASSERT_EQUAL_UINT8(PROMPT_TOO_LATE, b.prompt.decision_state);
+  TEST_ASSERT_TRUE(b.prompt.present);                   // kept so the UI can warn, never shows success
+}
+
+static void test_apply_ack_err_keeps_prompt(void) {
+  buddy_rec_t b; mk_pending_prompt(&b, "req_abc");
+  hub_ack_t a = { "req_abc", false, true };             // err frame
+  TEST_ASSERT_TRUE(hub_apply_ack(&b, &a));
+  TEST_ASSERT_EQUAL_UINT8(PROMPT_TOO_LATE, b.prompt.decision_state);
+  TEST_ASSERT_TRUE(b.prompt.present);
+}
+
+static void test_apply_ack_mismatched_id_ignored(void) {
+  buddy_rec_t b; mk_pending_prompt(&b, "req_abc");
+  hub_ack_t a = { "req_other", true, false };
+  TEST_ASSERT_FALSE(hub_apply_ack(&b, &a));             // stale id => no change
+  TEST_ASSERT_EQUAL_UINT8(PROMPT_PENDING, b.prompt.decision_state);
+  TEST_ASSERT_TRUE(b.prompt.present);
+}
+
+static void test_apply_ack_not_pending_ignored(void) {
+  buddy_rec_t b; mk_pending_prompt(&b, "req_abc");
+  b.prompt.decision_state = PROMPT_IDLE_DECISION;       // no decision awaiting an ack
+  hub_ack_t a = { "req_abc", true, false };
+  TEST_ASSERT_FALSE(hub_apply_ack(&b, &a));
+  TEST_ASSERT_TRUE(b.prompt.present);
 }
 
 int main(int, char**) {
@@ -225,7 +284,13 @@ int main(int, char**) {
   RUN_TEST(test_build_permission_deny);
   RUN_TEST(test_build_overflow_returns_zero);
   RUN_TEST(test_parse_ack_ok);
+  RUN_TEST(test_parse_ack_not_ok);
   RUN_TEST(test_parse_err);
   RUN_TEST(test_parse_ack_neither);
+  RUN_TEST(test_apply_ack_ok_clears_prompt);
+  RUN_TEST(test_apply_ack_not_ok_keeps_prompt);
+  RUN_TEST(test_apply_ack_err_keeps_prompt);
+  RUN_TEST(test_apply_ack_mismatched_id_ignored);
+  RUN_TEST(test_apply_ack_not_pending_ignored);
   return UNITY_END();
 }
