@@ -1,5 +1,6 @@
 #include "core/net.h"
 #include "core/nvs.h"
+#include "core/provision.h"
 #include "core/timekeep.h"
 #include "config/root_ca.h"
 #include "util/log.h"
@@ -19,6 +20,11 @@ static bool               s_ntp_started = false;
 static WiFiMulti          s_multi;
 static bool               s_sta = false;      // net_begin ran (STA mode active)
 static volatile bool      s_enabled = true;   // Connect/Disconnect toggle (pause auto-join)
+// Runtime "add network" portal: UI sets s_prov_req (Core-1); net_service (Core-0) owns the AP radio and
+// reflects it in s_prov_radio. While provisioning, net issues no STA run()/disconnect (the portal owns
+// the radio); provision_loop (Core-1) runs the captive servers off these flags.
+static volatile bool      s_prov_req = false;     // Core-1 writer (UI)
+static volatile bool      s_prov_radio = false;   // Core-0 writer (net_service)
 
 // Published status snapshot: written by net_service (Core-0), read by the UI (Core-1). Keeps the
 // `WiFi` singleton off Core-1 entirely (the §6 DataStore pattern) — no torn reads of WiFi.SSID() etc.
@@ -84,6 +90,23 @@ void net_begin(void) {
 // blocking WiFiMulti reconnect only when disconnected + enabled + at least one saved net.
 void net_service(void) {
   if (!s_sta) return;
+
+  // Runtime add-network portal: net owns the AP radio (the UI never touches WiFi). Bring the SoftAP up
+  // on request; tear it down once the captive servers (Core-1) have stopped, then apply the new creds.
+  if (s_prov_req && !s_prov_radio) {
+    WiFi.mode(WIFI_AP_STA);            // AP_STA keeps the current STA link up while the portal is open
+    WiFi.softAP(provision_ap_ssid());
+    s_prov_radio = true;
+    LOGI("provision(runtime) AP up");
+  } else if (!s_prov_req && s_prov_radio && !provision_servers_up()) {
+    WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_STA);
+    s_prov_radio = false;
+    nvs_wifi_clear_dirty(); rebuild_aps();   // a net may have been added: refresh WiFiMulti now
+    LOGI("provision(runtime) AP down; %u saved", (unsigned)nvs_wifi_count());
+  }
+  if (s_prov_radio) { update_snapshot(); return; }   // portal owns the radio: no STA run()/disconnect
+
   if (!s_enabled) {                                  // user Disconnect: drop + stay off (Core-0 disconnect)
     if (net_is_up()) { LOGI("wifi disconnect (user)"); WiFi.disconnect(); }
     update_snapshot();
@@ -96,6 +119,10 @@ void net_service(void) {
 
 void net_set_enabled(bool en) { s_enabled = en; }   // flag only; net_service (Core-0) acts on it
 bool net_is_enabled(void) { return s_enabled; }
+
+void net_request_provision(bool on) { s_prov_req = on; }   // flag only; net_service (Core-0) acts on it
+bool net_provision_requested(void)  { return s_prov_req; }
+bool net_provision_radio_up(void)   { return s_prov_radio; }
 
 bool net_is_up(void) { return s_up && WiFi.status() == WL_CONNECTED; }
 
