@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let central = BeaconCentral()
     private var bridge: ClaudeCodeBridge?
     private let poller = UsagePoller()
+    private let firstRun = FirstRunWindowController()
 
     // Latest known state -- the source of truth we (re)send on heartbeat/reconnect.
     private var usage = Usage(claude: .unavailable, codex: .unavailable)   // merged; resent on heartbeat
@@ -29,9 +30,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startBridge()
         startCentral()
         startPoller()
+        startFirstRun()
 
         heartbeat = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.sendFullFrame() }
+        }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // Hooks can change out-of-band (manual edit) between launches; re-check cheaply on re-focus.
+        firstRun.setHooks(HooksInstaller.isInstalled() ? .ok : .bad)
+    }
+
+    // --- first-run window ---
+
+    private func startFirstRun() {
+        firstRun.onInstallHooks = { [weak self] in self?.installHooksAndRefresh() }
+        menubar.onOpenSetup = { [weak self] in self?.firstRun.show() }
+        firstRun.setHooks(HooksInstaller.isInstalled() ? .ok : .bad)
+        firstRun.showIfNeeded()
+    }
+
+    // Run the (Process-backed) install off the main thread so the window stays responsive, then hop
+    // back to update the row + surface any stderr-derived error.
+    private func installHooksAndRefresh() {
+        Task.detached { [weak self] in
+            let errorMessage: String?
+            do { try HooksInstaller.install(); errorMessage = nil }
+            catch { errorMessage = error.localizedDescription }
+            let installed = HooksInstaller.isInstalled()
+            await MainActor.run {
+                self?.firstRun.finishInstall(installed: installed ? .ok : .bad, error: errorMessage)
+            }
         }
     }
 
@@ -93,6 +123,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menubar.setAlert(nil)   // device reachable again => clear any undeliverable-prompt alert.
         }
         bridge?.setDeviceConnected(connected)
+
+        // Drive the first-run window from the SAME phase stream (no second CBCentralManager): Bluetooth
+        // is bad only when powered-off/unauthorized/unavailable; paired tracks live .connected.
+        switch phase {
+        case .bluetoothOff, .unauthorized, .unavailable: firstRun.setBluetooth(.bad)
+        default:                                          firstRun.setBluetooth(.ok)
+        }
+        firstRun.setPaired(connected ? .ok : .bad)
     }
 
     private func handle(_ cmd: DeviceCommand) {
