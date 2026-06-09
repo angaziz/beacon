@@ -43,7 +43,13 @@ final class MenubarController: NSObject {
 
     // Audible cue when a prompt lands on the device, plus an opt-out (the device screen is easy to miss).
     private let muteLine = NSMenuItem(title: "Mute prompt sound", action: nil, keyEquivalent: "")
-    private let promptSound = NSSound(named: "Glass")
+    // Bundled custom chime; falls back to a system sound when run without the .app bundle (bare dev build).
+    private let promptSound: NSSound? = {
+        if let url = Bundle.main.url(forResource: "beacon-prompt", withExtension: "wav") {
+            return NSSound(contentsOf: url, byReference: true)
+        }
+        return NSSound(named: "Glass")
+    }()
     private var promptSoundMuted: Bool {
         get { UserDefaults.standard.bool(forKey: "BeaconPromptSoundMuted") }
         set { UserDefaults.standard.set(newValue, forKey: "BeaconPromptSoundMuted") }
