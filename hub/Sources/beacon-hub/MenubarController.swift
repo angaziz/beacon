@@ -51,6 +51,8 @@ final class MenubarController: NSObject {
     private let syncLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let claudeLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let codexLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let claudeRow = UsageRowView(provider: "Claude")
+    private let codexRow = UsageRowView(provider: "Codex")
     private let pairLine = NSMenuItem(title: "Pair: enter the code shown on the device", action: nil, keyEquivalent: "")
     private var errorItems: [NSMenuItem] = []
 
@@ -89,6 +91,8 @@ final class MenubarController: NSObject {
         menu.addItem(fixLine)
         syncLine.isEnabled = false; menu.addItem(syncLine)
         menu.addItem(.separator())
+        claudeLine.view = claudeRow
+        codexLine.view = codexRow
         for item in [claudeLine, codexLine] { item.isEnabled = false; menu.addItem(item) }
         menu.addItem(.separator())
         pairLine.isEnabled = false
@@ -181,8 +185,7 @@ final class MenubarController: NSObject {
             syncLine.title = "Last sync: never"
         }
 
-        claudeLine.title = "Claude  5h \(fmt(usage.claude.h5.pct))  7d \(fmt(usage.claude.d7.pct))"
-        codexLine.title  = "Codex   5h \(fmt(usage.codex.h5.pct))  7d \(fmt(usage.codex.d7.pct))"
+        refreshUsageRows()
 
         // Pairing hint is only actionable while looking for / connecting to a device.
         switch link {
@@ -267,9 +270,18 @@ final class MenubarController: NSObject {
         SettingsLinks.open(fixURL ?? SettingsLinks.fallback)
     }
 
-    private func fmt(_ pct: Int?) -> String { pct.map { "\($0)%" } ?? "--" }
+    // Re-stamp the usage rows with the current time so the reset hint ("resets 2:40pm" vs "Fri") is
+    // fresh; called from render (every 45s poll / state change) and on menu open (between polls).
+    private func refreshUsageRows() {
+        let now = Date()
+        claudeRow.update(usage.claude, now: now)
+        codexRow.update(usage.codex, now: now)
+    }
 }
 
 extension MenubarController: NSMenuDelegate {
-    func menuWillOpen(_ menu: NSMenu) { onMenuWillOpen?() }
+    func menuWillOpen(_ menu: NSMenu) {
+        onMenuWillOpen?()
+        refreshUsageRows()
+    }
 }
