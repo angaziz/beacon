@@ -109,6 +109,21 @@ public enum HookResponse {
         let payload: [String: Any] = ["hookSpecificOutput": inner]
         return (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])) ?? Data("{}".utf8)
     }
+
+    // "ask": do NOT gate -- defer to Claude Code's own interactive prompt. Used for AskUserQuestion,
+    // which is a multi-option question the device can't (and shouldn't) answer; `allow` here could let
+    // an auto-accept mode resolve it with no human pick, so we explicitly hand it to the Mac instead.
+    public static func permissionAsk(event: String) -> Data {
+        let inner: [String: Any]
+        switch event {
+        case "PermissionRequest":
+            inner = ["hookEventName": "PermissionRequest", "decision": ["behavior": "ask"]]
+        default:   // PreToolUse (and aliases)
+            inner = ["hookEventName": event, "permissionDecision": "ask"]
+        }
+        return (try? JSONSerialization.data(withJSONObject: ["hookSpecificOutput": inner],
+                                            options: [.sortedKeys])) ?? Data("{}".utf8)
+    }
 }
 
 // hub->device ack/err for a received command (tech.md §7.1).
