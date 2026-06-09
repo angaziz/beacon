@@ -186,6 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         central.onCommand = { [weak self] cmd in
             Task { @MainActor in self?.handle(cmd) }
         }
+        menubar.onRetryPairing = { [weak self] in self?.central.retryPairing() }
         central.start()
     }
 
@@ -200,6 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .connecting(let n):   link = .connecting(n)
         case .connected(let n):    link = .connected(n)
         case .reconnecting:        link = .reconnecting
+        case .pairingFailed:       link = .pairingFailed
         }
         menubar.setLink(link)
         let connected: Bool = { if case .connected = phase { return true } else { return false } }()

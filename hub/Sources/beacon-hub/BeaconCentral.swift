@@ -12,6 +12,7 @@ enum LinkPhase: Equatable {
     case connecting(String)
     case connected(String)
     case reconnecting
+    case pairingFailed
 }
 
 // CoreBluetooth central for the Nordic-UART link to the device (tech.md 7.1). Scans for the Beacon
@@ -38,13 +39,23 @@ final class BeaconCentral: NSObject {
             guard oldValue != isConnected else { return }
             // Disconnect path (handleDisconnect => beginScan) owns the next phase; only the rising edge
             // emits .connected here.
-            if isConnected { hadConnection = true; setPhase(.connected(connectedName ?? "")) }
+            if isConnected { hadConnection = true; escalation.reset(); setPhase(.connected(connectedName ?? "")) }
         }
     }
     private(set) var connectedName: String?
 
     private var phase: LinkPhase? = nil   // nil sentinel: forces first emit even if first real state folds to .unavailable
     private var hadConnection = false
+
+    // Bounds a genuinely-stuck first-time pair so bonding can't loop forever silently (issue #17).
+    // Queue-confined (all mutations happen on `queue`). 4 attempts / 25 s comfortably exceeds a single
+    // real OS pairing-dialog round-trip but trips a stuck bond.
+    private var escalation = PairingEscalation(maxAttempts: 4, deadline: 25)
+    // Monotonic seconds: the deadline measures elapsed real time, so a wall-clock jump (NTP/sleep) must
+    // not spuriously trip (or mask) it.
+    private static func monotonicNow() -> TimeInterval {
+        TimeInterval(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+    }
     private func setPhase(_ p: LinkPhase) {
         guard p != phase else { return }
         phase = p
@@ -93,13 +104,25 @@ final class BeaconCentral: NSObject {
         queue.async { [weak self] in
             guard let self else { return }
             self.hadConnection = false   // honest "Searching" (not "reconnecting" to a device we just forgot).
+            self.escalation.reset()       // explicit re-pair => full fresh budget.
             self.handleDisconnect()       // cancels connection, nils peripheral/rx/tx, clears inbound, beginScan().
+        }
+    }
+
+    // Menu's "Try again" after .pairingFailed: reset the budget and resume scanning. Distinct from the
+    // heavier forgetAndRescan() -- this does NOT pop the System-Settings "Forget This Device" modal.
+    func retryPairing() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.escalation.reset()
+            self.beginScan()
         }
     }
 
     private func beginScan() {
         guard central.state == .poweredOn else { return }
         inbound.removeAll(keepingCapacity: true)
+        escalation.recordAttemptStart(now: Self.monotonicNow())   // start the deadline clock at the first scan.
         central.scanForPeripherals(withServices: [Self.service], options: nil)
         setPhase(hadConnection ? .reconnecting : .searching)
     }
@@ -116,6 +139,12 @@ final class BeaconCentral: NSObject {
         if let p = peripheral { central.cancelPeripheralConnection(p) }
         peripheral = nil
         inbound.removeAll(keepingCapacity: true)
+        // A genuinely-stuck first-time pair (budget burned / deadline passed) escalates loudly instead of
+        // silently rescanning forever; a reconnect blip of a known-good device (hadConnection) never trips.
+        if escalation.recordFailure(now: Self.monotonicNow(), hadConnection: hadConnection) {
+            setPhase(.pairingFailed)
+            return
+        }
         beginScan()   // auto-reconnect (FR-HUB-3): rescan immediately.
     }
 
