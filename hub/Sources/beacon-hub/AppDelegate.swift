@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ServiceManagement
 import BeaconHubKit
 
 // Wires the four subsystems together: the local hook bridge, the BLE central, and the usage poller all
@@ -31,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startCentral()
         startPoller()
         startFirstRun()
+        startLoginItem()
 
         heartbeat = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.sendFullFrame() }
@@ -40,6 +42,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidBecomeActive(_ notification: Notification) {
         // Hooks can change out-of-band (manual edit) between launches; re-check cheaply on re-focus.
         firstRun.setHooks(HooksInstaller.isInstalled() ? .ok : .bad)
+        refreshLoginItem()   // cheap re-sync; the menu-open refresh is the reliable path for this accessory app.
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let bridge else { return .terminateNow }
+        var replied = false
+        let reply = { if !replied { replied = true; NSApp.reply(toApplicationShouldTerminate: true) } }
+        bridge.drainHeldPrompts(reason: "Beacon hub is quitting", completion: reply)
+        // Safety cap so Quit never hangs if a socket write stalls; the drain replies earlier on real flush,
+        // and immediately when nothing was held. A dropped conn would fail-OPEN per CONTRACT.md C.3.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { reply() }
+        return .terminateLater
     }
 
     // --- first-run window ---
@@ -63,6 +77,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.firstRun.finishInstall(installed: installed ? .ok : .bad, error: errorMessage)
             }
         }
+    }
+
+    // --- login item (issue #16) ---
+
+    private func startLoginItem() {
+        menubar.onToggleLoginItem = { [weak self] on in self?.applyLoginItem(on) }
+        menubar.onMenuWillOpen = { [weak self] in self?.refreshLoginItem() }
+        menubar.onForgetDevice = { [weak self] in self?.forgetDevice() }
+        refreshLoginItem()
+    }
+
+    // Map SMAppService.Status onto the UI enum so MenubarController never imports ServiceManagement.
+    private func loginItemStatus() -> MenubarController.LoginItemStatus {
+        switch LoginItem.status {
+        case .enabled:          return .enabled
+        case .requiresApproval: return .requiresApproval
+        default:                return .disabled   // .notRegistered/.notFound => off.
+        }
+    }
+
+    private func refreshLoginItem() { menubar.setLoginItemState(loginItemStatus()) }
+
+    private func applyLoginItem(_ on: Bool) {
+        do { try LoginItem.setEnabled(on) }
+        catch { menubar.setAlert("Login item: \(error.localizedDescription)") }
+        refreshLoginItem()   // always re-read truth; never trust the requested value (ad-hoc signing).
+        if loginItemStatus() == .requiresApproval {
+            menubar.setAlert("Approve Beacon in System Settings > General > Login Items")
+        }
+    }
+
+    // --- forget device / re-pair (issue #16) ---
+
+    private func forgetDevice() {
+        central.forgetAndRescan()
+        // CoreBluetooth cannot clear the OS bond; if rescan can't re-establish (keys stale after a re-flash),
+        // the user must Forget This Device in System Settings. Surface it as actionable guidance, not a no-op.
+        menubar.setAlert("Re-pairing... if it won't connect, Forget This Device in Bluetooth settings")
     }
 
     // --- bridge ---

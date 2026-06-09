@@ -85,6 +85,18 @@ final class BeaconCentral: NSObject {
         }
     }
 
+    // Forget device / re-pair (issue #16): app-side reset ONLY. CoreBluetooth cannot remove the OS-level
+    // bond (no such API) -- a stuck encryption bond still needs the user's System Settings "Forget This
+    // Device". This cancels our live link, drops the cached peripheral, resets the reconnect latch, and
+    // rescans so the device can be rediscovered/re-paired from a clean state.
+    func forgetAndRescan() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.hadConnection = false   // honest "Searching" (not "reconnecting" to a device we just forgot).
+            self.handleDisconnect()       // cancels connection, nils peripheral/rx/tx, clears inbound, beginScan().
+        }
+    }
+
     private func beginScan() {
         guard central.state == .poweredOn else { return }
         inbound.removeAll(keepingCapacity: true)
@@ -161,6 +173,7 @@ extension BeaconCentral: CBCentralManagerDelegate {
 
 extension BeaconCentral: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard peripheral == self.peripheral else { return }   // ignore a late callback for a forgotten/old peripheral.
         guard error == nil, let svc = peripheral.services?.first(where: { $0.uuid == Self.service })
         else { handleDisconnect(); return }
         peripheral.discoverCharacteristics([Self.rxChar, Self.txChar], for: svc)
@@ -168,6 +181,7 @@ extension BeaconCentral: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService,
                     error: Error?) {
+        guard peripheral == self.peripheral else { return }   // ignore a late callback for a forgotten/old peripheral.
         guard error == nil, let chars = service.characteristics else { handleDisconnect(); return }
         for c in chars {
             if c.uuid == Self.rxChar { rx = c }
@@ -181,6 +195,7 @@ extension BeaconCentral: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic,
                     error: Error?) {
+        guard peripheral == self.peripheral else { return }   // ignore a late callback for a forgotten/old peripheral.
         guard characteristic.uuid == Self.txChar else { return }
         if let error = error {
             // Pairing/encryption likely failed -> drop and let auto-reconnect retry.
@@ -197,6 +212,7 @@ extension BeaconCentral: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
+        guard peripheral == self.peripheral else { return }   // ignore a late callback for a forgotten/old peripheral.
         guard characteristic.uuid == Self.txChar, error == nil,
               let value = characteristic.value else { return }
         inbound.append(value)
