@@ -85,9 +85,11 @@ HTTP 2xx + body, no outer envelope. Hook `timeout` is in **seconds** (config: 35
 `deny` within the window; never let it hang.
 
 ### C.4 Session / statusline — CONFIRMED (CC v2.1.x docs)
-`SessionStart`(matcher startup/resume/clear/compact)/`Stop`/`Notification` http hooks => buddy idle.
-Stop body has `stop_reason`; Notification has `message`. **Statusline** (`statusLine` = `type:command`)
-receives JSON with `context_window.{used_percentage,total_input_tokens,total_output_tokens}` (=> buddy
+`SessionStart`(matcher startup/resume/clear/compact)/`Stop`/`Notification`/`SessionEnd` http hooks =>
+buddy idle. Stop body has `stop_reason`; Notification has `message`; SessionEnd carries `session_id`
+(clean per-session removal). **Statusline** (`statusLine` = `type:command`)
+receives JSON with `session_id` (per-session TOK/CTX aggregation key), `cwd` (attribution basename),
+`context_window.{used_percentage,total_input_tokens,total_output_tokens}` (=> buddy
 `context_pct`/`tokens`) and `rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}` (=> **Claude
 `usage.h5`/`d7`** — now the PRIMARY Claude source, §C.1). The shim **wraps the user's existing
 statusline renderer** (forwards the JSON to `127.0.0.1:8765/statusline`, then delegates to the real

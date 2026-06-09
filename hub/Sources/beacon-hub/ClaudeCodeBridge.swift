@@ -45,8 +45,9 @@ final class ClaudeCodeBridge {
         let respond: (Bool) -> Void   // true=allow, false=deny; idempotent (guarded by `done`).
         var done = false
         let timeout: DispatchSourceTimer
-        init(respond: @escaping (Bool) -> Void, timeout: DispatchSourceTimer) {
-            self.respond = respond; self.timeout = timeout
+        let sessionId: String         // the prompt's CC session_id, so finish() can clear waitingSessions.
+        init(respond: @escaping (Bool) -> Void, timeout: DispatchSourceTimer, sessionId: String) {
+            self.respond = respond; self.timeout = timeout; self.sessionId = sessionId
         }
     }
     private var pending: [String: Pending] = [:]
@@ -54,10 +55,32 @@ final class ClaudeCodeBridge {
     private var idCounter: UInt32 = 0
     private var deviceConnected = false   // mirrored from BeaconCentral; mutated only on `queue`.
 
+    // RUNNING is derived from a first-seen session map, NOT a SessionStart counter: SessionStart does
+    // not support type:http in current CC (it may never fire through the bridge), and SessionEnd does
+    // not fire on SIGKILL/crash. So we count any session we've SEEN recently (touch() on every event)
+    // and reap stale ones on a TTL backstop -- robust to both missed-start and missed-end.
+    private var sessions: [String: Date] = [:]            // session_id => lastSeen (queue-confined).
+    private var waitingSessions: Set<String> = []         // sessions blocked on a user decision (queue-confined).
+    private var sessionStats: [String: (tokens: Int, ctxPct: Int)] = [:]   // per-session statusline (queue-confined).
+    private var reaper: DispatchSourceTimer?
+    private static let sessionTTL: TimeInterval = 600      // 10 min: bounds a missed-SessionEnd leak.
+
     init() {}
 
     func start() {
-        queue.async { [weak self] in self?.bind() }
+        queue.async { [weak self] in self?.bind(); self?.startReaper() }
+    }
+
+    // Repeating TTL reaper on `queue`: prunes sessions/waiting/stats whose session has gone silent for
+    // > sessionTTL, then republishes if the derived counts changed. Bounds a SIGKILL/crash leak (no
+    // SessionEnd) to <= one TTL instead of leaking forever. reap(now:) takes an explicit clock so it is
+    // unit-testable without waiting on wall time.
+    private func startReaper() {
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        t.schedule(deadline: .now() + 60, repeating: 60)
+        t.setEventHandler { [weak self] in self?.reap(now: Date()) }
+        reaper = t
+        t.resume()
     }
 
     private static func makeListener() throws -> NWListener {
@@ -211,7 +234,7 @@ final class ClaudeCodeBridge {
         switch event {
         case "PreToolUse", "PermissionRequest":
             handlePermission(conn, body: body)
-        case "SessionStart", "Stop", "Notification":
+        case "SessionStart", "Stop", "Notification", "SessionEnd":
             applySessionHook(event: event, body: body)
             respondJSON(conn, ["ok": true])
         default:
@@ -223,8 +246,12 @@ final class ClaudeCodeBridge {
         // Confirmed Claude Code PreToolUse/PermissionRequest fields: tool_name, tool_input{command|
         // file_path|description}, tool_use_id, session_id.
         let event = (body["hook_event_name"] as? String) ?? "PreToolUse"
+        let sid = body["session_id"] as? String
+        touch(sid)   // a permission request is liveness too -- keep the session in the running count.
         let tool = (body["tool_name"] as? String) ?? (body["tool"] as? String) ?? "Tool"
-        let hint = Self.commandHint(from: body["tool_input"]) ?? tool
+        // Front-load the cwd basename: with one prompt slot, the dir is the human disambiguator across
+        // concurrent sessions (e.g. "[beacon] rm -rf build"). BUDDY_HINT_LEN=80 has room.
+        let hint = Self.cwdTag(from: body) + (Self.commandHint(from: body["tool_input"]) ?? tool)
 
         // Device offline => the prompt can't be shown. Deny immediately (named) rather than hold it
         // invisibly until the cap. Checked before busy: a disconnected device is undeliverable
@@ -244,13 +271,16 @@ final class ClaudeCodeBridge {
             return
         }
 
+        // Only a genuinely-held prompt (past the offline/busy returns) marks the session waiting.
+        if let sid { waitingSessions.insert(sid); buddy.waiting = waitingSessions.count }
+
         let shortId = mintId()
         let cappedTimer = DispatchSource.makeTimerSource(queue: queue)
         cappedTimer.schedule(deadline: .now() + 25)   // ~25 s fail-closed cap (D5, under CC's ~30 s).
         cappedTimer.setEventHandler { [weak self] in self?.finish(id: shortId, approve: false, capped: true) }
 
         let p = Pending(respond: { [weak self] allow in self?.respondDecision(conn, allow: allow, event: event) },
-                        timeout: cappedTimer)
+                        timeout: cappedTimer, sessionId: sid ?? "")
         pending = pending.filter { !$0.value.done }   // drop prior resolved prompts (see finish)
         pending[shortId] = p
         activeId = shortId
@@ -271,7 +301,12 @@ final class ClaudeCodeBridge {
         // .late (=> ack ok:false) instead of .unknown (=> err) -- the core timeout-race case. Pruned
         // when the next prompt is minted. ids never repeat (mintId), so no stale-collision risk.
         if activeId == id { activeId = nil }
-        if buddy.prompt?.id == id { buddy.prompt = nil; publishBuddy() }
+        // The prompt is resolved => the session is no longer blocked on the user.
+        if !p.sessionId.isEmpty, waitingSessions.remove(p.sessionId) != nil {
+            buddy.waiting = waitingSessions.count
+        }
+        if buddy.prompt?.id == id { buddy.prompt = nil }
+        publishBuddy()   // waiting and/or prompt may have changed.
         log(id: id, decision: capped ? "deny-timeout" : (approve ? "allow" : "deny"))
         p.respond(approve)
         return .applied
@@ -280,19 +315,38 @@ final class ClaudeCodeBridge {
     // --- session / statusline -> idle buddy fields ---
 
     private func applySessionHook(event: String, body: [String: Any]) {
+        let sid = body["session_id"] as? String
+        touch(sid)   // every session event is liveness; first-seen also covers SessionStart never firing.
         switch event {
-        case "SessionStart":
-            buddy.running += 1
         case "Stop":
-            buddy.running = max(0, buddy.running - 1)
+            // Turn finished (session still alive) => no longer blocked on the user; running unchanged.
+            if let sid { waitingSessions.remove(sid) }
         case "Notification":
-            // CC waiting on the user -- but there is no paired "resolved" event, so incrementing a
-            // counter here would climb forever. Surface it only in the entries feed below, not waiting.
-            break
-        default: break
+            // CC's Notification matcher is "*", so it also fires for non-waiting types (auth_success,
+            // elicitation_*). The waiting type is not reliably machine-readable from this body yet
+            // (confirm the field -- likely a `message`/type marker -- against a live payload), so we
+            // mark waiting for ALL Notifications and let the next Stop/SessionEnd/TTL clear a false
+            // wait (e.g. auth_success self-clears on the next Stop). Conservative: better a brief
+            // false-wait than a missed permission_prompt/idle_prompt.
+            if let sid { waitingSessions.insert(sid) }
+        case "SessionEnd":
+            // Clean exit (does NOT fire on SIGKILL -- the TTL reaper backstops that). Remove all trace.
+            if let sid {
+                sessions.removeValue(forKey: sid)
+                waitingSessions.remove(sid)
+                sessionStats.removeValue(forKey: sid)
+            }
+        default: break   // SessionStart: first-seen via touch() already counted it.
         }
+        buddy.running = sessions.count
+        buddy.waiting = waitingSessions.count
+        buddy.tokens = sessionStats.values.reduce(0) { $0 + $1.tokens }
+        buddy.contextPct = sessionStats.values.map(\.ctxPct).max() ?? 0   // no reporters => 0, matching tokens (not stale).
         if let entry = Self.entryLine(event: event, body: body) {
-            buddy.entries = (Array(buddy.entries.suffix(4)) + [entry]).suffix(5).map { $0 }
+            // Newest-first, cap 3 (= device BUDDY_ENTRIES): the device renders entries[0] as the
+            // prominent slot, so the latest event must land at index 0 (the old suffix-append put it
+            // last => device showed the oldest).
+            buddy.entries = Array(([entry] + buddy.entries).prefix(3))
         }
         publishBuddy()
     }
@@ -301,13 +355,18 @@ final class ClaudeCodeBridge {
         // Confirmed Claude Code statusline schema: context_window.{used_percentage,total_input_tokens,
         // total_output_tokens}. (The payload also carries rate_limits.{five_hour,seven_day} -- a future
         // path to Claude usage without the Keychain/oauth call.)
+        let sid = body["session_id"] as? String
+        touch(sid)   // statusline traffic is the most frequent liveness signal.
         if let cw = body["context_window"] as? [String: Any] {
-            if let pct = Self.double(cw["used_percentage"]) {
-                buddy.contextPct = max(0, min(100, Int(pct.rounded())))
-            }
+            let pct = Self.double(cw["used_percentage"]).map { max(0, min(100, Int($0.rounded()))) } ?? 0
             let inTok = Self.int(cw["total_input_tokens"]) ?? 0
             let outTok = Self.int(cw["total_output_tokens"]) ?? 0
-            if inTok + outTok > 0 { buddy.tokens = inTok + outTok }
+            // Per-session aggregate (replaces last-writer-wins, which hid concurrent sessions). CC's
+            // statusline carries session_id (CONTRACT.md C.4); if a live payload ever lacks it we fall
+            // back to a single synthetic key (degrades to last-writer-wins, no invented wire field).
+            sessionStats[sid ?? "_"] = (tokens: inTok + outTok, ctxPct: pct)
+            buddy.tokens = sessionStats.values.reduce(0) { $0 + $1.tokens }   // total work in flight.
+            buddy.contextPct = sessionStats.values.map(\.ctxPct).max() ?? 0   // most-pressured context.
         }
         // Claude usage is also in the statusline (rate_limits) -- authoritative, no token/endpoint, so
         // it survives the oauth/usage 429. AppDelegate prefers this over the poller's Claude value.
@@ -325,6 +384,33 @@ final class ClaudeCodeBridge {
         let pct = double(w?["used_percentage"]).map { max(0, min(100, Int($0.rounded()))) }
         let reset = int(w?["resets_at"]) ?? 0
         return UsageWindow(pct: pct, reset: reset)
+    }
+
+    // Record liveness for a session (queue-confined). First-seen establishes the running count even
+    // when SessionStart never fires; re-touching on every event keeps it out of the TTL reaper.
+    private func touch(_ sid: String?) {
+        guard let sid, !sid.isEmpty else { return }
+        sessions[sid] = Date()
+    }
+
+    // TTL backstop for sessions that died without a SessionEnd (SIGKILL/crash). Prunes silent sessions
+    // and any waiting/stats they left behind, then republishes only if a derived count moved. Takes an
+    // explicit `now` so it is unit-testable. internal so a future test can drive it directly.
+    func reap(now: Date) {
+        let cutoff = now.addingTimeInterval(-Self.sessionTTL)
+        let before = (sessions.count, waitingSessions.count, buddy.tokens, buddy.contextPct)
+        for (sid, seen) in sessions where seen < cutoff { sessions.removeValue(forKey: sid) }
+        waitingSessions = waitingSessions.filter { sessions[$0] != nil }   // a wait for a dead session is stuck.
+        for sid in sessionStats.keys where sid != "_" && sessions[sid] == nil {
+            sessionStats.removeValue(forKey: sid)   // a dead session must stop inflating the token sum.
+        }
+        buddy.running = sessions.count
+        buddy.waiting = waitingSessions.count
+        buddy.tokens = sessionStats.values.reduce(0) { $0 + $1.tokens }
+        buddy.contextPct = sessionStats.values.map(\.ctxPct).max() ?? 0   // no reporters => 0, matching tokens (not stale).
+        if before != (sessions.count, waitingSessions.count, buddy.tokens, buddy.contextPct) {
+            publishBuddy()
+        }
     }
 
     private func publishBuddy() {
@@ -357,14 +443,25 @@ final class ClaudeCodeBridge {
         return nil
     }
 
+    // Trailing path component of body["cwd"], truncated for the device's BUDDY_ENTRY_LEN=40 budget.
+    // Empty (no trailing tag) when cwd is absent, so callers can always concatenate. internal+static
+    // so a future test can assert basename + truncation without the HTTP/Network stack.
+    static func cwdTag(from body: [String: Any]) -> String {
+        guard let cwd = body["cwd"] as? String, !cwd.isEmpty else { return "" }
+        let base = (cwd as NSString).lastPathComponent
+        return "[\(base.prefix(10))] "
+    }
+
     private static func entryLine(event: String, body: [String: Any]) -> String? {
         let f = DateFormatter(); f.dateFormat = "HH:mm"
         let stamp = f.string(from: Date())
+        let tag = cwdTag(from: body)   // e.g. "[beacon] "; empty when cwd absent.
         switch event {
-        case "Stop": return "\(stamp) session stopped"
+        case "Stop": return "\(stamp) \(tag)turn done"           // turn finished, session still alive.
+        case "SessionEnd": return "\(stamp) \(tag)session ended"
         case "Notification":
-            if let msg = body["message"] as? String { return "\(stamp) \(msg.prefix(40))" }
-            return "\(stamp) notification"
+            if let msg = body["message"] as? String { return "\(stamp) \(tag)\(msg.prefix(40))" }
+            return "\(stamp) \(tag)notification"
         default: return nil
         }
     }
