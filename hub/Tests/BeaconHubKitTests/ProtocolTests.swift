@@ -78,6 +78,22 @@ final class ProtocolTests: XCTestCase {
         }
     }
 
+    func testPermissionAskShapePerEvent() throws {
+        // Defer to CC's own prompt (AskUserQuestion passthrough). PreToolUse's permissionDecision supports
+        // "ask"; PermissionRequest's decision.behavior does NOT (allow/deny only), so it must emit no
+        // decision -- an empty object CC reads as "no gate", falling through to its interactive prompt.
+        let pr = try JSONSerialization.jsonObject(
+            with: HookResponse.permissionAsk(event: "PermissionRequest")) as! [String: Any]
+        XCTAssertTrue(pr.isEmpty, "PermissionRequest ask must emit no decision (got \(pr))")
+
+        let pre = try JSONSerialization.jsonObject(
+            with: HookResponse.permissionAsk(event: "PreToolUse")) as! [String: Any]
+        let out = pre["hookSpecificOutput"] as! [String: Any]
+        XCTAssertEqual(out["hookEventName"] as? String, "PreToolUse")
+        XCTAssertEqual(out["permissionDecision"] as? String, "ask")
+        XCTAssertNil(out["decision"], "PreToolUse must not use the PermissionRequest shape")
+    }
+
     func testPermissionDenyMessageNamesCause() throws {
         // A custom deny message (e.g. "Beacon device offline") must surface in the TUI for both event
         // shapes; nil falls back to the generic reason; allow never carries a message.

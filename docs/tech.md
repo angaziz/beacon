@@ -176,7 +176,7 @@ Hub → device ack/error:
 {"v":1,"ack":"req_abc","ok":false}                // decision did NOT apply (late/superseded)
 {"v":1,"err":"unknown_prompt_id","id":"req_xyz"}
 ```
-Rules: a `permission` decision MUST echo the originating `prompt.id`; the hub rejects stale/unknown ids (`err`). `ok:false` means the device decided but the hub had already resolved the prompt (e.g. the 25 s fail-closed cap fired first, or it was superseded) — the device surfaces this as "did not apply", not success. On disconnect the device shows `ST_HUB_OFFLINE` with last values + age; on reconnect the hub resends a full status frame. `usage` may carry `null` for an unavailable window/provider.
+Rules: a `permission` decision MUST echo the originating `prompt.id`; the hub rejects stale/unknown ids (`err`). `ok:false` means the device decided but the hub had already resolved the prompt (e.g. the fail-closed cap fired first, or it was superseded) — the device surfaces this as "did not apply", not success. If Claude Code resolves the prompt on the **Mac** instead (the user answers in the terminal), it closes the held hook connection; the hub **withdraws** the device prompt silently (clears it, frees the slot — no decision frame, no "did not apply"). On disconnect the device shows `ST_HUB_OFFLINE` with last values + age; on reconnect the hub resends a full status frame. `usage` may carry `null` for an unavailable window/provider.
 
 ### 7.2 Normalized AI-usage schema (Hub-produced)
 
@@ -185,9 +185,10 @@ The hub normalizes both providers to: `pct` = integer 0–100 (percent of limit 
 ### 7.3 Claude Code integration (Hub-side) — needed before P2
 
 The hub gets buddy data from Claude Code via documented surfaces (`docs/research/` §2.2):
-- **Permission prompts:** `PreToolUse` / `PermissionRequest` **http hooks** → hub; hub forwards to device; device decision returns as the hook's `permissionDecision` (`allow`/`deny`). Blocking, ~30 s timeout ⇒ design for <5 s; on timeout treat as **deny** and label.
+- **Permission prompts:** `PreToolUse` / `PermissionRequest` **http hooks** → hub; hub forwards to device; device decision returns as the hook's `permissionDecision` (`allow`/`deny`). Blocking ⇒ design for <5 s; on timeout treat as **deny** and label; if the user answers on the Mac (held hook closed), the hub withdraws the device prompt silently (§7.1).
+- **Questions (`AskUserQuestion`):** never held as an Approve/Deny prompt — the hub returns `ask` (defers to the Mac's interactive prompt, where the human picks an option) and shows only a passive "asking a question" indicator on the device (§7.1, FR-BUDDY-5).
 - **Session/idle state + tokens/context + Claude usage:** statusline JSON (`context_window` + `rate_limits.{five_hour,seven_day}`) + `SessionStart`/`Stop`/`Notification` hook payloads. The hub maps these to the `buddy` block (§7.1) and, since `oauth/usage` now **429s** in practice (Anthropic limits-rule change), reads **Claude usage from the statusline `rate_limits`** (§7.2) — first-party, no token; the oauth endpoint is only a best-effort fallback. The statusline shim wraps the user's existing renderer (forward then delegate), so their status bar is unchanged.
-- **Out of scope (FR-BUDDY-5):** the buddy cannot answer `AskUserQuestion`, persist "don't ask again", or type into a live TUI.
+- **Out of scope (FR-BUDDY-5):** the buddy cannot answer `AskUserQuestion` (passed through to the Mac + shown only as a passive indicator, per above), persist "don't ask again", or type into a live TUI.
 
 Exact hook event field names + statusline fields: capture into a `hub/CONTRACT.md` fixture set at P2 start (with recorded sample payloads) so device and hub are tested against the same fixtures.
 
