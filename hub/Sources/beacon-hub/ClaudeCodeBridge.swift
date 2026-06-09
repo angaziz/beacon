@@ -341,7 +341,7 @@ final class ClaudeCodeBridge {
         buddy.running = sessions.count
         buddy.waiting = waitingSessions.count
         buddy.tokens = sessionStats.values.reduce(0) { $0 + $1.tokens }
-        buddy.contextPct = sessionStats.values.map(\.ctxPct).max() ?? buddy.contextPct
+        buddy.contextPct = sessionStats.values.map(\.ctxPct).max() ?? 0   // no reporters => 0, matching tokens (not stale).
         if let entry = Self.entryLine(event: event, body: body) {
             // Newest-first, cap 3 (= device BUDDY_ENTRIES): the device renders entries[0] as the
             // prominent slot, so the latest event must land at index 0 (the old suffix-append put it
@@ -407,7 +407,7 @@ final class ClaudeCodeBridge {
         buddy.running = sessions.count
         buddy.waiting = waitingSessions.count
         buddy.tokens = sessionStats.values.reduce(0) { $0 + $1.tokens }
-        buddy.contextPct = sessionStats.values.map(\.ctxPct).max() ?? buddy.contextPct
+        buddy.contextPct = sessionStats.values.map(\.ctxPct).max() ?? 0   // no reporters => 0, matching tokens (not stale).
         if before != (sessions.count, waitingSessions.count, buddy.tokens, buddy.contextPct) {
             publishBuddy()
         }
