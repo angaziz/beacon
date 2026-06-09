@@ -3,7 +3,7 @@ import Network
 import BeaconHubKit
 
 // Localhost HTTP/1.1 server that ingests Claude Code http hooks + the statusline shim, maps them to a
-// BuddyState, and holds permission prompts open until the device decides (or a ~25 s fail-closed cap).
+// BuddyState, and holds permission prompts open until the device decides (or a ~180 s fail-closed cap).
 // Binds 127.0.0.1 on an ephemeral port written to ~/.beacon-hub/port (the hooks read it). Logs only
 // id + decision + timestamp -- NEVER the hint/command string (tech.md 9).
 final class ClaudeCodeBridge {
@@ -12,13 +12,14 @@ final class ClaudeCodeBridge {
     // id the hub never minted.
     enum ResolveOutcome {
         case applied
-        case late      // id known but already done (e.g. lost the 25s-cap race) -> ack(ok:false)
+        case late      // id known but already done (e.g. lost the cap race) -> ack(ok:false)
         case unknown   // id never seen -> err(unknown_prompt_id)
     }
 
     var onBuddyUpdate: ((BuddyState) -> Void)?
     var onClaudeUsage: ((ProviderUsage) -> Void)?   // Claude 5h/7d from statusline rate_limits
     var onPromptUndeliverable: ((String) -> Void)?  // a prompt couldn't be shown (device offline)
+    var onPromptArrived: (() -> Void)?              // a deliverable prompt was shown on the device (cue the user)
     var onBridgeStatus: ((String?) -> Void)?        // non-nil = bind failed (loud); nil = recovered
 
     // Fixed localhost port so Claude Code's native http hooks use a static URL
@@ -276,7 +277,7 @@ final class ClaudeCodeBridge {
 
         let shortId = mintId()
         let cappedTimer = DispatchSource.makeTimerSource(queue: queue)
-        cappedTimer.schedule(deadline: .now() + 25)   // ~25 s fail-closed cap (D5, under CC's ~30 s).
+        cappedTimer.schedule(deadline: .now() + 180)   // 3 min fail-closed cap, under the hook's 190s timeout (CC PermissionRequest default 600s).
         cappedTimer.setEventHandler { [weak self] in self?.finish(id: shortId, approve: false, capped: true) }
 
         let p = Pending(respond: { [weak self] allow in self?.respondDecision(conn, allow: allow, event: event) },
@@ -289,12 +290,13 @@ final class ClaudeCodeBridge {
         buddy.prompt = BuddyPrompt(id: shortId, tool: tool, hint: hint)
         publishBuddy()
         log(id: shortId, decision: "prompt")
+        onPromptArrived?()   // audible Mac cue: a prompt is now waiting on the device (a 2.16" screen is easy to miss).
     }
 
     @discardableResult
     private func finish(id: String, approve: Bool, capped: Bool) -> ResolveOutcome {
         guard let p = pending[id] else { return .unknown }
-        guard !p.done else { return .late }   // already resolved (e.g. the 25s cap fired first).
+        guard !p.done else { return .late }   // already resolved (e.g. the cap fired first).
         p.done = true
         p.timeout.cancel()
         // Keep the resolved entry (done=true) so a later device decision for this same id reports

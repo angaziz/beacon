@@ -48,6 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         b.onPromptUndeliverable = { [weak self] reason in
             Task { @MainActor in self?.menubar.setAlert("Auto-denied: \(reason)") }
         }
+        b.onPromptArrived = { [weak self] in
+            Task { @MainActor in self?.menubar.playPromptSoundIfEnabled() }
+        }
         b.onBridgeStatus = { [weak self] msg in
             Task { @MainActor in self?.menubar.setBridgeAlert(msg) }
         }

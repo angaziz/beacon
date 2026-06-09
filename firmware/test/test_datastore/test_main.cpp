@@ -101,9 +101,9 @@ static void test_tick_buddy_prompt_transitions(void) {
     bool     expect_present;
     uint8_t  expect_decision;
   } cases[] = {
-    // IDLE prompt: expires to TOO_LATE at/after BUDDY_PROMPT_EXPIRY_S (25), else unchanged.
-    {"idle_before_expiry", PROMPT_IDLE_DECISION, 100, 0, 100 + 24, true, PROMPT_IDLE_DECISION},
-    {"idle_at_expiry",     PROMPT_IDLE_DECISION, 100, 0, 100 + 25, true, PROMPT_TOO_LATE},
+    // IDLE prompt: expires to TOO_LATE at/after BUDDY_PROMPT_EXPIRY_S, else unchanged.
+    {"idle_before_expiry", PROMPT_IDLE_DECISION, 100, 0, 100 + BUDDY_PROMPT_EXPIRY_S - 1, true, PROMPT_IDLE_DECISION},
+    {"idle_at_expiry",     PROMPT_IDLE_DECISION, 100, 0, 100 + BUDDY_PROMPT_EXPIRY_S,     true, PROMPT_TOO_LATE},
     // SENT_OK beat: clears (present=false) at/after BUDDY_CONFIRM_HOLD_S (2), else held.
     {"sent_before_hold",   PROMPT_SENT_OK, 100, 200, 200 + 1, true,  PROMPT_SENT_OK},
     {"sent_at_hold",       PROMPT_SENT_OK, 100, 200, 200 + 2, false, PROMPT_SENT_OK},
@@ -122,7 +122,7 @@ static void test_tick_buddy_prompt_transitions(void) {
 static void test_tick_buddy_prompt_preserves_hub_offline(void) {
   mk_prompt(PROMPT_IDLE_DECISION, 100, 0);
   ds_set_hub_offline();                 // flips buddy hdr.state, leaves the prompt
-  ds_tick_buddy_prompt(100 + 100);      // well past expiry
+  ds_tick_buddy_prompt(100 + BUDDY_PROMPT_EXPIRY_S + 100);      // well past expiry
   buddy_rec_t g = ds_get_buddy();
   TEST_ASSERT_EQUAL_INT(ST_HUB_OFFLINE, g.hdr.state);          // never erased by the tick
   TEST_ASSERT_EQUAL_UINT8(PROMPT_TOO_LATE, g.prompt.decision_state);   // prompt still ages
