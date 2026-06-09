@@ -101,11 +101,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applyLoginItem(_ on: Bool) {
         do { try LoginItem.setEnabled(on) }
-        catch { menubar.setAlert("Login item: \(error.localizedDescription)") }
+        catch { showGuidance("Couldn't change the login item", info: error.localizedDescription) }
         refreshLoginItem()   // always re-read truth; never trust the requested value (ad-hoc signing).
         if loginItemStatus() == .requiresApproval {
-            menubar.setAlert("Approve Beacon in System Settings > General > Login Items")
+            showGuidance("Approve Beacon to start at login",
+                         info: "Open System Settings > General > Login Items and turn Beacon on.")
         }
+    }
+
+    // One-shot informational dialog for a user-initiated action (login-item / forget-device). NOT the
+    // persistent menu-bar `alert` slot -- that one is the undeliverable-prompt surface (it appends
+    // "couldn't show prompt" and is cleared by reconnect), so reusing it here mis-worded the message and
+    // left a stale warning after the user fixed things. A modal dismissed by the user has no stale state.
+    private func showGuidance(_ message: String, info: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = message
+        alert.informativeText = info
+        alert.runModal()
     }
 
     // --- forget device / re-pair (issue #16) ---
@@ -114,7 +128,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         central.forgetAndRescan()
         // CoreBluetooth cannot clear the OS bond; if rescan can't re-establish (keys stale after a re-flash),
         // the user must Forget This Device in System Settings. Surface it as actionable guidance, not a no-op.
-        menubar.setAlert("Re-pairing... if it won't connect, Forget This Device in Bluetooth settings")
+        showGuidance("Re-pairing Beacon",
+                     info: "Searching again. If it won't reconnect, open Bluetooth settings, Forget This Device, then pair Beacon again.")
     }
 
     // --- bridge ---
