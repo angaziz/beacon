@@ -58,11 +58,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // --- central ---
 
     private func startCentral() {
-        central.onStatusChange = { [weak self] connected, name in
-            Task { @MainActor in self?.refreshLink(connected: connected, name: name) }
+        central.onPhaseChange = { [weak self] phase in
+            Task { @MainActor in self?.refreshLink(phase) }
         }
         central.onReady = { [weak self] in
-            // Link state is refreshed by the isConnected didSet's onStatusChange (fires just before
+            // Link state is refreshed by the isConnected didSet's onPhaseChange (fires just before
             // this); onReady only resends the full frame to a freshly-(re)subscribed device.
             Task { @MainActor in self?.sendFullFrame() }
         }
@@ -72,13 +72,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         central.start()
     }
 
-    // `connected`/`name` are a snapshot captured on BeaconCentral's queue (no cross-thread read).
-    private func refreshLink(connected: Bool, name: String?) {
-        if connected, let name = name {
-            menubar.setLink(.connected(name))
+    // `phase` is computed on BeaconCentral's queue (no cross-thread read of the link state).
+    private func refreshLink(_ phase: LinkPhase) {
+        let link: MenubarController.Link
+        switch phase {
+        case .bluetoothOff:        link = .bluetoothOff
+        case .unauthorized:        link = .unauthorized
+        case .unavailable:         link = .unavailable
+        case .searching:           link = .searching
+        case .connecting(let n):   link = .connecting(n)
+        case .connected(let n):    link = .connected(n)
+        case .reconnecting:        link = .reconnecting
+        }
+        menubar.setLink(link)
+        let connected: Bool = { if case .connected = phase { return true } else { return false } }()
+        if connected {
             menubar.setAlert(nil)   // device reachable again => clear any undeliverable-prompt alert.
-        } else {
-            menubar.setLink(.scanning)
         }
         bridge?.setDeviceConnected(connected)
     }

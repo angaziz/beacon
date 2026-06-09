@@ -2,6 +2,18 @@ import Foundation
 import CoreBluetooth
 import BeaconHubKit
 
+// Distinct link phases the UI distinguishes (issue #11). Rare CBManager states (.resetting/.unsupported/
+// .unknown) fold into .unavailable since none has a distinct user remediation.
+enum LinkPhase: Equatable {
+    case bluetoothOff
+    case unauthorized
+    case unavailable
+    case searching
+    case connecting(String)
+    case connected(String)
+    case reconnecting
+}
+
 // CoreBluetooth central for the Nordic-UART link to the device (tech.md 7.1). Scans for the Beacon
 // peripheral, subscribes TX (device->hub notify), writes RX (hub->device), reassembles inbound lines
 // on '\n', and parses each into a DeviceCommand. Pairing is OS-mediated: simply accessing the
@@ -15,16 +27,29 @@ final class BeaconCentral: NSObject {
     private static let namePrefix = "Beacon"
 
     // Callbacks (set by AppDelegate). onReady => caller resends a full frame after (re)subscribe.
-    // onStatusChange carries an (isConnected, name) snapshot captured ON this queue, so callers never
-    // read the queue-owned link state back across threads.
+    // onPhaseChange carries a LinkPhase computed ON this queue, so callers never read the queue-owned
+    // link state back across threads.
     var onReady: (() -> Void)?
     var onCommand: ((DeviceCommand) -> Void)?
-    var onStatusChange: ((Bool, String?) -> Void)?
+    var onPhaseChange: ((LinkPhase) -> Void)?
 
     private(set) var isConnected = false {
-        didSet { if oldValue != isConnected { onStatusChange?(isConnected, connectedName) } }
+        didSet {
+            guard oldValue != isConnected else { return }
+            // Disconnect path (handleDisconnect => beginScan) owns the next phase; only the rising edge
+            // emits .connected here.
+            if isConnected { hadConnection = true; setPhase(.connected(connectedName ?? "")) }
+        }
     }
     private(set) var connectedName: String?
+
+    private var phase: LinkPhase? = nil   // nil sentinel: forces first emit even if first real state folds to .unavailable
+    private var hadConnection = false
+    private func setPhase(_ p: LinkPhase) {
+        guard p != phase else { return }
+        phase = p
+        onPhaseChange?(p)
+    }
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -64,11 +89,11 @@ final class BeaconCentral: NSObject {
         guard central.state == .poweredOn else { return }
         inbound.removeAll(keepingCapacity: true)
         central.scanForPeripherals(withServices: [Self.service], options: nil)
-        onStatusChange?(isConnected, connectedName)
+        setPhase(hadConnection ? .reconnecting : .searching)
     }
 
     private func handleDisconnect() {
-        // Clear the name BEFORE isConnected so the didSet emits a consistent (false, nil) snapshot.
+        // isConnected=false does not emit a phase; beginScan below emits .reconnecting (hadConnection set).
         connectedName = nil
         isConnected = false
         rx = nil
@@ -101,7 +126,9 @@ extension BeaconCentral: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn: beginScan()
-        default: isConnected = false; onStatusChange?(isConnected, connectedName)
+        case .poweredOff: isConnected = false; setPhase(.bluetoothOff)
+        case .unauthorized: isConnected = false; setPhase(.unauthorized)
+        default: isConnected = false; setPhase(.unavailable)
         }
     }
 
@@ -114,6 +141,7 @@ extension BeaconCentral: CBCentralManagerDelegate {
         self.connectedName = name
         peripheral.delegate = self
         central.connect(peripheral, options: nil)
+        setPhase(.connecting(name))
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
