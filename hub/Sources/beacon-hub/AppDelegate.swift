@@ -38,22 +38,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // --- bridge ---
 
     private func startBridge() {
-        do {
-            let b = try ClaudeCodeBridge()
-            b.onBuddyUpdate = { [weak self] state in
-                Task { @MainActor in self?.onBuddy(state) }
-            }
-            b.onClaudeUsage = { [weak self] c in
-                Task { @MainActor in self?.onStatuslineClaude(c) }
-            }
-            b.onPromptUndeliverable = { [weak self] reason in
-                Task { @MainActor in self?.menubar.setAlert("Auto-denied: \(reason)") }
-            }
-            b.start()
-            bridge = b
-        } catch {
-            FileHandle.standardError.write(Data("[beacon-hub] bridge failed to start: \(error.localizedDescription)\n".utf8))
+        let b = ClaudeCodeBridge()
+        b.onBuddyUpdate = { [weak self] state in
+            Task { @MainActor in self?.onBuddy(state) }
         }
+        b.onClaudeUsage = { [weak self] c in
+            Task { @MainActor in self?.onStatuslineClaude(c) }
+        }
+        b.onPromptUndeliverable = { [weak self] reason in
+            Task { @MainActor in self?.menubar.setAlert("Auto-denied: \(reason)") }
+        }
+        b.onBridgeStatus = { [weak self] msg in
+            Task { @MainActor in self?.menubar.setBridgeAlert(msg) }
+        }
+        b.start()
+        bridge = b
     }
 
     // --- central ---

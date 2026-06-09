@@ -19,13 +19,21 @@ final class ClaudeCodeBridge {
     var onBuddyUpdate: ((BuddyState) -> Void)?
     var onClaudeUsage: ((ProviderUsage) -> Void)?   // Claude 5h/7d from statusline rate_limits
     var onPromptUndeliverable: ((String) -> Void)?  // a prompt couldn't be shown (device offline)
+    var onBridgeStatus: ((String?) -> Void)?        // non-nil = bind failed (loud); nil = recovered
 
     // Fixed localhost port so Claude Code's native http hooks use a static URL
     // (http://127.0.0.1:8765/hook). Also written to ~/.beacon-hub/port for the statusline shim.
     static let port: UInt16 = 8765
 
-    private let listener: NWListener
+    // A failed NWListener is terminal (cannot start() again), so recovery recreates it; hence a var.
+    private var listener: NWListener?
     private let queue = DispatchQueue(label: "beacon.bridge")
+
+    // Bumped on every bind(). State/timer closures capture their gen and early-return if it no longer
+    // matches, so a delayed callback from a superseded listener can't clear/cancel/rebind a newer one.
+    private var listenerGen: UInt64 = 0
+    private var rebindDelay: TimeInterval = 2   // exponential backoff, reset to 2 on .ready.
+    private var waitingDebounce: DispatchWorkItem?
 
     // Buddy idle fields accumulated from session/statusline hooks; the active prompt is overlaid.
     private var buddy = BuddyState()
@@ -46,23 +54,82 @@ final class ClaudeCodeBridge {
     private var idCounter: UInt32 = 0
     private var deviceConnected = false   // mirrored from BeaconCentral; mutated only on `queue`.
 
-    init() throws {
+    init() {}
+
+    func start() {
+        queue.async { [weak self] in self?.bind() }
+    }
+
+    private static func makeListener() throws -> NWListener {
         let params = NWParameters.tcp
+        // SO_REUSEADDR: only permits rebinding a port in TIME_WAIT (clean hub restart). It does NOT
+        // allow two live listeners on 8765 (that needs SO_REUSEPORT), so a real conflict still fails
+        // and our bind-failure detection is unaffected -- keep this true, don't "fix" it.
         params.allowLocalEndpointReuse = true
         params.requiredLocalEndpoint = NWEndpoint.hostPort(
             host: "127.0.0.1", port: NWEndpoint.Port(rawValue: Self.port)!)
-        listener = try NWListener(using: params)   // binds 127.0.0.1:8765 (loopback only)
+        return try NWListener(using: params)   // binds 127.0.0.1:8765 (loopback only)
     }
 
-    func start() {
-        listener.newConnectionHandler = { [weak self] conn in self?.accept(conn) }
-        listener.stateUpdateHandler = { [weak self] state in
-            guard let self else { return }
-            if case .ready = state, let p = self.listener.port?.rawValue {
-                self.writePortFile(p)
-            }
+    // Recreate + start a listener. Runs on `queue`. A bind throw (port already held at launch) flows to
+    // reportFailure just like an async .failed, closing the init-time silent-stderr gap.
+    private func bind() {
+        listenerGen &+= 1
+        let gen = listenerGen
+        let l: NWListener
+        do {
+            l = try Self.makeListener()
+        } catch {
+            reportFailure(gen: gen, error: error)
+            return
         }
-        listener.start(queue: queue)
+        l.newConnectionHandler = { [weak self] conn in self?.accept(conn) }
+        l.stateUpdateHandler = { [weak self] state in self?.handleState(state, gen: gen) }
+        listener = l
+        l.start(queue: queue)
+    }
+
+    private func handleState(_ state: NWListener.State, gen: UInt64) {
+        guard gen == listenerGen else { return }   // superseded listener; ignore.
+        switch state {
+        case .ready:
+            if let p = listener?.port?.rawValue { writePortFile(p) }
+            rebindDelay = 2
+            waitingDebounce?.cancel(); waitingDebounce = nil
+            let cb = onBridgeStatus
+            DispatchQueue.main.async { cb?(nil) }
+        case .failed(let error):
+            reportFailure(gen: gen, error: error)
+        case .waiting(let error):
+            // .waiting is NOT terminal (transient flap at startup), so debounce ~1s before going loud;
+            // if .ready arrives first it cancels this and we never flash a false alert.
+            waitingDebounce?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.reportFailure(gen: gen, error: error) }
+            waitingDebounce = work
+            queue.asyncAfter(deadline: .now() + 1, execute: work)
+        default:
+            break
+        }
+    }
+
+    private func reportFailure(gen: UInt64, error: Error) {
+        guard gen == listenerGen else { return }
+        waitingDebounce?.cancel(); waitingDebounce = nil   // a real failure supersedes any pending .waiting debounce.
+        FileHandle.standardError.write(Data("[beacon-hub] bridge bind failed on port \(Self.port): \(error.localizedDescription)\n".utf8))
+        let cb = onBridgeStatus
+        DispatchQueue.main.async { cb?("Bridge offline - port \(Self.port) in use") }
+        listener?.cancel(); listener = nil
+        scheduleRebind()
+    }
+
+    private func scheduleRebind() {
+        let delay = rebindDelay
+        rebindDelay = min(rebindDelay * 2, 30)
+        let gen = listenerGen
+        queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, gen == self.listenerGen else { return }   // newer cycle already ran.
+            self.bind()
+        }
     }
 
     // resolve a held permission by the short id; approve=false denies. Safe to call from any thread.
