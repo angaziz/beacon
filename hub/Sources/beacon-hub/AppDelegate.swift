@@ -126,10 +126,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func forgetDevice() {
         central.forgetAndRescan()
-        // CoreBluetooth cannot clear the OS bond; if rescan can't re-establish (keys stale after a re-flash),
-        // the user must Forget This Device in System Settings. Surface it as actionable guidance, not a no-op.
-        showGuidance("Re-pairing Beacon",
-                     info: "Searching again. If it won't reconnect, open Bluetooth settings, Forget This Device, then pair Beacon again.")
+        // CoreBluetooth cannot clear the OS bond (no API). The app-side reset above just drops the link and
+        // rescans, so a healthy bond reconnects on its own. The only real "forget" is the user doing it in
+        // Bluetooth settings -- so spell out the steps and offer a one-click jump there, instead of a dead-end.
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Forget Beacon"
+        alert.informativeText = """
+            To forget Beacon, macOS needs you to remove the pairing yourself:
+
+            1. Open Bluetooth settings.
+            2. Click the info (i) button next to Beacon.
+            3. Choose "Forget This Device".
+
+            Beacon is now disconnected and searching. After you forget it, bring it back in range to pair and reconnect.
+            """
+        alert.addButton(withTitle: "Open Bluetooth Settings")   // first button = default
+        alert.addButton(withTitle: "Done")
+        if alert.runModal() == .alertFirstButtonReturn {
+            SettingsLinks.open(SettingsLinks.bluetooth)
+        }
     }
 
     // --- bridge ---
