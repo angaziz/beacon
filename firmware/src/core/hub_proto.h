@@ -51,6 +51,12 @@ typedef struct { char id[BUDDY_ID_LEN]; bool ok; bool is_err; } hub_ack_t;
 // rejected prompt id. Returns false if the frame is neither an ack nor an err (or v != 1 / invalid).
 bool hub_parse_ack(const char* json, size_t len, hub_ack_t* out);
 
+// Pure state transition for a received ack against the current buddy record (issue #8). Applies only
+// when the ack's id matches a PENDING prompt: ok && !is_err => PROMPT_SENT_OK + clears present;
+// otherwise => PROMPT_TOO_LATE + keeps present. A stale/mismatched id leaves *buddy untouched.
+// Returns true if the record was changed (so the caller knows to persist + log). Host-testable.
+bool hub_apply_ack(buddy_rec_t* buddy, const hub_ack_t* ack);
+
 #ifdef __cplusplus
 }
 #endif

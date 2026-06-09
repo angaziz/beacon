@@ -17,6 +17,16 @@ void hub_task_start(void);
 // still clears locally for testing.
 bool hub_send_permission(const char* id, bool approve);
 
+// Centralized buddy decide path (issue #8): the single place a view calls to approve/deny the active
+// prompt. Applies the canonical guard (present && not hub-offline/reconnecting && not already decided),
+// enqueues the §7.1 command, and on success marks the prompt PROMPT_PENDING WITHOUT clearing present --
+// the prompt is cleared only later by a truthful hub ack (hub_apply_ack). Returns true if enqueued.
+bool buddy_decide(bool approve);
+
+// Dismiss a prompt the hub said did not apply (PROMPT_TOO_LATE): clears present locally so the warning
+// goes away. No-op for any other state. Returns true if a prompt was dismissed.
+bool buddy_dismiss(void);
+
 #ifdef __cplusplus
 }
 #endif

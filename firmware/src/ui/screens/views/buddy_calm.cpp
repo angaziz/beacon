@@ -1,7 +1,8 @@
 // Calm Futurism CLAUDE (coding buddy) view. Sparse white-on-black. Top: [dot] claude + status
 // slot. A dim stat line (running / waiting / tokens / ctx). prompt.present => big Doto tool name,
 // a faint hint box, and DENY | APPROVE actions. Else => recent entries (or "idle").
-// Approve/Deny is a local stub (clear prompt + ds_set_buddy). Actions disabled when hub offline.
+// Decide routes through buddy_decide; the prompt waits on the hub ack and clears only on ok:true,
+// else warns "too late" with a dismiss. Actions disabled when hub offline.
 #include "ui/screen.h"
 #include "ui/styles.h"
 #include "ui/state_view.h"
@@ -14,31 +15,21 @@ static void update(void);
 
 
 static lv_obj_t *s_status, *s_stat;
-static lv_obj_t *s_tool, *s_hintbox, *s_hint;
+static lv_obj_t *s_eyebrow, *s_tool, *s_hintbox, *s_hint;
 static lv_obj_t *s_deny, *s_approve;
 static lv_obj_t *s_idle[BUDDY_ENTRIES];
 static bool      s_actions_enabled;
 
-static void decide_clear(bool approve) {
-  buddy_rec_t r = ds_get_buddy();
-  // guard a stale click: don't resurrect ST_LIVE over hub-offline/reconnecting (ds_set_* forces LIVE)
-  if (!r.prompt.present || r.hdr.state == ST_HUB_OFFLINE || r.hdr.state == ST_RECONNECTING) return;
-  if (!hub_send_permission(r.prompt.id, approve)) return;   // keep prompt visible if not enqueued
-  r.prompt.present = false;
-  ds_set_buddy(&r);
-  LV_LOG_USER("buddy_calm: prompt decided");
-  update();
-}
-
 static void on_deny(lv_event_t* e) {
   (void)e;
+  if (buddy_dismiss()) { update(); return; }   // clear a "too late" warning
   if (!s_actions_enabled) return;
-  decide_clear(false);
+  if (buddy_decide(false)) update();
 }
 static void on_approve(lv_event_t* e) {
   (void)e;
   if (!s_actions_enabled) return;
-  decide_clear(true);
+  if (buddy_decide(true)) update();
 }
 
 static void build(lv_obj_t* page) {
@@ -73,7 +64,14 @@ static void build(lv_obj_t* page) {
   lv_obj_set_style_text_letter_space(s_stat, 2, 0);
   lv_obj_align(s_stat, LV_ALIGN_TOP_LEFT, SAFE_INSET + 4, SAFE_INSET + 36);
 
-  // Prompt layout (big tool name + hint box), centered.
+  // Prompt layout (eyebrow + big tool name + hint box), centered.
+  s_eyebrow = lv_label_create(page);
+  lv_label_set_text(s_eyebrow, "");
+  lv_obj_set_style_text_font(s_eyebrow, t->f_body, 0);
+  lv_obj_set_style_text_color(s_eyebrow, t->ink_dim, 0);
+  lv_obj_set_style_text_letter_space(s_eyebrow, 3, 0);
+  lv_obj_align(s_eyebrow, LV_ALIGN_CENTER, 0, -64);
+
   s_tool = lv_label_create(page);
   lv_obj_set_style_text_font(s_tool, t->f_display, 0);
   lv_obj_set_style_text_color(s_tool, t->ink, 0);
@@ -129,7 +127,7 @@ static void build(lv_obj_t* page) {
 }
 
 static void show_prompt(bool on) {
-  lv_obj_t* p[] = { s_tool, s_hintbox, s_deny, s_approve };
+  lv_obj_t* p[] = { s_eyebrow, s_tool, s_hintbox, s_deny, s_approve };
   for (lv_obj_t* o : p) {
     if (on) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
     else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
@@ -171,9 +169,30 @@ static void update(void) {
     show_prompt(true);
     lv_label_set_text(s_tool, b.prompt.tool[0] ? b.prompt.tool : "tool");
     lv_label_set_text(s_hint, b.prompt.hint);
-    // Dim actions visually when disabled (hub offline / reconnecting).
-    lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
-    lv_obj_set_style_text_color(s_approve, s_actions_enabled ? t->accent : t->ink_dim, 0);
+    switch (b.prompt.decision_state) {
+    case PROMPT_PENDING:   // sent; both actions dim until the truthful ack (issue #8).
+      lv_label_set_text(s_eyebrow, "sent - awaiting");
+      lv_obj_set_style_text_color(s_eyebrow, t->ink_dim, 0);
+      lv_label_set_text(s_deny, "< deny");
+      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
+      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
+      break;
+    case PROMPT_TOO_LATE:   // did not apply; deny becomes the dismiss affordance.
+      lv_label_set_text(s_eyebrow, "too late - didn't apply");
+      lv_obj_set_style_text_color(s_eyebrow, t->down, 0);
+      lv_label_set_text(s_deny, "< dismiss");
+      lv_obj_set_style_text_color(s_deny, t->ink, 0);
+      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
+      break;
+    default:
+      lv_label_set_text(s_eyebrow, "permission - approve?");
+      lv_obj_set_style_text_color(s_eyebrow, t->ink_dim, 0);
+      lv_label_set_text(s_deny, "< deny");
+      // Dim actions visually when disabled (hub offline / reconnecting).
+      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
+      lv_obj_set_style_text_color(s_approve, s_actions_enabled ? t->accent : t->ink_dim, 0);
+      break;
+    }
   } else {
     show_prompt(false);
     if (b.entry_count == 0) {

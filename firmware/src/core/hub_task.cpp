@@ -12,9 +12,26 @@ static HubLink*   g_link = nullptr;   // null until the task starts (BEACON_DEV 
 static bool       s_was_connected = false;
 static uint32_t   s_min_int_free  = UINT32_MAX;
 
-// Inbound status frame (loop() context, Core-0). Fill from current records so an absent block keeps
-// its values; stamp last_updated = now so staleness ages hub data on the same epoch as P1 (one epoch).
+// A hub ack for an in-flight decision (issue #8): apply the truthful outcome to the buddy prompt's
+// confirm state. ok:true clears the prompt; ok:false / err keeps it so the UI can warn "too late".
+static void apply_ack(const hub_ack_t& ack) {
+  buddy_rec_t b = ds_get_buddy();
+  if (!hub_apply_ack(&b, &ack)) {           // stale/mismatched id or nothing pending => ignore
+    LOGW("hub: ack id=%s ignored (no matching pending prompt)", ack.id);
+    return;
+  }
+  ds_set_buddy(&b);
+  LOGI("hub: ack id=%s ok=%d is_err=%d -> state=%u", ack.id, ack.ok, ack.is_err,
+       (unsigned)b.prompt.decision_state);
+}
+
+// Inbound frame (loop() context, Core-0). Acks dispatch before status (an ack is not a status frame).
+// Status: fill from current records so an absent block keeps its values; stamp last_updated = now so
+// staleness ages hub data on the same epoch as P1 (one epoch).
 static void on_frame(const char* json, size_t len) {
+  hub_ack_t ack;
+  if (hub_parse_ack(json, len, &ack)) { apply_ack(ack); return; }
+
   usage_rec_t u = ds_get_usage();
   buddy_rec_t b = ds_get_buddy();
   bool hu = false, hb = false;
@@ -58,4 +75,28 @@ bool hub_send_permission(const char* id, bool approve) {
   bool ok = g_link->send(buf, n);
   LOGI("buddy decide -> hub id=%s approve=%d sent=%d", id, approve, ok);
   return ok;
+}
+
+bool buddy_decide(bool approve) {
+  buddy_rec_t r = ds_get_buddy();
+  // Canonical guard (folds in the old per-view present/offline checks + the re-tap guard): only the
+  // first decision on a live, present prompt is enqueued.
+  if (!r.prompt.present) return false;
+  if (r.hdr.state == ST_HUB_OFFLINE || r.hdr.state == ST_RECONNECTING) return false;
+  if (r.prompt.decision_state != PROMPT_IDLE_DECISION) return false;     // already decided/awaiting ack
+  if (!hub_send_permission(r.prompt.id, approve)) return false;          // keep prompt as-is if not enqueued
+  if (!g_link)                                                           // no hub => no ack will ever arrive (dev/seed
+    r.prompt.present = false;                                            // path); clear locally as the old per-view flow did
+  else
+    r.prompt.decision_state = PROMPT_PENDING;                            // real link: await the truthful ack; keep present
+  ds_set_buddy(&r);
+  return true;
+}
+
+bool buddy_dismiss(void) {
+  buddy_rec_t r = ds_get_buddy();
+  if (!r.prompt.present || r.prompt.decision_state != PROMPT_TOO_LATE) return false;
+  r.prompt.present = false;
+  ds_set_buddy(&r);
+  return true;
 }

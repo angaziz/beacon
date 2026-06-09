@@ -56,11 +56,22 @@ typedef struct {
 } usage_rec_t;
 
 // --- Coding buddy (FR-BUDDY, hub-plane) ---
+// decision_state tracks the local confirm lifecycle of a sent decision so the UI stops lying about
+// outcomes (issue #8): a decision is enqueued (PENDING) and only cleared on a truthful hub ack
+// (SENT_OK) or surfaced as TOO_LATE when the hub says it did not apply. Device-local only -- NOT on
+// the wire (hub_proto serializes id/decision and parses fields individually, never the raw struct).
+enum {
+  PROMPT_IDLE_DECISION = 0,    // no decision sent yet (memset-zero default)
+  PROMPT_PENDING       = 1,    // decision enqueued; awaiting the hub ack
+  PROMPT_SENT_OK       = 2,    // hub acked ok:true -> decision applied
+  PROMPT_TOO_LATE      = 3,    // hub acked ok:false / err -> decision did not apply (late/superseded)
+};
 typedef struct {
   bool present;                // a tool-permission prompt is pending (absence => idle)
   char id[BUDDY_ID_LEN];       // prompt id (echoed back on decide)
   char tool[BUDDY_TOOL_LEN];   // tool name
   char hint[BUDDY_HINT_LEN];   // command hint
+  uint8_t decision_state;      // device-local confirm lifecycle (PROMPT_*); NOT serialized
 } buddy_prompt_t;
 typedef struct {
   record_hdr_t  hdr;           // ST_HUB_OFFLINE when the hub link drops

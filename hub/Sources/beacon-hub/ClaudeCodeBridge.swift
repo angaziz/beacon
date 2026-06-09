@@ -7,6 +7,15 @@ import BeaconHubKit
 // Binds 127.0.0.1 on an ephemeral port written to ~/.beacon-hub/port (the hooks read it). Logs only
 // id + decision + timestamp -- NEVER the hint/command string (tech.md 9).
 final class ClaudeCodeBridge {
+    // Outcome of resolving a device decision, so the caller can send a truthful ack (issue #8): the
+    // decision either applied, arrived after the prompt already resolved (cap/superseded), or names an
+    // id the hub never minted.
+    enum ResolveOutcome {
+        case applied
+        case late      // id known but already done (e.g. lost the 25s-cap race) -> ack(ok:false)
+        case unknown   // id never seen -> err(unknown_prompt_id)
+    }
+
     var onBuddyUpdate: ((BuddyState) -> Void)?
     var onClaudeUsage: ((ProviderUsage) -> Void)?   // Claude 5h/7d from statusline rate_limits
     var onPromptUndeliverable: ((String) -> Void)?  // a prompt couldn't be shown (device offline)
@@ -57,8 +66,11 @@ final class ClaudeCodeBridge {
     }
 
     // resolve a held permission by the short id; approve=false denies. Safe to call from any thread.
-    func resolve(id: String, approve: Bool) {
-        queue.async { [weak self] in self?.finish(id: id, approve: approve, capped: false) }
+    // Runs finish synchronously on `queue` and returns its outcome so the caller can ack truthfully
+    // (issue #8). Deadlock-safe on the real path: the BLE callback hops to @MainActor before calling
+    // here, and finish only posts main callbacks / HTTP asynchronously (never blocks back on main).
+    func resolve(id: String, approve: Bool) -> ResolveOutcome {
+        queue.sync { finish(id: id, approve: approve, capped: false) }
     }
 
     // Mirror the BLE link state so an arriving prompt can be denied as "offline" instead of held
@@ -172,6 +184,7 @@ final class ClaudeCodeBridge {
 
         let p = Pending(respond: { [weak self] allow in self?.respondDecision(conn, allow: allow, event: event) },
                         timeout: cappedTimer)
+        pending = pending.filter { !$0.value.done }   // drop prior resolved prompts (see finish)
         pending[shortId] = p
         activeId = shortId
         cappedTimer.resume()
@@ -181,15 +194,20 @@ final class ClaudeCodeBridge {
         log(id: shortId, decision: "prompt")
     }
 
-    private func finish(id: String, approve: Bool, capped: Bool) {
-        guard let p = pending[id], !p.done else { return }
+    @discardableResult
+    private func finish(id: String, approve: Bool, capped: Bool) -> ResolveOutcome {
+        guard let p = pending[id] else { return .unknown }
+        guard !p.done else { return .late }   // already resolved (e.g. the 25s cap fired first).
         p.done = true
         p.timeout.cancel()
-        pending[id] = nil
+        // Keep the resolved entry (done=true) so a later device decision for this same id reports
+        // .late (=> ack ok:false) instead of .unknown (=> err) -- the core timeout-race case. Pruned
+        // when the next prompt is minted. ids never repeat (mintId), so no stale-collision risk.
         if activeId == id { activeId = nil }
         if buddy.prompt?.id == id { buddy.prompt = nil; publishBuddy() }
         log(id: id, decision: capped ? "deny-timeout" : (approve ? "allow" : "deny"))
         p.respond(approve)
+        return .applied
     }
 
     // --- session / statusline -> idle buddy fields ---

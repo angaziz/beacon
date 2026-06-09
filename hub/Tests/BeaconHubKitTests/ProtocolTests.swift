@@ -109,6 +109,10 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(ack["v"] as? Int, 1)
         XCTAssertEqual(ack["ack"] as? String, "req_abc")
         XCTAssertEqual(ack["ok"] as? Bool, true)
+        // ok:false = decision did not apply (late/superseded); same shape, ok flips to false (issue #8).
+        let nack = try JSONSerialization.jsonObject(with: HubAck.ack(id: "req_abc", ok: false)) as! [String: Any]
+        XCTAssertEqual(nack["ack"] as? String, "req_abc")
+        XCTAssertEqual(nack["ok"] as? Bool, false)
         let err = try JSONSerialization.jsonObject(with: HubAck.err(id: "req_xyz", reason: "unknown_prompt_id")) as! [String: Any]
         XCTAssertEqual(err["err"] as? String, "unknown_prompt_id")
         XCTAssertEqual(err["id"] as? String, "req_xyz")
