@@ -54,9 +54,12 @@ if [ "${1:-}" = "install-hooks" ]; then
   trap 'rm -f "$TMP"' EXIT
 
   # Step 5 -- the merge. All external values enter via --arg/--slurpfile; nothing is shell-interpolated
-  # into the jq program. Idempotency key is the INNER hook object (type+url): hand-installed beacon
-  # entries may lack a matcher, so we match the inner http-8765 object anywhere in an event's wrappers.
-  # def's must precede the pipeline (a leading/trailing `|` around them is a jq syntax error).
+  # into the jq program. Beacon wrappers are matched by the INNER hook object (type+url) -- hand-installed
+  # entries may lack a matcher, so we match the inner http-8765 object anywhere in an event's wrappers --
+  # then REFRESHED: drop any existing beacon wrapper and re-add the canonical one from the snippet, so a
+  # reinstall propagates field changes (e.g. the timeout bump 35->190); non-beacon wrappers are preserved.
+  # Still idempotent (re-running yields the same result). def's must precede the pipeline (a leading/
+  # trailing `|` around them is a jq syntax error).
   jq -n --arg shim "$SHIM" --slurpfile cur "$SETTINGS" --slurpfile snip "$SNIPPET" '
     def is_beacon_inner: (.type=="http") and (.url=="http://127.0.0.1:8765/hook");
     def wrapper_is_beacon: (.hooks // []) | any(.[]; is_beacon_inner);
@@ -64,9 +67,7 @@ if [ "${1:-}" = "install-hooks" ]; then
     | ($snip[0] | del(._comment)) as $snippet
     | reduce ($snippet.hooks | keys_unsorted[]) as $ev ($s;
         ($snippet.hooks[$ev]) as $beaconWrappers
-        | .hooks[$ev] = ((.hooks[$ev] // []) as $existing
-            | if ($existing | any(.[]; wrapper_is_beacon)) then $existing
-              else $existing + $beaconWrappers end))
+        | .hooks[$ev] = (((.hooks[$ev] // []) | map(select(wrapper_is_beacon | not))) + $beaconWrappers))
     | (.statusLine.command // "") as $oldcmd
     # Wrap, do not replace: an inline-shell renderer (env=val cmd, cmd && other, redirects, $(...)) would
     # break if we just space-prefixed the shim, so delegate it as a single `sh -c <quoted>` invocation
