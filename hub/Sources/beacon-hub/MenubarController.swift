@@ -14,7 +14,8 @@ final class MenubarController {
     private var lastSync: Date?
     private var usage: Usage = Usage(claude: .unavailable, codex: .unavailable)
     private var errors: [String] = []
-    private var alert: String?   // persistent loud surface for an undeliverable prompt; nil => none.
+    private var alert: String?         // persistent loud surface for an undeliverable prompt; nil => none.
+    private var bridgeAlert: String?   // bridge bind failure; nil => none. Independent of `alert`.
 
     private let alertLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -48,6 +49,7 @@ final class MenubarController {
 
     func setLink(_ link: Link) { self.link = link; render() }
     func setAlert(_ message: String?) { self.alert = message; render() }
+    func setBridgeAlert(_ message: String?) { self.bridgeAlert = message; render() }
     func setUsage(_ usage: Usage, errors: [String]) {
         self.usage = usage
         self.errors = errors
@@ -56,10 +58,19 @@ final class MenubarController {
     }
 
     private func render() {
-        if let alert = alert {
+        // Bridge alert takes priority (safety-critical). One reused alertLine, so each branch sets its
+        // title state explicitly -- clearing attributedTitle on the others so stale red can't leak.
+        if let bridgeAlert = bridgeAlert {
+            alertLine.attributedTitle = NSAttributedString(
+                string: "! \(bridgeAlert)",
+                attributes: [.foregroundColor: NSColor.systemRed])
+            alertLine.isHidden = false
+        } else if let alert = alert {
+            alertLine.attributedTitle = nil
             alertLine.title = "! \(alert) -- couldn't show prompt"
             alertLine.isHidden = false
         } else {
+            alertLine.attributedTitle = nil
             alertLine.isHidden = true
         }
 
@@ -98,7 +109,7 @@ final class MenubarController {
 
     private func barTitle() -> String {
         // An active alert overrides the link state in the bar so it's visible without opening the menu.
-        if alert != nil { return "Beacon !" }
+        if bridgeAlert != nil || alert != nil { return "Beacon !" }
         switch link {
         case .connected: return "Beacon"
         case .scanning: return "Beacon..."
