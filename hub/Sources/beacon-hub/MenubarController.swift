@@ -108,7 +108,8 @@ final class MenubarController: NSObject {
         switch link {
         case .bluetoothOff:
             fixLine.title = "Open Bluetooth settings…"
-            fixURL = URL(string: "x-apple.systempreferences:com.apple.Bluetooth")
+            // macOS 13+ pane id; the pre-Ventura "com.apple.Bluetooth" no longer resolves.
+            fixURL = URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings")
             fixLine.isEnabled = true; fixLine.isHidden = false
         case .unauthorized:
             fixLine.title = "Open Privacy settings…"
