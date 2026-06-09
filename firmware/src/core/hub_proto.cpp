@@ -76,9 +76,14 @@ bool hub_parse_status(const char* json, size_t len,
       buddy->prompt.present = false;
       buddy->prompt.id[0] = buddy->prompt.tool[0] = buddy->prompt.hint[0] = '\0';
     } else {
+      const char* pid = p["id"].as<const char*>();
+      // A full-frame resend (e.g. on reconnect) can repeat the SAME prompt we are already showing;
+      // preserve its in-flight confirm state (PENDING/TOO_LATE) so a pending ack can still land (#8).
+      // Only a genuinely new id (or a prompt shown after idle) is fresh to decide.
+      bool same_prompt = buddy->prompt.present && pid && strcmp(buddy->prompt.id, pid) == 0;
+      if (!same_prompt) buddy->prompt.decision_state = PROMPT_IDLE_DECISION;
       buddy->prompt.present = true;
-      buddy->prompt.decision_state = PROMPT_IDLE_DECISION;   // a (re)shown prompt is fresh to decide (issue #8)
-      copy_trunc(buddy->prompt.id,   BUDDY_ID_LEN,   p["id"].as<const char*>());
+      copy_trunc(buddy->prompt.id,   BUDDY_ID_LEN,   pid);
       copy_trunc(buddy->prompt.tool, BUDDY_TOOL_LEN, p["tool"].as<const char*>());
       copy_trunc(buddy->prompt.hint, BUDDY_HINT_LEN, p["hint"].as<const char*>());
     }

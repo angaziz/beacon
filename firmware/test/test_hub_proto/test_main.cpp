@@ -125,6 +125,29 @@ static void test_parse_prompt_absent_is_idle(void) {
   TEST_ASSERT_FALSE(b.prompt.present);            // absence of prompt => idle
 }
 
+// A full-frame resend repeating the SAME pending prompt must NOT reset the confirm state (#8),
+// or the pending ack would no longer transition the prompt.
+static void test_parse_same_prompt_preserves_pending(void) {
+  const char* j = "{\"v\":1,\"buddy\":{\"running\":0,\"waiting\":0,\"tokens\":0,\"context_pct\":0,"
+                  "\"prompt\":{\"id\":\"p7\",\"tool\":\"Bash\",\"hint\":\"ls\"}}}";
+  usage_rec_t u; buddy_rec_t b; bool hu, hb;
+  memset(&u, 0, sizeof(u)); memset(&b, 0, sizeof(b));
+  b.prompt.present = true; strcpy(b.prompt.id, "p7"); b.prompt.decision_state = PROMPT_PENDING;
+  TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
+  TEST_ASSERT_EQUAL_UINT8(PROMPT_PENDING, b.prompt.decision_state);
+}
+
+// A different prompt id IS fresh to decide => reset to idle.
+static void test_parse_new_prompt_resets_decision(void) {
+  const char* j = "{\"v\":1,\"buddy\":{\"running\":0,\"waiting\":0,\"tokens\":0,\"context_pct\":0,"
+                  "\"prompt\":{\"id\":\"p8\",\"tool\":\"Bash\",\"hint\":\"ls\"}}}";
+  usage_rec_t u; buddy_rec_t b; bool hu, hb;
+  memset(&u, 0, sizeof(u)); memset(&b, 0, sizeof(b));
+  b.prompt.present = true; strcpy(b.prompt.id, "p7"); b.prompt.decision_state = PROMPT_PENDING;
+  TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
+  TEST_ASSERT_EQUAL_UINT8(PROMPT_IDLE_DECISION, b.prompt.decision_state);
+}
+
 static void test_parse_truncates_long_strings(void) {
   // id longer than BUDDY_ID_LEN-1 (23) must truncate, not overflow (hub mints <=23, but be safe).
   const char* j = "{\"v\":1,\"buddy\":{\"prompt\":{\"id\":\"0123456789ABCDEF0123456789\","
@@ -277,6 +300,8 @@ int main(int, char**) {
   RUN_TEST(test_parse_full_frame);
   RUN_TEST(test_parse_null_and_missing_windows);
   RUN_TEST(test_parse_prompt_absent_is_idle);
+  RUN_TEST(test_parse_same_prompt_preserves_pending);
+  RUN_TEST(test_parse_new_prompt_resets_decision);
   RUN_TEST(test_parse_truncates_long_strings);
   RUN_TEST(test_parse_entries_capped);
   RUN_TEST(test_parse_rejects_bad_version_and_garbage);
