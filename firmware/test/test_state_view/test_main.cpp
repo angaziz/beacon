@@ -18,7 +18,7 @@ static void test_sv_status(void) {
   h.state = ST_LIVE;        TEST_ASSERT_FALSE(sv_status(b, sizeof(b), &h, 2000));
   h.state = ST_STALE;       TEST_ASSERT_TRUE(sv_status(b, sizeof(b), &h, 1000 + 120)); TEST_ASSERT_EQUAL_STRING("STALE 2m", b);
   h.state = ST_OFFLINE;     TEST_ASSERT_TRUE(sv_status(b, sizeof(b), &h, 2000)); TEST_ASSERT_EQUAL_STRING("OFFLINE", b);
-  h.state = ST_HUB_OFFLINE; TEST_ASSERT_TRUE(sv_status(b, sizeof(b), &h, 2000)); TEST_ASSERT_EQUAL_STRING("HUB OFFLINE", b);
+  h.state = ST_HUB_OFFLINE; TEST_ASSERT_TRUE(sv_status(b, sizeof(b), &h, 1000 + 1000)); TEST_ASSERT_EQUAL_STRING("HUB OFFLINE 16m", b);
   h.state = ST_ERROR; h.err = ERR_RATE_LIMITED; TEST_ASSERT_TRUE(sv_status(b, sizeof(b), &h, 2000)); TEST_ASSERT_EQUAL_STRING("RATE LIMIT", b);
 }
 static void test_predicates(void) {

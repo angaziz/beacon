@@ -19,7 +19,7 @@ static lv_obj_t *s_deny, *s_approve, *s_actrule;
 static lv_obj_t *s_idle;
 
 static bool actions_locked(screen_state_t st) {
-  return st == ST_HUB_OFFLINE || st == ST_RECONNECTING;
+  return st == ST_HUB_OFFLINE;
 }
 
 static void decide_cb(lv_event_t* e) {
@@ -157,6 +157,15 @@ static void update(void) {
       lv_obj_clear_flag(s_deny, LV_OBJ_FLAG_CLICKABLE);
       lv_obj_clear_flag(s_approve, LV_OBJ_FLAG_CLICKABLE);
       break;
+    case PROMPT_SENT_OK:   // applied; held briefly + non-clickable before the tick clears (issue #12).
+      lv_label_set_text(s_eyebrow, "sent ok");
+      lv_obj_set_style_text_color(s_eyebrow, t->up, 0);
+      lv_label_set_text(s_deny, "< deny");
+      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
+      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
+      lv_obj_clear_flag(s_deny, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_clear_flag(s_approve, LV_OBJ_FLAG_CLICKABLE);
+      break;
     case PROMPT_TOO_LATE:   // did not apply; deny becomes the dismiss affordance.
       lv_label_set_text(s_eyebrow, "too late - didn't apply");
       lv_obj_set_style_text_color(s_eyebrow, t->down, 0);
@@ -166,8 +175,10 @@ static void update(void) {
       lv_obj_add_flag(s_deny, LV_OBJ_FLAG_CLICKABLE);
       lv_obj_clear_flag(s_approve, LV_OBJ_FLAG_CLICKABLE);
       break;
-    default:
-      lv_label_set_text(s_eyebrow, "permission - approve?");
+    default: {
+      char eb[32];
+      snprintf(eb, sizeof(eb), "approve? %us", (unsigned)buddy_prompt_secs_left(&r, uptime_s()));
+      lv_label_set_text(s_eyebrow, eb);
       lv_obj_set_style_text_color(s_eyebrow, t->accent, 0);
       lv_label_set_text(s_deny, "< deny");
       lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
@@ -180,6 +191,7 @@ static void update(void) {
         lv_obj_add_flag(s_approve, LV_OBJ_FLAG_CLICKABLE);
       }
       break;
+    }
     }
   } else {
     if (r.entry_count > 0) lv_label_set_text(s_idle, r.entries[0]);

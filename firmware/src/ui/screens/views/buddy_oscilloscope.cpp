@@ -109,7 +109,7 @@ static void update(void) {
   buddy_rec_t b = ds_get_buddy();
   uint32_t now = now_s();
 
-  bool offline = (b.hdr.state == ST_HUB_OFFLINE || b.hdr.state == ST_RECONNECTING);
+  bool offline = (b.hdr.state == ST_HUB_OFFLINE);
 
   char chip[24];
   if (sv_status(chip, sizeof(chip), &b.hdr, now)) {
@@ -134,6 +134,12 @@ static void update(void) {
       lv_label_set_text(s_deny, "< DENY");
       show_actions(true, false, t);
       break;
+    case PROMPT_SENT_OK:   // applied; held briefly before the tick clears (issue #12).
+      lv_label_set_text(s_eyebrow, "SENT OK");
+      lv_obj_set_style_text_color(s_eyebrow, t->up, 0);
+      lv_label_set_text(s_deny, "< DENY");
+      show_actions(true, false, t);
+      break;
     case PROMPT_TOO_LATE:   // did not apply; deny becomes the dismiss readout.
       lv_label_set_text(s_eyebrow, "TOO LATE - DIDN'T APPLY");
       lv_obj_set_style_text_color(s_eyebrow, t->down, 0);
@@ -142,12 +148,15 @@ static void update(void) {
       lv_obj_add_flag(s_approve, LV_OBJ_FLAG_HIDDEN);
       lv_obj_set_style_text_color(s_deny, t->ink, 0);
       break;
-    default:
-      lv_label_set_text(s_eyebrow, "PERMISSION - APPROVE?");
+    default: {
+      char eb[32];
+      snprintf(eb, sizeof(eb), "PERMISSION - APPROVE? %us", (unsigned)buddy_prompt_secs_left(&b, uptime_s()));
+      lv_label_set_text(s_eyebrow, eb);
       lv_obj_set_style_text_color(s_eyebrow, t->accent, 0);
       lv_label_set_text(s_deny, "< DENY");
       show_actions(true, !offline, t);
       break;
+    }
     }
   } else {
     lv_label_set_text(s_eyebrow, "ACTIVITY");

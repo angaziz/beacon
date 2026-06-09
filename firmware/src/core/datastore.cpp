@@ -117,3 +117,17 @@ void ds_tick_staleness(uint32_t now) {
   for (uint8_t i = 0; i < s_finance_count; i++) sweep_one(&s_finance[i].hdr, now, finance_stale_s(i));
   ds_lock_give(s_lock);
 }
+
+// `now` is monotonic uptime (uptime_s()); shown_at/decided_at share that epoch (records.h).
+void ds_tick_buddy_prompt(uint32_t now) {
+  ds_lock_take(s_lock);
+  buddy_prompt_t* p = &s_buddy.prompt;
+  if (p->present) {
+    if (p->decision_state == PROMPT_SENT_OK) {
+      if (now - p->decided_at >= BUDDY_CONFIRM_HOLD_S) p->present = false;        // beat shown; clear
+    } else if (p->decision_state == PROMPT_IDLE_DECISION) {
+      if (now - p->shown_at >= BUDDY_PROMPT_EXPIRY_S) p->decision_state = PROMPT_TOO_LATE;   // expired
+    }
+  }
+  ds_lock_give(s_lock);
+}

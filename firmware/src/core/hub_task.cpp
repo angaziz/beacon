@@ -6,6 +6,9 @@
 #include "util/log.h"
 #include <Arduino.h>
 #include <esp_heap_caps.h>
+#include <string.h>
+
+uint32_t uptime_s(void);   // monotonic uptime (defined in timekeep.cpp; ui/screen.h owns the public decl)
 
 static HubLinkBle s_link;
 static HubLink*   g_link = nullptr;   // null until the task starts (BEACON_DEV leaves it null)
@@ -20,6 +23,7 @@ static void apply_ack(const hub_ack_t& ack) {
     LOGW("hub: ack id=%s ignored (no matching pending prompt)", ack.id);
     return;
   }
+  if (b.prompt.decision_state == PROMPT_SENT_OK) b.prompt.decided_at = uptime_s();  // start confirm-hold
   ds_set_buddy(&b);
   LOGI("hub: ack id=%s ok=%d is_err=%d -> state=%u", ack.id, ack.ok, ack.is_err,
        (unsigned)b.prompt.decision_state);
@@ -34,11 +38,19 @@ static void on_frame(const char* json, size_t len) {
 
   usage_rec_t u = ds_get_usage();
   buddy_rec_t b = ds_get_buddy();
+  buddy_prompt_t prev = b.prompt;                          // snapshot before parse (r1 #4)
   bool hu = false, hb = false;
   if (!hub_parse_status(json, len, &u, &hu, &b, &hb)) { LOGW("hub: bad/ignored frame"); return; }
-  uint32_t now = (uint32_t)timekeep_now();
-  if (hu) { u.hdr.last_updated = now; ds_set_usage(&u); }   // setter forces ST_LIVE
-  if (hb) { b.hdr.last_updated = now; ds_set_buddy(&b); }
+  uint32_t now  = (uint32_t)timekeep_now();                // wall, for last_updated (staleness/age)
+  uint32_t mono = uptime_s();                              // monotonic, for prompt lifecycle stamps
+  if (hu) { u.hdr.last_updated = now; ds_set_usage(&u); }  // setter forces ST_LIVE
+  if (hb) {
+    if (prev.present && prev.decision_state == PROMPT_SENT_OK && !b.prompt.present)
+      b.prompt = prev;                                     // protect the in-flight "sent ok" beat from an absent-prompt status (r1 #3)
+    else if (b.prompt.present && (!prev.present || strncmp(prev.id, b.prompt.id, BUDDY_ID_LEN) != 0))
+      b.prompt.shown_at = mono;                            // genuinely new prompt => start the countdown
+    b.hdr.last_updated = now; ds_set_buddy(&b);
+  }
 }
 
 static void hub_task(void*) {
@@ -49,6 +61,7 @@ static void hub_task(void*) {
   int k = 0;
   for (;;) {
     s_link.loop();
+    ds_tick_buddy_prompt(uptime_s());   // prompt expiry + confirm-hold (monotonic; runs every screen)
 
     bool c = s_link.isConnected();
     if (s_was_connected && !c) ds_set_hub_offline();   // edge-triggered: flip both hub records once
@@ -82,7 +95,7 @@ bool buddy_decide(bool approve) {
   // Canonical guard (folds in the old per-view present/offline checks + the re-tap guard): only the
   // first decision on a live, present prompt is enqueued.
   if (!r.prompt.present) return false;
-  if (r.hdr.state == ST_HUB_OFFLINE || r.hdr.state == ST_RECONNECTING) return false;
+  if (r.hdr.state == ST_HUB_OFFLINE) return false;
   if (r.prompt.decision_state != PROMPT_IDLE_DECISION) return false;     // already decided/awaiting ack
   if (!hub_send_permission(r.prompt.id, approve)) return false;          // keep prompt as-is if not enqueued
   if (!g_link)                                                           // no hub => no ack will ever arrive (dev/seed

@@ -143,7 +143,7 @@ static void update(void) {
   buddy_rec_t b = ds_get_buddy();
   uint32_t now = now_s();
 
-  bool offline = (b.hdr.state == ST_HUB_OFFLINE || b.hdr.state == ST_RECONNECTING);
+  bool offline = (b.hdr.state == ST_HUB_OFFLINE);
   s_actions_enabled = b.prompt.present && !offline;
 
   char sbuf[24];
@@ -177,6 +177,13 @@ static void update(void) {
       lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
       lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
       break;
+    case PROMPT_SENT_OK:   // applied; held briefly before the tick clears (issue #12).
+      lv_label_set_text(s_eyebrow, "sent ok");
+      lv_obj_set_style_text_color(s_eyebrow, t->up, 0);
+      lv_label_set_text(s_deny, "< deny");
+      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
+      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
+      break;
     case PROMPT_TOO_LATE:   // did not apply; deny becomes the dismiss affordance.
       lv_label_set_text(s_eyebrow, "too late - didn't apply");
       lv_obj_set_style_text_color(s_eyebrow, t->down, 0);
@@ -184,14 +191,17 @@ static void update(void) {
       lv_obj_set_style_text_color(s_deny, t->ink, 0);
       lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
       break;
-    default:
-      lv_label_set_text(s_eyebrow, "permission - approve?");
+    default: {
+      char eb[32];
+      snprintf(eb, sizeof(eb), "approve? %us", (unsigned)buddy_prompt_secs_left(&b, uptime_s()));
+      lv_label_set_text(s_eyebrow, eb);
       lv_obj_set_style_text_color(s_eyebrow, t->ink_dim, 0);
       lv_label_set_text(s_deny, "< deny");
-      // Dim actions visually when disabled (hub offline / reconnecting).
+      // Dim actions visually when disabled (hub offline).
       lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
       lv_obj_set_style_text_color(s_approve, s_actions_enabled ? t->accent : t->ink_dim, 0);
       break;
+    }
     }
   } else {
     show_prompt(false);

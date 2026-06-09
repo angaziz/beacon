@@ -51,7 +51,7 @@ static void update(void) {
   slot_set(s_slot, "REQ --", &b.hdr, now);
   lv_label_set_text_fmt(s_status, "%u RUNNING . %u WAITING . %uK TOK . CTX %u%%",
     b.running, b.waiting, (unsigned)(b.tokens/1000), b.context_pct);
-  bool disabled = (b.hdr.state == ST_HUB_OFFLINE || b.hdr.state == ST_RECONNECTING);
+  bool disabled = (b.hdr.state == ST_HUB_OFFLINE);
   if (b.prompt.present && !disabled) {
     show_prompt(true);
     lv_label_set_text(s_tool, b.prompt.tool);
@@ -65,6 +65,13 @@ static void update(void) {
       lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
       lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
       break;
+    case PROMPT_SENT_OK:   // applied; held briefly before the tick clears (issue #12).
+      lv_label_set_text(s_kicker, "SENT OK");
+      lv_obj_set_style_text_color(s_kicker, t->up, 0);
+      lv_label_set_text(s_deny, "< DENY");
+      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
+      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
+      break;
     case PROMPT_TOO_LATE:   // did not apply; deny becomes the dismiss affordance.
       lv_label_set_text(s_kicker, "TOO LATE -- DIDN'T APPLY");
       lv_obj_set_style_text_color(s_kicker, t->down, 0);
@@ -72,13 +79,16 @@ static void update(void) {
       lv_obj_set_style_text_color(s_deny, t->ink, 0);
       lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
       break;
-    default:
-      lv_label_set_text(s_kicker, "PERMISSION -- APPROVE?");
+    default: {
+      char eb[32];
+      snprintf(eb, sizeof(eb), "PERMISSION -- APPROVE? %us", (unsigned)buddy_prompt_secs_left(&b, uptime_s()));
+      lv_label_set_text(s_kicker, eb);
       lv_obj_set_style_text_color(s_kicker, t->accent, 0);
       lv_label_set_text(s_deny, "< DENY");
       lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
       lv_obj_set_style_text_color(s_approve, t->accent, 0);
       break;
+    }
     }
   } else {
     show_prompt(false);

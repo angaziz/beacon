@@ -66,12 +66,20 @@ enum {
   PROMPT_SENT_OK       = 2,    // hub acked ok:true -> decision applied
   PROMPT_TOO_LATE      = 3,    // hub acked ok:false / err -> decision did not apply (late/superseded)
 };
+// Prompt lifecycle timeouts (monotonic seconds): a prompt nobody decides expires; an applied decision
+// holds its "sent ok" beat briefly before clearing. See ds_tick_buddy_prompt.
+#define BUDDY_PROMPT_EXPIRY_S 25u   // match the Mac fail-closed window (audit 3.4)
+#define BUDDY_CONFIRM_HOLD_S   2u
 typedef struct {
   bool present;                // a tool-permission prompt is pending (absence => idle)
   char id[BUDDY_ID_LEN];       // prompt id (echoed back on decide)
   char tool[BUDDY_TOOL_LEN];   // tool name
   char hint[BUDDY_HINT_LEN];   // command hint
   uint8_t decision_state;      // device-local confirm lifecycle (PROMPT_*); NOT serialized
+  // Device-local monotonic-uptime stamps (uptime_s()), NOT serialized; live in a different epoch from
+  // hdr.last_updated (wall clock) and are only ever compared against each other (each-other deltas).
+  uint32_t shown_at;           // uptime when this prompt arrived => expiry countdown
+  uint32_t decided_at;         // uptime when the hub acked ok => confirm-hold window
 } buddy_prompt_t;
 typedef struct {
   record_hdr_t  hdr;           // ST_HUB_OFFLINE when the hub link drops

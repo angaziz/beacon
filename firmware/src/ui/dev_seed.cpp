@@ -29,7 +29,8 @@ static void seed(void) {
   u.hdr.last_updated = now; ds_set_usage(&u);
   buddy_rec_t b; memset(&b, 0, sizeof(b)); b.running = 2; b.waiting = 1; b.tokens = 184502; b.context_pct = 42;
   b.prompt.present = true; strncpy(b.prompt.id, "A1B2", BUDDY_ID_LEN-1); strncpy(b.prompt.tool, "Bash", BUDDY_TOOL_LEN-1);
-  strncpy(b.prompt.hint, "rm -rf /tmp/build-cache", BUDDY_HINT_LEN-1); b.hdr.last_updated = now; ds_set_buddy(&b);
+  strncpy(b.prompt.hint, "rm -rf /tmp/build-cache", BUDDY_HINT_LEN-1); b.prompt.shown_at = uptime_s();
+  b.hdr.last_updated = now; ds_set_buddy(&b);
   nowplaying_rec_t np; memset(&np, 0, sizeof(np)); np.has_device = true; np.playing = true;
   strncpy(np.title, "Midnight City", NP_TITLE_LEN-1); strncpy(np.artist, "M83", NP_ARTIST_LEN-1);
   strncpy(np.device, "Studio", NP_DEVICE_LEN-1); np.progress_ms = 60000; np.duration_ms = 240000; np.hdr.last_updated = now;
@@ -41,6 +42,7 @@ static void stale_task(void*) {
   int k = 0;
   for (;;) {
     ds_tick_staleness(now_s());
+    ds_tick_buddy_prompt(uptime_s());
     if (++k % 5 == 0)
       LOGI("heap: int_free=%u int_dma_blk=%u psram_free=%u psram_blk=%u",
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),

@@ -94,7 +94,7 @@ lv_obj_get_coords. For gauges you may instead reuse `gauge_render(parent, t, pct
 - buddy (CLAUDE): status line (running, waiting, tokens/1000 +"K", context_pct). Discriminate
   buddy.prompt.present: true => prompt layout (prompt.tool, prompt.hint in a box, DENY|APPROVE);
   false => idle (entries[0..entry_count-1], or "idle"). Approve/Deny tap is a LOCAL STUB: read rec,
-  set prompt.present=false, ds_set_buddy(&rec), LOGI. Disable actions when hdr.state is HUB_OFFLINE/RECONNECTING.
+  set prompt.present=false, ds_set_buddy(&rec), LOGI. Disable actions when hdr.state is HUB_OFFLINE.
 - nowplaying (NOW): title/artist/device, progress bar = progress_ms/duration_ms, playing => "PLAYING"/
   "PAUSED". has_device==false => "no active device" state. Controls are non-functional placeholders (P4).
 - settings (SETTINGS): rows Wi-Fi(status text "not set"), Brightness, Theme, Tickers(ds_get_finance_count
