@@ -41,6 +41,14 @@ final class MenubarController: NSObject {
     private let pairLine = NSMenuItem(title: "Pair: enter the code shown on the device", action: nil, keyEquivalent: "")
     private var errorItems: [NSMenuItem] = []
 
+    // Audible cue when a prompt lands on the device, plus an opt-out (the device screen is easy to miss).
+    private let muteLine = NSMenuItem(title: "Mute prompt sound", action: nil, keyEquivalent: "")
+    private let promptSound = NSSound(named: "Glass")
+    private var promptSoundMuted: Bool {
+        get { UserDefaults.standard.bool(forKey: "BeaconPromptSoundMuted") }
+        set { UserDefaults.standard.set(newValue, forKey: "BeaconPromptSoundMuted") }
+    }
+
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
@@ -62,6 +70,10 @@ final class MenubarController: NSObject {
         menu.addItem(.separator())
         pairLine.isEnabled = false
         menu.addItem(pairLine)
+        menu.addItem(.separator())
+        muteLine.target = self; muteLine.action = #selector(toggleMute)
+        muteLine.state = promptSoundMuted ? .on : .off
+        menu.addItem(muteLine)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Beacon", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
@@ -188,6 +200,18 @@ final class MenubarController: NSObject {
         image?.isTemplate = true
         button.image = image
         button.contentTintColor = tint
+    }
+
+    // Play even if the previous cue is still ringing (stop+play) so back-to-back prompts each sound.
+    func playPromptSoundIfEnabled() {
+        guard !promptSoundMuted else { return }
+        promptSound?.stop()
+        promptSound?.play()
+    }
+
+    @objc private func toggleMute() {
+        promptSoundMuted.toggle()
+        muteLine.state = promptSoundMuted ? .on : .off
     }
 
     @objc private func openLink() {

@@ -68,7 +68,7 @@ enum {
 };
 // Prompt lifecycle timeouts (monotonic seconds): a prompt nobody decides expires; an applied decision
 // holds its "sent ok" beat briefly before clearing. See ds_tick_buddy_prompt.
-#define BUDDY_PROMPT_EXPIRY_S 25u   // match the Mac fail-closed window (audit 3.4)
+#define BUDDY_PROMPT_EXPIRY_S 180u   // match the Mac fail-closed window (3 min; CC PermissionRequest allows up to 600s)
 #define BUDDY_CONFIRM_HOLD_S   2u
 typedef struct {
   bool present;                // a tool-permission prompt is pending (absence => idle)
