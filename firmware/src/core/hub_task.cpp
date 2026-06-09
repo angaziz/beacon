@@ -85,7 +85,10 @@ bool buddy_decide(bool approve) {
   if (r.hdr.state == ST_HUB_OFFLINE || r.hdr.state == ST_RECONNECTING) return false;
   if (r.prompt.decision_state != PROMPT_IDLE_DECISION) return false;     // already decided/awaiting ack
   if (!hub_send_permission(r.prompt.id, approve)) return false;          // keep prompt as-is if not enqueued
-  r.prompt.decision_state = PROMPT_PENDING;                              // await the truthful ack; DO NOT clear present
+  if (!g_link)                                                           // no hub => no ack will ever arrive (dev/seed
+    r.prompt.present = false;                                            // path); clear locally as the old per-view flow did
+  else
+    r.prompt.decision_state = PROMPT_PENDING;                            // real link: await the truthful ack; keep present
   ds_set_buddy(&r);
   return true;
 }

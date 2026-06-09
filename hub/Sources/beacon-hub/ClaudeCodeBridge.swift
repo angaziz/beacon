@@ -184,6 +184,7 @@ final class ClaudeCodeBridge {
 
         let p = Pending(respond: { [weak self] allow in self?.respondDecision(conn, allow: allow, event: event) },
                         timeout: cappedTimer)
+        pending = pending.filter { !$0.value.done }   // drop prior resolved prompts (see finish)
         pending[shortId] = p
         activeId = shortId
         cappedTimer.resume()
@@ -199,7 +200,9 @@ final class ClaudeCodeBridge {
         guard !p.done else { return .late }   // already resolved (e.g. the 25s cap fired first).
         p.done = true
         p.timeout.cancel()
-        pending[id] = nil
+        // Keep the resolved entry (done=true) so a later device decision for this same id reports
+        // .late (=> ack ok:false) instead of .unknown (=> err) -- the core timeout-race case. Pruned
+        // when the next prompt is minted. ids never repeat (mintId), so no stale-collision risk.
         if activeId == id { activeId = nil }
         if buddy.prompt?.id == id { buddy.prompt = nil; publishBuddy() }
         log(id: id, decision: capped ? "deny-timeout" : (approve ? "allow" : "deny"))
