@@ -110,19 +110,20 @@ public enum HookResponse {
         return (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])) ?? Data("{}".utf8)
     }
 
-    // "ask": do NOT gate -- defer to Claude Code's own interactive prompt. Used for AskUserQuestion,
-    // which is a multi-option question the device can't (and shouldn't) answer; `allow` here could let
-    // an auto-accept mode resolve it with no human pick, so we explicitly hand it to the Mac instead.
+    // Do NOT gate -- defer to Claude Code's own interactive prompt. Used for AskUserQuestion, which is a
+    // multi-option question the device can't (and shouldn't) answer; `allow` here could let an auto-accept
+    // mode resolve it with no human pick, so we explicitly hand it to the Mac instead.
     public static func permissionAsk(event: String) -> Data {
-        let inner: [String: Any]
         switch event {
         case "PermissionRequest":
-            inner = ["hookEventName": "PermissionRequest", "decision": ["behavior": "ask"]]
-        default:   // PreToolUse (and aliases)
-            inner = ["hookEventName": event, "permissionDecision": "ask"]
+            // PermissionRequest's decision.behavior accepts only allow/deny (no "ask", unlike PreToolUse);
+            // an unsupported value fails to defer. Emit NO decision -- CC then falls through to its own
+            // interactive prompt on the Mac, which is exactly the passthrough we want.
+            return Data("{}".utf8)
+        default:   // PreToolUse (and aliases): permissionDecision supports "ask" directly.
+            let payload = ["hookSpecificOutput": ["hookEventName": event, "permissionDecision": "ask"]]
+            return (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])) ?? Data("{}".utf8)
         }
-        return (try? JSONSerialization.data(withJSONObject: ["hookSpecificOutput": inner],
-                                            options: [.sortedKeys])) ?? Data("{}".utf8)
     }
 }
 

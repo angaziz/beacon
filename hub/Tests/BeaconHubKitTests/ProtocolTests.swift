@@ -79,21 +79,19 @@ final class ProtocolTests: XCTestCase {
     }
 
     func testPermissionAskShapePerEvent() throws {
-        // "ask" defers to CC's own prompt (AskUserQuestion passthrough): no behavior=allow/deny, no
-        // message. Same per-event split as a real decision (decision.behavior vs permissionDecision).
-        let cases: [(event: String, wantBehavior: String?, wantDecision: String?)] = [
-            ("PermissionRequest", "ask", nil),
-            ("PreToolUse", nil, "ask"),
-        ]
-        for c in cases {
-            let obj = try JSONSerialization.jsonObject(
-                with: HookResponse.permissionAsk(event: c.event)) as! [String: Any]
-            let out = obj["hookSpecificOutput"] as! [String: Any]
-            XCTAssertEqual(out["hookEventName"] as? String, c.event, "\(c)")
-            XCTAssertEqual((out["decision"] as? [String: Any])?["behavior"] as? String, c.wantBehavior, "\(c)")
-            XCTAssertEqual(out["permissionDecision"] as? String, c.wantDecision, "\(c)")
-            XCTAssertNil((out["decision"] as? [String: Any])?["message"], "ask carries no deny message \(c)")
-        }
+        // Defer to CC's own prompt (AskUserQuestion passthrough). PreToolUse's permissionDecision supports
+        // "ask"; PermissionRequest's decision.behavior does NOT (allow/deny only), so it must emit no
+        // decision -- an empty object CC reads as "no gate", falling through to its interactive prompt.
+        let pr = try JSONSerialization.jsonObject(
+            with: HookResponse.permissionAsk(event: "PermissionRequest")) as! [String: Any]
+        XCTAssertTrue(pr.isEmpty, "PermissionRequest ask must emit no decision (got \(pr))")
+
+        let pre = try JSONSerialization.jsonObject(
+            with: HookResponse.permissionAsk(event: "PreToolUse")) as! [String: Any]
+        let out = pre["hookSpecificOutput"] as! [String: Any]
+        XCTAssertEqual(out["hookEventName"] as? String, "PreToolUse")
+        XCTAssertEqual(out["permissionDecision"] as? String, "ask")
+        XCTAssertNil(out["decision"], "PreToolUse must not use the PermissionRequest shape")
     }
 
     func testPermissionDenyMessageNamesCause() throws {

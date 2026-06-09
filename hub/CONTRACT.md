@@ -79,9 +79,11 @@ one silently fails to gate the tool:
 {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied on Beacon device"}}}
 // PreToolUse (back-compat): permissionDecision in {allow,deny,ask}; precedence deny>ask>allow
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"Approved on Beacon device"}}
-// AskUserQuestion (a question, not yes/no): hub never holds it -- `ask` defers to the Mac's prompt so
-// the human picks an option there; the device shows only a passive "asking a question" feed entry.
-{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"ask"}}}
+// AskUserQuestion (a question, not yes/no): hub never holds it -- it defers to the Mac's prompt so the
+// human picks an option there; the device shows only a passive "asking a question" feed entry. Since
+// PermissionRequest's decision.behavior has no "ask" (allow/deny only), defer by emitting NO decision --
+// an empty body CC reads as "no gate", falling through to its own interactive prompt.
+{}
 ```
 HTTP 2xx + body, no outer envelope. Hook `timeout` is in **seconds** (config: 35 to cover the device's
 ~25 s window). Non-2xx/timeout = **non-blocking (CC proceeds, fail-OPEN)** -- so the hub MUST return
