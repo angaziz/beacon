@@ -51,6 +51,10 @@ final class BeaconCentral: NSObject {
     // Queue-confined (all mutations happen on `queue`). 4 attempts / 25 s comfortably exceeds a single
     // real OS pairing-dialog round-trip but trips a stuck bond.
     private var escalation = PairingEscalation(maxAttempts: 4, deadline: 25)
+    // Set when handleDisconnect cancels a still-connected peripheral: CoreBluetooth echoes that cancel back
+    // as didDisconnectPeripheral, which would re-enter handleDisconnect and count the SAME failure twice
+    // (escalating after 2 failed pairings instead of 4). This one-shot flag swallows that expected echo.
+    private var expectingDisconnect = false
     // Monotonic seconds: the deadline measures elapsed real time, so a wall-clock jump (NTP/sleep) must
     // not spuriously trip (or mask) it.
     private static func monotonicNow() -> TimeInterval {
@@ -136,7 +140,12 @@ final class BeaconCentral: NSObject {
         // Error paths (service/char discovery, pairing failure) land here while still GATT-connected;
         // releasing the reference alone leaves CoreBluetooth holding the link, so the device never
         // re-advertises and the rescan below can't rediscover it. Cancel first (no-op if not connected).
-        if let p = peripheral { central.cancelPeripheralConnection(p) }
+        // A connected peripheral's cancel echoes back as didDisconnectPeripheral => mark it so that re-entry
+        // is swallowed (didFailToConnect never connected, so it produces no echo and must NOT set the flag).
+        if let p = peripheral {
+            expectingDisconnect = (p.state == .connected)
+            central.cancelPeripheralConnection(p)
+        }
         peripheral = nil
         inbound.removeAll(keepingCapacity: true)
         // A genuinely-stuck first-time pair (budget burned / deadline passed) escalates loudly instead of
@@ -196,6 +205,9 @@ extension BeaconCentral: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral,
                         error: Error?) {
+        // Swallow the echo of our own cancelPeripheralConnection (already torn down + counted); only a
+        // spontaneous disconnect (device out of range, etc.) should re-run the teardown.
+        if expectingDisconnect { expectingDisconnect = false; return }
         handleDisconnect()
     }
 }
