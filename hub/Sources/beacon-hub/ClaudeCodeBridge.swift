@@ -265,6 +265,21 @@ final class ClaudeCodeBridge {
             return
         }
 
+        // AskUserQuestion is a question, not a yes/no permission: the device can't pick an option, and a
+        // held question would squat the single prompt slot (auto-denying real permissions that follow).
+        // So never hold it -- defer to the Mac's interactive prompt ("ask") and just surface a passive
+        // "asking a question" indicator. Before offline/busy: the human answers on the Mac regardless of
+        // the device link, and a question must never consume the slot.
+        if tool == "AskUserQuestion" {
+            log(id: "-", decision: "question-passthrough")
+            respondAsk(conn, event: event)
+            if deviceConnected {
+                buddy.entries = Array(([Self.questionEntry(from: body)] + buddy.entries).prefix(3))
+                publishBuddy()
+            }
+            return
+        }
+
         // Device offline => the prompt can't be shown. Deny immediately (named) rather than hold it
         // invisibly until the cap. Checked before busy: a disconnected device is undeliverable
         // regardless of any pending prompt. Respond first, THEN raise the alert, so the contract-
@@ -299,6 +314,7 @@ final class ClaudeCodeBridge {
         pending[shortId] = p
         activeId = shortId
         cappedTimer.resume()
+        watchForClose(conn, id: shortId)   // peer closes => answered on the Mac => withdraw, not "too late" (issue #17)
 
         buddy.prompt = BuddyPrompt(id: shortId, tool: tool, hint: hint)
         publishBuddy()
@@ -326,6 +342,36 @@ final class ClaudeCodeBridge {
         log(id: id, decision: capped ? "deny-timeout" : (approve ? "allow" : "deny"))
         p.respond(approve, message, onSent)
         return .applied
+    }
+
+    // Watch a parked permission connection for the peer (Claude Code) closing it. CC abandons the
+    // in-flight hook -- closing the socket -- when the user answers the permission in the Mac terminal
+    // instead of on the device (issue #17). The request body is already fully read, so this lone receive
+    // sees only EOF/error (a client FIN/RST), never more data. Runs on `queue` (the connection's queue).
+    private func watchForClose(_ conn: NWConnection, id: String) {
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 1) { [weak self] _, _, isComplete, error in
+            guard let self, isComplete || error != nil else { return }
+            self.queue.async { self.withdraw(id: id) }
+        }
+    }
+
+    // Withdraw a held prompt that was resolved elsewhere (the Mac), as opposed to finish() which answers
+    // CC. No HTTP write (the socket is already gone) and no deny -- just free the slot and clear the
+    // device prompt SILENTLY, so a stale prompt can't self-expire to a false "too late - didn't apply"
+    // and can't keep blocking later permissions. The !done guard makes our own finish()->cancel() (which
+    // also fires watchForClose) a no-op: finish sets done before cancelling, so withdraw only wins when
+    // the peer closes first.
+    private func withdraw(id: String) {
+        guard let p = pending[id], !p.done else { return }
+        p.done = true
+        p.timeout.cancel()
+        if activeId == id { activeId = nil }
+        if !p.sessionId.isEmpty, waitingSessions.remove(p.sessionId) != nil {
+            buddy.waiting = waitingSessions.count
+        }
+        if buddy.prompt?.id == id { buddy.prompt = nil }
+        publishBuddy()
+        log(id: id, decision: "withdrawn-resolved-elsewhere")
     }
 
     // Quit drain (issue #16): deny every still-held prompt with a reason, and fire `completion` only once
@@ -487,6 +533,13 @@ final class ClaudeCodeBridge {
         return "[\(base.prefix(10))] "
     }
 
+    // Passive device indicator for an AskUserQuestion (which is passed through, never held): a single
+    // activity-feed line, same "HH:mm [dir] ..." shape as entryLine.
+    static func questionEntry(from body: [String: Any]) -> String {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"
+        return "\(f.string(from: Date())) \(cwdTag(from: body))asking a question"
+    }
+
     private static func entryLine(event: String, body: [String: Any]) -> String? {
         let f = DateFormatter(); f.dateFormat = "HH:mm"
         let stamp = f.string(from: Date())
@@ -523,6 +576,11 @@ final class ClaudeCodeBridge {
         // one by event); the wrong shape silently fails to gate the tool. `message` names a deny cause.
         respond(conn, status: "200 OK", json: HookResponse.permission(event: event, allow: allow, message: message),
                 onSent: onSent)
+    }
+
+    private func respondAsk(_ conn: NWConnection, event: String) {
+        // Defer a question to Claude Code's own interactive prompt (no gate); see HookResponse.permissionAsk.
+        respond(conn, status: "200 OK", json: HookResponse.permissionAsk(event: event))
     }
 
     private func respondJSON(_ conn: NWConnection, _ obj: [String: Any]) {
