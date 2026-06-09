@@ -43,11 +43,13 @@ final class ClaudeCodeBridge {
     // HTTP response. Only ONE may be active (device holds a single prompt, records.h); a second hook
     // is auto-denied + labeled (chosen policy: never stack two long holds).
     private final class Pending {
-        let respond: (Bool) -> Void   // true=allow, false=deny; idempotent (guarded by `done`).
+        // (allow, optional deny message, optional onSent fired once the deny bytes flush). Idempotent
+        // (guarded by `done`). onSent is the seam the quit drain uses to wait for the socket write.
+        let respond: (Bool, String?, (() -> Void)?) -> Void
         var done = false
         let timeout: DispatchSourceTimer
         let sessionId: String         // the prompt's CC session_id, so finish() can clear waitingSessions.
-        init(respond: @escaping (Bool) -> Void, timeout: DispatchSourceTimer, sessionId: String) {
+        init(respond: @escaping (Bool, String?, (() -> Void)?) -> Void, timeout: DispatchSourceTimer, sessionId: String) {
             self.respond = respond; self.timeout = timeout; self.sessionId = sessionId
         }
     }
@@ -55,6 +57,7 @@ final class ClaudeCodeBridge {
     private var activeId: String?
     private var idCounter: UInt32 = 0
     private var deviceConnected = false   // mirrored from BeaconCentral; mutated only on `queue`.
+    private var terminating = false       // quit drain in progress (issue #16); queue-confined.
 
     // RUNNING is derived from a first-seen session map, NOT a SessionStart counter: SessionStart does
     // not support type:http in current CC (it may never fire through the bridge), and SessionEnd does
@@ -254,6 +257,14 @@ final class ClaudeCodeBridge {
         // concurrent sessions (e.g. "[beacon] rm -rf build"). BUDDY_HINT_LEN=80 has room.
         let hint = Self.cwdTag(from: body) + (Self.commandHint(from: body["tool_input"]) ?? tool)
 
+        // Quitting => deny any prompt landing in the drain window immediately (never held), so it can't
+        // be dropped on exit (issue #16). Checked FIRST, before offline/busy.
+        if terminating {
+            log(id: "-", decision: "auto-deny-quit")
+            respondDecision(conn, allow: false, event: event, message: "Beacon hub is quitting")
+            return
+        }
+
         // Device offline => the prompt can't be shown. Deny immediately (named) rather than hold it
         // invisibly until the cap. Checked before busy: a disconnected device is undeliverable
         // regardless of any pending prompt. Respond first, THEN raise the alert, so the contract-
@@ -280,7 +291,9 @@ final class ClaudeCodeBridge {
         cappedTimer.schedule(deadline: .now() + 180)   // 3 min fail-closed cap, under the hook's 190s timeout (CC PermissionRequest default 600s).
         cappedTimer.setEventHandler { [weak self] in self?.finish(id: shortId, approve: false, capped: true) }
 
-        let p = Pending(respond: { [weak self] allow in self?.respondDecision(conn, allow: allow, event: event) },
+        let p = Pending(respond: { [weak self] allow, msg, onSent in
+                            self?.respondDecision(conn, allow: allow, event: event, message: msg, onSent: onSent)
+                        },
                         timeout: cappedTimer, sessionId: sid ?? "")
         pending = pending.filter { !$0.value.done }   // drop prior resolved prompts (see finish)
         pending[shortId] = p
@@ -294,7 +307,8 @@ final class ClaudeCodeBridge {
     }
 
     @discardableResult
-    private func finish(id: String, approve: Bool, capped: Bool) -> ResolveOutcome {
+    private func finish(id: String, approve: Bool, capped: Bool, message: String? = nil,
+                        onSent: (() -> Void)? = nil) -> ResolveOutcome {
         guard let p = pending[id] else { return .unknown }
         guard !p.done else { return .late }   // already resolved (e.g. the cap fired first).
         p.done = true
@@ -310,8 +324,27 @@ final class ClaudeCodeBridge {
         if buddy.prompt?.id == id { buddy.prompt = nil }
         publishBuddy()   // waiting and/or prompt may have changed.
         log(id: id, decision: capped ? "deny-timeout" : (approve ? "allow" : "deny"))
-        p.respond(approve)
+        p.respond(approve, message, onSent)
         return .applied
+    }
+
+    // Quit drain (issue #16): deny every still-held prompt with a reason, and fire `completion` only once
+    // the deny bytes have flushed to the socket (DispatchGroup over the per-send onSent), so CC gets a
+    // clean answer instead of a dropped responder. Calls completion immediately when nothing is held.
+    // Queue-confined.
+    func drainHeldPrompts(reason: String, completion: @escaping () -> Void) {
+        queue.async { [weak self] in
+            guard let self else { DispatchQueue.main.async(execute: completion); return }
+            self.terminating = true
+            let heldIds = self.pending.filter { !$0.value.done }.map(\.key)
+            guard !heldIds.isEmpty else { DispatchQueue.main.async(execute: completion); return }
+            let group = DispatchGroup()
+            for id in heldIds {
+                group.enter()
+                self.finish(id: id, approve: false, capped: false, message: reason, onSent: { group.leave() })
+            }
+            group.notify(queue: .main, execute: completion)
+        }
     }
 
     // --- session / statusline -> idle buddy fields ---
@@ -484,10 +517,12 @@ final class ClaudeCodeBridge {
 
     // --- raw HTTP write ---
 
-    private func respondDecision(_ conn: NWConnection, allow: Bool, event: String, message: String? = nil) {
+    private func respondDecision(_ conn: NWConnection, allow: Bool, event: String, message: String? = nil,
+                                 onSent: (() -> Void)? = nil) {
         // PreToolUse and PermissionRequest need DIFFERENT decision shapes (HookResponse picks the right
         // one by event); the wrong shape silently fails to gate the tool. `message` names a deny cause.
-        respond(conn, status: "200 OK", json: HookResponse.permission(event: event, allow: allow, message: message))
+        respond(conn, status: "200 OK", json: HookResponse.permission(event: event, allow: allow, message: message),
+                onSent: onSent)
     }
 
     private func respondJSON(_ conn: NWConnection, _ obj: [String: Any]) {
@@ -495,14 +530,14 @@ final class ClaudeCodeBridge {
         respond(conn, status: "200 OK", json: data)
     }
 
-    private func respond(_ conn: NWConnection, status: String, json: Data) {
+    private func respond(_ conn: NWConnection, status: String, json: Data, onSent: (() -> Void)? = nil) {
         var head = "HTTP/1.1 \(status)\r\n"
         head += "Content-Type: application/json\r\n"
         head += "Content-Length: \(json.count)\r\n"
         head += "Connection: close\r\n\r\n"
         var out = Data(head.utf8)
         out.append(json)
-        conn.send(content: out, completion: .contentProcessed { _ in conn.cancel() })
+        conn.send(content: out, completion: .contentProcessed { _ in conn.cancel(); onSent?() })
     }
 
     private static func parseHead(_ head: Data) -> (method: String, path: String, contentLength: Int) {

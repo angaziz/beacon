@@ -11,6 +11,11 @@ final class MenubarController: NSObject {
         case searching, connecting(String), connected(String), reconnecting
     }
 
+    // UI-facing login-item state (issue #16). AppDelegate maps SMAppService.Status onto this so this
+    // pure-display layer never imports ServiceManagement. .requiresApproval is surfaced honestly instead
+    // of a silent false "off".
+    enum LoginItemStatus { case enabled, disabled, requiresApproval }
+
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
 
@@ -26,6 +31,11 @@ final class MenubarController: NSObject {
 
     // Re-opens the first-run status window; AppDelegate wires it to FirstRunWindowController.show().
     var onOpenSetup: (() -> Void)?
+
+    // Login-item + forget-device callbacks (issue #16); AppDelegate owns the side effects.
+    var onToggleLoginItem: ((Bool) -> Void)?   // desired on/off; AppDelegate re-reads truth + calls setLoginItemState.
+    var onForgetDevice: (() -> Void)?
+    var onMenuWillOpen: (() -> Void)?          // accessory app: menuWillOpen is the reliable login-item refresh hook.
 
     // Absolute HH:MM avoids a stale relative age with no refresh timer.
     private let timeFormatter: DateFormatter = {
@@ -43,6 +53,10 @@ final class MenubarController: NSObject {
     private let codexLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let pairLine = NSMenuItem(title: "Pair: enter the code shown on the device", action: nil, keyEquivalent: "")
     private var errorItems: [NSMenuItem] = []
+
+    // Auto-start at login (issue #16); checkmark reflects the RE-READ SMAppService status, never the
+    // requested value. Title widens to "(approve in Login Items)" when registration needs user approval.
+    private let loginItemLine = NSMenuItem(title: "Start at login", action: nil, keyEquivalent: "")
 
     // Audible cue when a prompt lands on the device, plus an opt-out (the device screen is easy to miss).
     private let muteLine = NSMenuItem(title: "Mute prompt sound", action: nil, keyEquivalent: "")
@@ -83,12 +97,28 @@ final class MenubarController: NSObject {
         muteLine.target = self; muteLine.action = #selector(toggleMute)
         muteLine.state = promptSoundMuted ? .on : .off
         menu.addItem(muteLine)
+        loginItemLine.target = self; loginItemLine.action = #selector(toggleLoginItem)
+        menu.addItem(loginItemLine)
         menu.addItem(.separator())
         let setupLine = NSMenuItem(title: "Setup…", action: #selector(openSetup), keyEquivalent: "")
         setupLine.target = self
         menu.addItem(setupLine)
+        let forgetLine = NSMenuItem(title: "Forget device / re-pair", action: #selector(forgetDevice), keyEquivalent: "")
+        forgetLine.target = self
+        menu.addItem(forgetLine)
         menu.addItem(NSMenuItem(title: "Quit Beacon", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.delegate = self   // accessory app: refresh login-item status on menu open (menuWillOpen).
         statusItem.menu = menu
+    }
+
+    // Render the RE-READ login-item truth (issue #16). requiresApproval keeps the checkmark off but
+    // labels the row so the user knows the toggle is pending their approval in System Settings.
+    func setLoginItemState(_ status: LoginItemStatus) {
+        switch status {
+        case .enabled:          loginItemLine.state = .on;  loginItemLine.title = "Start at login"
+        case .disabled:         loginItemLine.state = .off; loginItemLine.title = "Start at login"
+        case .requiresApproval: loginItemLine.state = .off; loginItemLine.title = "Start at login (approve in Login Items)"
+        }
     }
 
     func setLink(_ link: Link) { self.link = link; render() }
@@ -227,9 +257,19 @@ final class MenubarController: NSObject {
         muteLine.state = promptSoundMuted ? .on : .off
     }
 
+    // Request the opposite of the current checkmark; AppDelegate re-reads truth and calls back
+    // setLoginItemState (no optimistic flip, since ad-hoc signing can land on .requiresApproval).
+    @objc private func toggleLoginItem() { onToggleLoginItem?(loginItemLine.state != .on) }
+
+    @objc private func forgetDevice() { onForgetDevice?() }
+
     @objc private func openLink() {
         SettingsLinks.open(fixURL ?? SettingsLinks.fallback)
     }
 
     private func fmt(_ pct: Int?) -> String { pct.map { "\($0)%" } ?? "--" }
+}
+
+extension MenubarController: NSMenuDelegate {
+    func menuWillOpen(_ menu: NSMenu) { onMenuWillOpen?() }
 }
