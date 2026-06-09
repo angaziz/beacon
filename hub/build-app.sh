@@ -33,9 +33,12 @@ if [ "${1:-}" = "install-hooks" ]; then
   # Step 2 -- locate/bootstrap settings.
   SETTINGS="$HOME/.claude/settings.json"
   mkdir -p "$HOME/.claude"
-  if [ ! -f "$SETTINGS" ]; then
+  if [ -f "$SETTINGS" ]; then
+    MODE=$(stat -f '%Lp' "$SETTINGS")   # preserve the user's mode; don't broaden a private 0600 file
+  else
     printf '{}\n' > "$SETTINGS"
     echo "bootstrapped empty $SETTINGS"
+    MODE=644                            # CC's conventional default for a freshly created settings file
   fi
 
   # Step 3 -- validate existing settings is strict JSON (no JSONC). Abort before touching anything.
@@ -65,17 +68,22 @@ if [ "${1:-}" = "install-hooks" ]; then
             | if ($existing | any(.[]; wrapper_is_beacon)) then $existing
               else $existing + $beaconWrappers end))
     | (.statusLine.command // "") as $oldcmd
-    | .statusLine = ( if ($oldcmd == $shim or ($oldcmd | startswith($shim + " ")))
-                        then {type:"command", command:$oldcmd}
-                      elif ($oldcmd=="") then {type:"command", command:$shim}
-                      else {type:"command", command:($shim+" "+$oldcmd)} end )
+    # Wrap, do not replace: an inline-shell renderer (env=val cmd, cmd && other, redirects, $(...)) would
+    # break if we just space-prefixed the shim, so delegate it as a single `sh -c <quoted>` invocation
+    # (@sh shell-escapes it). Merge {type,command} OVER the existing statusLine so sibling options
+    # (padding, refreshInterval, ...) survive. Already-wrapped (idempotent) and empty cases pass through.
+    | ( if ($oldcmd == $shim or ($oldcmd | startswith($shim + " "))) then $oldcmd
+        elif ($oldcmd == "") then $shim
+        else ($shim + " sh -c " + ($oldcmd | @sh)) end ) as $newcmd
+    | .statusLine = ((.statusLine // {}) + {type:"command", command:$newcmd})
   ' > "$TMP" || { echo "error: jq merge failed; $SETTINGS left untouched (backup: $BACKUP)" >&2; exit 1; }
 
   # Post-validate the merge output before it replaces the live file.
   jq -e . "$TMP" >/dev/null 2>&1 || { echo "error: merged output is not valid JSON; $SETTINGS left untouched (backup: $BACKUP)" >&2; exit 1; }
 
-  # mktemp creates 0600; settings.json is conventionally 0644 -- restore it before the rename.
-  chmod 644 "$TMP"
+  # mktemp creates 0600; restore the ORIGINAL settings mode (captured in Step 2) so a private
+  # 0600 file is not silently broadened to 0644.
+  chmod "$MODE" "$TMP"
   mv "$TMP" "$SETTINGS"
   trap - EXIT
 
