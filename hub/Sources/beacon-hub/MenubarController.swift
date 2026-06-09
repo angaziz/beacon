@@ -9,6 +9,7 @@ final class MenubarController: NSObject {
     enum Link {
         case bluetoothOff, unauthorized, unavailable
         case searching, connecting(String), connected(String), reconnecting
+        case pairingFailed
     }
 
     // UI-facing login-item state (issue #16). AppDelegate maps SMAppService.Status onto this so this
@@ -35,6 +36,7 @@ final class MenubarController: NSObject {
     // Login-item + forget-device callbacks (issue #16); AppDelegate owns the side effects.
     var onToggleLoginItem: ((Bool) -> Void)?   // desired on/off; AppDelegate re-reads truth + calls setLoginItemState.
     var onForgetDevice: (() -> Void)?
+    var onRetryPairing: (() -> Void)?          // in-app "try again" after a .pairingFailed escalation (issue #17).
     var onMenuWillOpen: (() -> Void)?          // accessory app: menuWillOpen is the reliable login-item refresh hook.
 
     // Absolute HH:MM avoids a stale relative age with no refresh timer.
@@ -48,6 +50,8 @@ final class MenubarController: NSObject {
     private let alertLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let fixLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    // In-app "try again" after a pairing-failed escalation (issue #17); shown ONLY for .pairingFailed.
+    private let retryLine = NSMenuItem(title: "Try pairing again", action: nil, keyEquivalent: "")
     private let syncLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let claudeLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let codexLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -87,6 +91,8 @@ final class MenubarController: NSObject {
         // Remediation link, hidden unless a fault state (bluetoothOff/unauthorized) sets a fixURL.
         fixLine.target = self; fixLine.action = #selector(openLink); fixLine.isHidden = true
         menu.addItem(fixLine)
+        retryLine.target = self; retryLine.action = #selector(retryPairing); retryLine.isHidden = true
+        menu.addItem(retryLine)
         syncLine.isEnabled = false; menu.addItem(syncLine)
         menu.addItem(.separator())
         for item in [claudeLine, codexLine] { item.isEnabled = false; menu.addItem(item) }
@@ -156,7 +162,11 @@ final class MenubarController: NSObject {
         case .connecting(let n):   statusLine.title = "Connecting to \(n)…"
         case .connected(let n):    statusLine.title = "Connected \(n)"
         case .reconnecting:        statusLine.title = "Disconnected — reconnecting"
+        case .pairingFailed:       statusLine.title = "Pairing failed"
         }
+
+        // In-app retry affordance, shown only when pairing has escalated to a failure.
+        if case .pairingFailed = link { retryLine.isHidden = false } else { retryLine.isHidden = true }
 
         // Two distinct remediations; the URL is stored so a single openLink selector serves both.
         switch link {
@@ -186,7 +196,7 @@ final class MenubarController: NSObject {
 
         // Pairing hint is only actionable while looking for / connecting to a device.
         switch link {
-        case .searching, .connecting: pairLine.isHidden = false
+        case .searching, .connecting, .pairingFailed: pairLine.isHidden = false
         default: pairLine.isHidden = true
         }
 
@@ -225,6 +235,10 @@ final class MenubarController: NSObject {
                 symbol = "exclamationmark.triangle.fill"; tint = .systemOrange; description = "Beacon: permission needed"
             case .unavailable:
                 symbol = "exclamationmark.triangle.fill"; tint = .systemRed; description = "Beacon: Bluetooth unavailable"
+            case .pairingFailed:
+                // Orange (recoverable via "try again"), matching the bluetoothOff/unauthorized convention;
+                // red is reserved for the bridge/alert safety surface.
+                symbol = "exclamationmark.triangle.fill"; tint = .systemOrange; description = "Beacon: pairing failed"
             case .searching:
                 symbol = "antenna.radiowaves.left.and.right"; tint = .secondaryLabelColor; description = "Beacon: searching"
             case .connecting:
@@ -262,6 +276,8 @@ final class MenubarController: NSObject {
     @objc private func toggleLoginItem() { onToggleLoginItem?(loginItemLine.state != .on) }
 
     @objc private func forgetDevice() { onForgetDevice?() }
+
+    @objc private func retryPairing() { onRetryPairing?() }
 
     @objc private func openLink() {
         SettingsLinks.open(fixURL ?? SettingsLinks.fallback)

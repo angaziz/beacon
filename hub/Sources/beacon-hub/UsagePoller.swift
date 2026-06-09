@@ -95,6 +95,13 @@ final class ClaudeUsageProvider: UsageProvider {
             completion(ProviderResult(usage: .unavailable, reason: "Claude token missing - run claude login"))
             return
         }
+        fetch(token: token, retryOn401: true, completion: completion)
+    }
+
+    // retryOn401: a bool not a counter => exactly one retry, structurally impossible to loop. On 401 the
+    // public path (true) re-reads the CLI-rotated Keychain token and re-issues ONCE with retryOn401:false
+    // iff the token actually changed; an unchanged token or a second 401 surfaces the terminal reason.
+    private func fetch(token: String, retryOn401: Bool, completion: @escaping (ProviderResult) -> Void) {
         guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
             completion(ProviderResult(usage: .unavailable, reason: "Claude endpoint invalid"))
             return
@@ -114,9 +121,13 @@ final class ClaudeUsageProvider: UsageProvider {
             }
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             if code == 401 {
-                self.invalidateToken()   // token rotated; re-read from Keychain next poll
-                // TODO(P2-0): retry once via stored refresh token (D2). Refresh endpoint + field
-                // names are unverified until the P2-0 fixtures land. Happy path only for now.
+                self.invalidateToken()   // token rotated; re-read from Keychain.
+                // Self-heal within this poll: the running `claude` CLI rotates the Keychain item before
+                // expiry, so re-read once and retry iff the token changed (else it is genuinely expired).
+                if retryOn401, let fresh = self.token(), fresh != token {
+                    self.fetch(token: fresh, retryOn401: false, completion: completion)
+                    return
+                }
                 completion(ProviderResult(usage: .unavailable, reason: "Claude token expired - re-login"))
                 return
             }
@@ -128,7 +139,7 @@ final class ClaudeUsageProvider: UsageProvider {
         }.resume()
     }
 
-    // Keychain generic-password "Claude Code-credentials"; JSON at claudeAiOauth.accessToken.
+    // Keychain generic-password "Claude Code-credentials"; the JSON shape is parsed by ProviderCredentials.
     private static func accessToken() -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -138,12 +149,9 @@ final class ClaudeUsageProvider: UsageProvider {
         ]
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data,
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let oauth = obj["claudeAiOauth"] as? [String: Any],
-              let tok = oauth["accessToken"] as? String, !tok.isEmpty
+              let data = item as? Data
         else { return nil }
-        return tok
+        return ProviderCredentials.parseClaude(data)
     }
 }
 
@@ -159,13 +167,21 @@ final class CodexUsageProvider: UsageProvider {
             completion(ProviderResult(usage: .unavailable, reason: "Codex token missing - run codex login"))
             return
         }
+        fetch(token: creds.accessToken, accountId: creds.accountId, retryOn401: true, completion: completion)
+    }
+
+    // retryOn401: a bool not a counter => exactly one retry, structurally impossible to loop. On 401 the
+    // public path (true) re-reads CLI-rotated ~/.codex/auth.json and re-issues ONCE with retryOn401:false
+    // iff access_token actually changed; an unchanged token or a second 401 surfaces the terminal reason.
+    private func fetch(token: String, accountId: String, retryOn401: Bool,
+                       completion: @escaping (ProviderResult) -> Void) {
         guard let url = URL(string: "https://chatgpt.com/backend-api/wham/usage") else {
             completion(ProviderResult(usage: .unavailable, reason: "Codex endpoint invalid"))
             return
         }
         var req = URLRequest(url: url)
-        req.setValue("Bearer \(creds.token)", forHTTPHeaderField: "Authorization")
-        req.setValue(creds.accountId, forHTTPHeaderField: "chatgpt-account-id")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue(accountId, forHTTPHeaderField: "chatgpt-account-id")
 
         session.dataTask(with: req) { data, resp, err in
             if let err = err {
@@ -174,8 +190,13 @@ final class CodexUsageProvider: UsageProvider {
             }
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             if code == 401 {
-                // TODO(P2-0): retry once via stored refresh token (D2) + the local rollout fallback
-                // (D1: ~/.codex/sessions/**/rollout-*.jsonl rate_limits). Field names land at P2-0.
+                // Self-heal within this poll: the running `codex` CLI rotates auth.json in place (bumps
+                // last_refresh), so re-read once and retry iff access_token changed (else genuinely expired).
+                if retryOn401, let fresh = Self.credentials(), fresh.accessToken != token {
+                    self.fetch(token: fresh.accessToken, accountId: fresh.accountId,
+                               retryOn401: false, completion: completion)
+                    return
+                }
                 completion(ProviderResult(usage: .unavailable, reason: "Codex token expired - re-login"))
                 return
             }
@@ -187,15 +208,11 @@ final class CodexUsageProvider: UsageProvider {
         }.resume()
     }
 
-    private static func credentials() -> (token: String, accountId: String)? {
+    // ~/.codex/auth.json; the JSON shape is parsed by ProviderCredentials.
+    private static func credentials() -> (accessToken: String, accountId: String)? {
         let path = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/auth.json")
-        guard let data = try? Data(contentsOf: path),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let tokens = obj["tokens"] as? [String: Any],
-              let token = tokens["access_token"] as? String, !token.isEmpty,
-              let account = tokens["account_id"] as? String, !account.isEmpty
-        else { return nil }
-        return (token, account)
+        guard let data = try? Data(contentsOf: path) else { return nil }
+        return ProviderCredentials.parseCodex(data)
     }
 }
