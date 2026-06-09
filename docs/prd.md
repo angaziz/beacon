@@ -118,9 +118,9 @@ Priority = MUST / SHOULD / COULD. Phase per §7.
 | ID | Priority | Phase | Requirement |
 |---|---|---|---|
 | FR-BUDDY-1 | MUST | P2 | **Idle state:** show Claude Code session state pushed by the Hub — running/waiting counts, tokens, context %, recent activity. |
-| FR-BUDDY-2 | MUST | P2 | **Prompt state:** when a tool-permission prompt arrives, surface it (tool name + command hint) and let the user **Approve** or **Deny** by tap/gesture; the decision returns to the Hub and resolves the prompt. |
+| FR-BUDDY-2 | MUST | P2 | **Prompt state:** when a tool-permission prompt arrives, surface it (tool name + command hint) and let the user **Approve** or **Deny** by tap/gesture; the decision returns to the Hub and resolves the prompt. A prompt the user instead answers on the **Mac** (in the terminal) is **withdrawn from the device silently** — no decision, no "too late". |
 | FR-BUDDY-3 | MUST | P2 | Approve/Deny round-trip must complete well within the Claude Code hook timeout (~30s); design for a <5s human action; on timeout the prompt is treated as denied (fail-closed) and labeled. |
-| FR-BUDDY-5 | MUST | P2 | The buddy must NOT imply unsupported actions: it **cannot** answer Claude's `AskUserQuestion` multiple-choice prompts, persist "don't ask again", or type into a live TUI session. |
+| FR-BUDDY-5 | MUST | P2 | The buddy must NOT imply unsupported actions: it **cannot** answer Claude's `AskUserQuestion` multiple-choice prompts (these are passed through to the Mac and surfaced only as a passive "asking a question" indicator — **never** as an Approve/Deny prompt, and never occupying the prompt slot), persist "don't ask again", or type into a live TUI session. |
 
 **Acceptance:** a real Claude Code tool prompt appears on the device and an Approve/Deny tap resolves it in Claude Code; idle state reflects live session counts; unsupported actions are absent from the UI.
 
