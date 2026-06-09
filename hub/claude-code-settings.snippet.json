@@ -1,5 +1,5 @@
 {
-  "_comment": "Merge these keys into ~/.claude/settings.json to wire Claude Code to the Beacon hub (127.0.0.1:8765, ClaudeCodeBridge). ESSENTIAL for the buddy round-trip: the PermissionRequest hook + statusLine. PermissionRequest fires ONLY when a tool actually needs permission (Write, Edit, Bash, MCP, ...) -- unlike PreToolUse, which fires on EVERY tool and would block routine reads if held open. SessionStart/Stop/Notification are optional (running count + activity feed). timeout is in SECONDS; PermissionRequest is 35 to cover the device's ~25s decision window. If you already have other hooks for these events, ADD these as additional array entries -- do not overwrite. (PreToolUse with a narrow matcher like \"Bash\" is the back-compat alternative; the bridge still accepts it.)",
+  "_comment": "Merge these keys into ~/.claude/settings.json to wire Claude Code to the Beacon hub (127.0.0.1:8765, ClaudeCodeBridge). ESSENTIAL for the buddy round-trip: the PermissionRequest hook + statusLine. PermissionRequest fires ONLY when a tool actually needs permission (Write, Edit, Bash, MCP, ...) -- unlike PreToolUse, which fires on EVERY tool and would block routine reads if held open. SessionStart/Stop/Notification are optional (running count + activity feed). timeout is in SECONDS; PermissionRequest is 35 to cover the device's ~25s decision window. If you already have other hooks for these events, ADD these as additional array entries -- do not overwrite. (PreToolUse with a narrow matcher like \"Bash\" is the back-compat alternative; the bridge still accepts it.) Prefer `./build-app.sh install-hooks`, which merges these keys idempotently and rewrites __BEACON_SHIM__ to the absolute shim path on this machine.",
 
   "hooks": {
     "PermissionRequest": [
@@ -38,6 +38,6 @@
 
   "statusLine": {
     "type": "command",
-    "command": "/Users/angaziz/work/personal/beacon/hub/statusline-shim/beacon-statusline"
+    "command": "__BEACON_SHIM__"
   }
 }
