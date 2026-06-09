@@ -100,13 +100,25 @@ final class MenubarController: NSObject {
         loginItemLine.target = self; loginItemLine.action = #selector(toggleLoginItem)
         menu.addItem(loginItemLine)
         menu.addItem(.separator())
+        // SF Symbols fill the menu's reserved state-image column (showsStateColumn defaults on, and the
+        // checkmark toggles above need it), so the leading gutter reads as deliberate icons, not dead
+        // space. Template images tint to the menu text color and invert white-on-blue when highlighted.
+        func symbol(_ name: String) -> NSImage? {
+            let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+            img?.isTemplate = true
+            return img
+        }
         let setupLine = NSMenuItem(title: "Setup…", action: #selector(openSetup), keyEquivalent: "")
         setupLine.target = self
+        setupLine.image = symbol("gearshape")
         menu.addItem(setupLine)
         let forgetLine = NSMenuItem(title: "Forget device / re-pair", action: #selector(forgetDevice), keyEquivalent: "")
         forgetLine.target = self
+        forgetLine.image = symbol("arrow.triangle.2.circlepath")
         menu.addItem(forgetLine)
-        menu.addItem(NSMenuItem(title: "Quit Beacon", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        let quitLine = NSMenuItem(title: "Quit Beacon", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quitLine.image = symbol("power")
+        menu.addItem(quitLine)
         menu.delegate = self   // accessory app: refresh login-item status on menu open (menuWillOpen).
         statusItem.menu = menu
     }
