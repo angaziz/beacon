@@ -106,3 +106,36 @@ command passed as args), so the user's status bar is unchanged. Bind port is the
 - **Timing:** design target < 5 s round-trip; ~25 s fail-closed cap (below Claude Code's ~30 s hook
   timeout); cap => `deny` + label (`tech.md` §8, FR-BUDDY-3).
 - **Logging:** id + decision + timestamp only. NEVER the command `hint` or any token (`tech.md` §9).
+
+### D.1 Onboarding, lifecycle & error recovery (epic #20 — `docs/research/2026-06-08-hub-ux-audit.md`)
+
+- **First-run setup window (#15):** on first launch (gated by `BeaconFirstRunComplete`) the hub shows a
+  setup window with live **Bluetooth / Claude Code hooks / device-connected** rows, each with one-click
+  remediation; reachable later via the menu **Setup…**. The hooks **Install** button shells out to
+  `build-app.sh install-hooks` (single source of truth for the idempotent `jq` merge) and installs the
+  statusline shim to the no-space path `~/.beacon/beacon-statusline` (`build-app.sh` honours a `BEACON_SHIM`
+  override so install + detection agree). "Hooks installed" is detected by requiring BOTH the
+  `PermissionRequest` hook (`url=http://127.0.0.1:8765/hook`) AND a `statusLine.command` containing the shim
+  — not any beacon URL anywhere. Replaces hand-editing `~/.claude/settings.json`.
+- **Login item (#16):** `SMAppService.mainApp`, toggled by the menu **Start at login**. The menu reflects the
+  REAL registration state (re-read on every menu open), and `.requiresApproval` is surfaced honestly
+  (guidance dialog), never a silent false "on".
+- **Graceful quit drain (#16):** on quit, every still-held permission prompt is resolved as
+  **deny-with-reason** ("Beacon hub is quitting") and the response is flushed to Claude Code BEFORE exit
+  (completion-aware: a `DispatchGroup` over the socket-send completions, replied via an idempotent latch from
+  the drain or a 1 s safety cap). A `terminating` flag denies any prompt arriving during the drain window, so
+  no in-flight CC call is ever left without a responder (fail-OPEN per §C.3 is avoided).
+- **Forget device / re-pair (#16):** app-side reset only — cancel the link, drop the cached peripheral,
+  rescan. CoreBluetooth has **no API to remove an OS-level bond**, so a truly stuck bond (e.g. keys changed
+  after a firmware re-flash) still needs the user's System Settings **Forget This Device**; the menu action
+  guides there with a one-click "Open Bluetooth Settings".
+- **401 token self-heal (#17):** on a usage 401 the hub re-reads the **CLI-rotated** credential (Claude
+  Keychain blob / `~/.codex/auth.json`) and retries the request **exactly once** if the token changed; a
+  one-shot guard makes a second 401 unable to loop. Self-heals the common case (active user whose CLI already
+  refreshed); an idle, truly-expired token still ends at "…token expired - re-login". A real OAuth
+  refresh-token grant is **deferred** (it needs unofficial, reverse-engineered endpoints/client_ids).
+- **BLE pairing-failed escalation (#17):** a **first-time** bond (`hadConnection == false`) that fails
+  **4 attempts or 25 s** (monotonic clock) escalates to a loud `LinkPhase.pairingFailed` ("Pairing failed" +
+  **Try pairing again**) instead of rescanning forever silently; a reconnect blip of a previously-bonded
+  device is never escalated. "Try again" (`retryPairing`) resets the budget + rescans, distinct from the
+  heavier forget/re-pair path.
