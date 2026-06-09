@@ -22,7 +22,7 @@ final class UsageRowView: NSView {
     private let rowGap: CGFloat = 3
     private let labelW: CGFloat = 24     // "5h" / "7d"
     private let pctW: CGFloat = 38       // "100%"
-    private let resetW: CGFloat = 66     // "resets Fri"
+    private let maxResetW: CGFloat = 100 // cap on the (locale-sized) reset column so the bar can't collapse
     private let gap: CGFloat = 6
     private let barH: CGFloat = 6
 
@@ -67,6 +67,7 @@ final class UsageRowView: NSView {
 
     private func drawWindow(_ label: String, _ w: UsageWindow, atY y: CGFloat) {
         let rowRect = NSRect(x: leftPad, y: y, width: bounds.width - leftPad - rightPad, height: lineHeight)
+        let resetW = resetColumnWidth()
         draw(text: label, font: font, color: .secondaryLabelColor,
              in: NSRect(x: rowRect.minX, y: y, width: labelW, height: lineHeight))
 
@@ -102,6 +103,17 @@ final class UsageRowView: NSView {
     }
 
     private func pctText(_ pct: Int?) -> String { pct.map { "\($0)%" } ?? "--" }
+
+    // The reset hint is locale-formatted: "resets 2:40 PM" (12-hour locales) is far wider than the
+    // "resets Fri" weekday form, and a fixed column truncated the time. Size the column to the actual
+    // strings of both windows -- so the two rows stay aligned -- capped so the bar never collapses.
+    private func resetColumnWidth() -> CGFloat {
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        let widest = [resetText(usage.h5.reset), resetText(usage.d7.reset)]
+            .map { ($0 as NSString).size(withAttributes: attrs).width }
+            .max() ?? 0
+        return min(ceil(widest), maxResetW)
+    }
 
     private func resetText(_ reset: Int) -> String {
         switch resetDisplay(reset: reset, now: now) {
