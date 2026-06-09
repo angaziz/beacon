@@ -73,8 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do { try HooksInstaller.install(); errorMessage = nil }
             catch { errorMessage = error.localizedDescription }
             let installed = HooksInstaller.isInstalled()
+            guard let self else { return }
             await MainActor.run {
-                self?.firstRun.finishInstall(installed: installed ? .ok : .bad, error: errorMessage)
+                self.firstRun.finishInstall(installed: installed ? .ok : .bad, error: errorMessage)
             }
         }
     }
