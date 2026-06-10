@@ -1,0 +1,8 @@
+# GitHub Actions versions only. PlatformIO/library pins are deliberate (see
+# firmware/platformio.ini and firmware/README.md) and must NOT be auto-bumped.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

@@ -1,0 +1,55 @@
+<!doctype html>
+<!-- Beacon web flasher. Deployed to GitHub Pages by .github/workflows/release.yml, which
+     drops the firmware binary into firmware/ and writes manifest.json next to this file.
+     Flashing uses ESP Web Tools (Web Serial), so it needs Chrome/Edge on desktop. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Beacon — web flasher</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: #0b0e14; color: #c9d1e3; font-family: ui-monospace, Menlo, Consolas, monospace;
+    }
+    main { max-width: 560px; padding: 48px 24px; }
+    h1 { font-size: 28px; letter-spacing: 0.08em; margin: 0 0 4px; color: #e8edf7; }
+    h1 span { color: #5ac8fa; }
+    p { line-height: 1.6; color: #8b93a7; }
+    ol { line-height: 1.9; color: #8b93a7; padding-left: 20px; }
+    a { color: #5ac8fa; }
+    .button-row { margin: 28px 0; }
+    esp-web-install-button::part(button) {
+      background: #5ac8fa; color: #0b0e14; font-family: inherit; font-weight: 700;
+      border-radius: 8px; padding: 12px 28px; font-size: 15px; letter-spacing: 0.04em;
+    }
+    .fineprint { font-size: 12px; color: #5c6478; border-top: 1px solid #1c2230; padding-top: 16px; margin-top: 36px; }
+  </style>
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</head>
+<body>
+  <main>
+    <h1>BEACON <span>// web flasher</span></h1>
+    <p>Install the Beacon firmware on a Waveshare ESP32-S3-Touch-AMOLED-2.16 straight from
+       the browser. No toolchain, no drivers on macOS.</p>
+    <ol>
+      <li>Connect the device with a USB-C <strong>data</strong> cable.</li>
+      <li>Use Chrome or Edge on desktop (Web Serial is not available in Safari/Firefox).</li>
+      <li>Click Install and pick the device's serial port — it shows up with a generic name like <code>usbmodemXXXX</code> or <code>ESP32-S3</code>. No drivers needed: the board uses the ESP32-S3's native USB (ignore the CP2102/CH34x driver links in the "no port" help dialog).</li>
+      <li>First install? Choose the "erase device" option when prompted.</li>
+    </ol>
+    <p>Port missing from the picker? Close anything using the serial port (serial monitors, Arduino IDE), or force the ROM bootloader: unplug, hold <strong>BOOT</strong>, plug in while holding for ~3&nbsp;s, release, then try again.</p>
+    <div class="button-row">
+      <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+    </div>
+    <p>After flashing, the device opens a <code>Beacon-setup</code> WiFi hotspot — join it
+       and the captive portal asks for your network.</p>
+    <p class="fineprint">
+      Beacon is a personal, unofficial project — <a href="https://github.com/angaziz/beacon">source on GitHub</a>.
+      Flashing uses <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a>.
+      Use at your own risk.
+    </p>
+  </main>
+</body>
+</html>

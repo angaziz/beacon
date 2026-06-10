@@ -1,0 +1,121 @@
+# Tag-driven releases: push a tag like v0.1.0 and this ships
+#   - Beacon-Hub-<tag>.zip          (ad-hoc-signed macOS .app; users need the Gatekeeper
+#                                    "Open Anyway" step documented in hub/README.md)
+#   - beacon-<tag>-full.bin         (full-flash image @0x0 for the web flasher / esptool)
+#   - beacon-<tag>-app.bin          (app-only image @0x10000 for OTA-style updates)
+# and redeploys the GitHub Pages web flasher with the new image.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  hub:
+    name: Build hub app
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stamp version from tag
+        run: /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${GITHUB_REF_NAME#v}" hub/Info.plist
+      - name: Build + bundle
+        working-directory: hub
+        run: ./build-app.sh release
+      - name: Zip (ditto preserves the signature and exec bits)
+        working-directory: hub
+        run: ditto -c -k --keepParent "Beacon Hub.app" "Beacon-Hub-${GITHUB_REF_NAME}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hub-app
+          path: hub/Beacon-Hub-*.zip
+
+  firmware:
+    name: Build firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # esptool pinned <5: v5 renamed merge_bin; pyyaml: pioarduino builder imports it
+      - run: pip install platformio pyyaml "esptool~=4.8"
+      - name: Build
+        working-directory: firmware
+        run: pio run -e beacon
+      - name: Assemble flashable images
+        working-directory: firmware
+        run: |
+          set -euo pipefail
+          BUILD=.pio/build/beacon
+          # boot_app0 selects ota_0 on first boot; shipped with the arduino-esp32 framework
+          BOOT_APP0=$(ls "$HOME"/.platformio/packages/framework-arduinoespressif32*/tools/partitions/boot_app0.bin | head -1)
+          mkdir -p out
+          # Offsets are the standard ESP32-S3 Arduino layout (bootloader@0x0) + partitions.csv
+          esptool.py --chip esp32s3 merge_bin -o "out/beacon-${GITHUB_REF_NAME}-full.bin" \
+            --flash_mode qio --flash_freq 80m --flash_size 16MB \
+            0x0     "$BUILD/bootloader.bin" \
+            0x8000  "$BUILD/partitions.bin" \
+            0xe000  "$BOOT_APP0" \
+            0x10000 "$BUILD/firmware.bin"
+          cp "$BUILD/firmware.bin" "out/beacon-${GITHUB_REF_NAME}-app.bin"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: firmware/out/*
+
+  release:
+    name: Publish GitHub release
+    needs: [hub, firmware]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*
+
+  flasher:
+    name: Deploy web flasher
+    needs: [firmware]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: web/flasher/firmware
+      - name: Write manifest
+        working-directory: web/flasher
+        run: |
+          set -euo pipefail
+          rm -f firmware/*-app.bin   # the flasher only serves the full image
+          FULL=$(basename firmware/beacon-*-full.bin)
+          cat > manifest.json <<EOF
+          {
+            "name": "Beacon",
+            "version": "${GITHUB_REF_NAME}",
+            "new_install_prompt_erase": true,
+            "builds": [
+              {
+                "chipFamily": "ESP32-S3",
+                "parts": [{ "path": "firmware/${FULL}", "offset": 0 }]
+              }
+            ]
+          }
+          EOF
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/flasher
+      - id: deploy
+        uses: actions/deploy-pages@v4

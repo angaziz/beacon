@@ -1,17 +1,15 @@
 # Beacon
 
-A dark, futuristic desk command-center on a 2.16" AMOLED touch device — built on the
-**Waveshare ESP32-S3-Touch-AMOLED-2.16**. It sits next to your keyboard and, at a glance,
-shows your Claude Code / Codex usage, live markets, weather, music, and a Claude coding
-"buddy" you can approve tool-prompts on — without breaking focus on your Mac.
+[![CI](https://github.com/angaziz/beacon/actions/workflows/ci.yml/badge.svg)](https://github.com/angaziz/beacon/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/angaziz/beacon?include_prereleases)](https://github.com/angaziz/beacon/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Status: early / prototype.** Hardware bring-up is proven and **P0 + P1 run on-device**: the swipe
-> carousel + all six screens render in **7 bespoke per-theme layouts (42 views)**, on real data over
-> WiFi — NTP/RTC time, live weather (Open-Meteo, IP-geolocated), and live markets (FX→IDR, BTC,
-> indices) with the honest screen-state model (loading/live/stale/offline). Persistence (NVS),
-> multi-network WiFi (WiFiMulti) with a SoftAP captive-portal + on-device Wi-Fi manager, and the
-> time service all landed. **Next:** P2 (macOS hub + AI Usage / Coding Buddy over BLE). Expect things
-> to move. See [Roadmap](#roadmap).
+A dark, futuristic desk command-center on a 2.16" AMOLED touch device — built on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**. It sits next to your keyboard and, at a glance, shows your Claude Code / Codex usage, live markets, weather, music, and a Claude coding "buddy" you can approve tool-prompts on — without breaking focus on your Mac.
+
+![Beacon on a desk](docs/assets/hero.svg)
+<!-- TODO(photo): replace docs/assets/hero.svg with a real desk photo (jpg/png), update this link -->
+
+> **Status: early prototype — but it runs on real hardware today.** The device side (all six screens, seven themes, on-device WiFi setup, live weather + markets) and the macOS hub (AI usage + coding buddy over Bluetooth) are both working end-to-end. Expect rough edges and moving parts. See [What works today](#what-works-today).
 
 ## What it does
 
@@ -20,11 +18,22 @@ Six screens, navigated by swipe + motion gestures:
 | Screen | Shows | Source |
 |---|---|---|
 | Home | clock, date, weather, humidity | WiFi (direct) |
-| Finance | configurable FX→IDR, crypto, indices, ETFs | WiFi (direct) |
+| Finance | configurable FX->IDR, crypto, indices, ETFs | WiFi (direct) |
 | AI Usage | Claude + Codex, **both** 5h and 7-day windows + reset | Mac hub (BLE) |
 | Coding Buddy | session state + approve/deny Claude tool-permission prompts | Mac hub (BLE) |
 | Now-Playing | Spotify control (remote for an active Connect device) | WiFi (direct) |
 | Settings | WiFi, brightness, theme picker, tickers, etc. | local (NVS) |
+
+## What works today
+
+- **All six screens render on-device** in 7 bespoke per-theme layouts (42 views), with an honest screen-state model: a value is shown as loading / live / stale / offline — never a guess dressed up as live data.
+- **Home + Finance run on live data** over WiFi: NTP/RTC time, Open-Meteo weather (auto-located by IP), FX->IDR / BTC / indices.
+- **WiFi setup happens on-device** — the device opens a hotspot with a captive portal; no credentials are ever compiled into the firmware. Multiple networks are remembered.
+- **AI Usage is live over Bluetooth**: the macOS hub reads Claude Code + Codex usage and streams it to the device over a bonded BLE link, alongside the device's own WiFi plane.
+- **Coding Buddy round-trip is validated on hardware**: approve or deny a Claude Code tool-permission prompt from the device, and the Mac honors it.
+- Settings, theme picker, brightness, and preferences persist across reboots.
+
+Not built yet: motion gestures (P3) and the Spotify Now-Playing screen (P4) — see the [Roadmap](#roadmap).
 
 ## Two-plane architecture
 
@@ -38,17 +47,29 @@ Six screens, navigated by swipe + motion gestures:
                       [ Beacon device: ESP32-S3 + AMOLED ]
 ```
 
-Private data (your Claude/Codex tokens) lives only on a small macOS hub app and reaches the
-device over BLE. Public data the device fetches itself over WiFi, so the ambient screens keep
-working when the Mac is asleep.
+Private data (your Claude/Codex tokens) lives only on a small macOS hub app and reaches the device over BLE. Public data the device fetches itself over WiFi, so the ambient screens keep working when the Mac is asleep.
 
 ## Themes
 
-The UI is fully themeable — **7 themes**, each a **bespoke per-screen experience** (its own layout
-in a distinct visual language) composed from shared design tokens (color / type / gauge-style) +
-per-theme background chrome; default **Editorial Index**. The seven: Editorial Index, Aerospace HUD,
-Dot-Matrix, Blueprint, LED Matrix, Oscilloscope, Analog Neo. See the full gallery at
-[`docs/design/mockups/directions.html`](docs/design/mockups/directions.html) (open in a browser).
+The UI is fully themeable — **7 themes**, each a bespoke per-screen experience (its own layout in a distinct visual language) composed from shared design tokens (color / type / gauge-style): **Editorial Index** (default), Aerospace HUD, Dot-Matrix, Blueprint, LED Matrix, Oscilloscope, and Analog Neo.
+
+![The seven themes](docs/assets/themes.svg)
+<!-- TODO(photo): replace docs/assets/themes.svg with a grid of theme renders or photos -->
+
+Interactive mockups of all seven live in [`docs/design/mockups/directions.html`](docs/design/mockups/directions.html) (clone the repo and open it in a browser — GitHub does not render HTML files).
+
+## Get one running
+
+You need the **Waveshare ESP32-S3-Touch-AMOLED-2.16** (around US$30 from Waveshare or the usual resellers), a USB-C **data** cable, and a Mac for the hub features.
+
+1. **Flash the firmware.** Easiest: the [web flasher](https://angaziz.github.io/beacon/) — plug the device in, open the page in Chrome or Edge, click Install. No toolchain needed. Prefer building it yourself? See [`firmware/README.md`](firmware/README.md).
+2. **Connect WiFi.** On first boot the device opens a `Beacon-setup` hotspot — join it and the captive portal asks for your network. Everything except AI Usage / Coding Buddy now works.
+3. **Install the hub (macOS).** Download `Beacon-Hub-<version>.zip` from [Releases](https://github.com/angaziz/beacon/releases), unzip, drag to Applications. Install and pairing details (including the Gatekeeper "Open Anyway" step — the app is not notarized): [`hub/README.md`](hub/README.md).
+4. **Pair.** Open Beacon Hub; the **Set up Beacon** window walks three checks — Bluetooth permission, device pairing, and a one-click **Install hooks** for Claude Code.
+
+If there is no release published yet, both pieces build from source in a few minutes: [`firmware/README.md`](firmware/README.md) and [`hub/README.md`](hub/README.md).
+
+Just validating a fresh board? Flash the bring-up spike first — [`docs/spikes/SETUP.md`](docs/spikes/SETUP.md) covers the Arduino toolchain and the AXP2101 power-rail init the stock demo omits.
 
 ## Repo layout
 
@@ -56,72 +77,53 @@ Dot-Matrix, Blueprint, LED Matrix, Oscilloscope, Analog Neo. See the full galler
 beacon/
 ├── PRODUCT.md              # product strategy: users, purpose, principles
 ├── DESIGN.md               # visual design system + theme tokens (the 7 themes)
-├── firmware/               # product firmware (PlatformIO): bring-up, contracts, theme engine, carousel
-│   ├── src/                #   core/ (DataStore, HubLink, records) · hal/ · ui/ (carousel, screens, views, theme)
+├── firmware/               # product firmware (PlatformIO): contracts, theme engine, carousel
+│   ├── src/                #   core/ (DataStore, HubLink, records) · hal/ · ui/ (screens, themes)
 │   └── test/               #   native unit tests (contracts, theme, datastore, carousel…)
+├── hub/                    # macOS menubar hub (SwiftPM): BLE central, usage pollers, buddy bridge
+│   ├── Sources/            #   BeaconHubKit (pure logic) + beacon-hub (the menubar agent)
+│   ├── Tests/              #   host unit tests
+│   └── CONTRACT.md         #   BLE protocol + hub-side policies
+├── web/flasher/            # browser-based firmware installer (ESP Web Tools, GitHub Pages)
 └── docs/
     ├── research/           # device + integrations research (hardware, APIs, prior art)
-    ├── plans/ · design/specs/ # P0 implementation plans + design specs (A/B/C)
+    ├── plans/ · design/specs/ # implementation plans + design specs
     ├── design/
     │   ├── mockups/        # HTML theme mockups (directions.html)
     │   └── tooling/        # Playwright screenshot helper (shoot.mjs)
     └── spikes/             # hardware spikes (throwaway), organized by topic
-        ├── README.md       # index + outcomes
-        ├── SETUP.md        # Arduino toolchain + flashing/troubleshooting
-        ├── display-power/          # AXP2101 power + CO5300 display bring-up
-        └── wifi-ble-coexistence/   # WiFi + BLE + HTTPS coexistence test
 ```
-
-The product firmware lives under `firmware/` (build/flash instructions in its [`README`](firmware/README.md)); `docs/spikes/` keeps the exploratory experiments separate from it.
-
-## Getting started (hardware)
-
-You'll need the Waveshare **ESP32-S3-Touch-AMOLED-2.16** and a USB-C **data** cable.
-Full toolchain + library setup is in **[`docs/spikes/SETUP.md`](docs/spikes/SETUP.md)**.
-Short version: Arduino IDE 2.x + the `esp32` core (3.3.x), the Waveshare libraries +
-`lv_conf.h`, board = *ESP32S3 Dev Module* with **PSRAM: OPI PSRAM** and **Flash: 16MB**.
-
-Start by flashing `docs/spikes/display-power/beacon_power_test` — it powers the display
-correctly (the AXP2101 rail init the stock demo omits) and confirms your board.
 
 ## Roadmap
 
-The full phased plan (requirements, acceptance, dependencies) is in [`docs/prd.md`](docs/prd.md) §7; this is the short version.
+Short version — the full phased plan (requirements, acceptance, dependencies) is in [`docs/prd.md`](docs/prd.md) §7.
 
-- [x] Device + integrations research; hardware capability map
-- [x] Design system + 7 themes (Editorial default)
-- [x] Hardware spike: AXP2101 power + CO5300 display bring-up
-- [x] Hardware spike: WiFi + BLE coexistence + memory headroom
-- [x] Functional PRD + technical constitution ([`docs/prd.md`](docs/prd.md), [`docs/tech.md`](docs/tech.md))
-- [x] **P0 — Foundation** — shell, carousel, themes, frozen contracts, persistence, WiFi, and time service, running on-device:
-  - [x] Bring-up: AXP2101 power + CO5300 display + LVGL 8.4 + touch; pinned PlatformIO toolchain; `SAFE_INSET`/corner-radius + `partitions.csv` frozen on hardware
-  - [x] Frozen shared contracts (DataStore, `screen_state_t`, HubLink, config schemas) + theme engine (7 themes, design tokens, gauge styles)
-  - [x] Swipe carousel + six state-aware screen shells, bespoke per-theme (6 × 7 = 42 views) + per-theme chrome + battery on Settings
-  - [x] Persistence (NVS: screen/brightness/theme/networks), time service (NTP + PCF85063 RTC + POSIX TZ), WiFi provisioning (SoftAP captive portal)
-- [x] **P1 — Ambient screens**: Home (clock + weather), Finance (live FX→IDR / BTC / indices), full screen-state model; live on hardware. Location is **auto-geolocated** (IP-based); on-device ticker/location *editing* (FR-SET-4, SHOULD) deferred. Also added: multi-network WiFi (WiFiMulti) + on-device Wi-Fi manager.
-- [ ] **P2 — Hub + AI** (code complete, running on hardware): macOS hub app (Swift) + AI Usage + Coding Buddy over BLE. AI Usage is **live on-device** over a bonded NimBLE link (Codex via `~/.codex`; Claude via the Claude Code statusline `rate_limits`, since the unofficial `oauth/usage` now 429s), simultaneously with the device-direct WiFi/TLS plane. Heap re-measured under the full load => LVGL draw buffers moved to PSRAM (`-DBEACON_LVGL_PSRAM`, now the default build flag). **Validated on-device:** buddy permission round-trip (approve/deny honored on the Mac). **Last item:** P2-0 contract capture — record real token-redacted upstream payloads into `hub/CONTRACT.md` §C (fixtures are still research drafts). Scope cut: device-initiated *launch* (FR-BUDDY-4 / FR-HUB-4) removed.
-  - [x] **Hub UX hardening** (epic [#20](https://github.com/angaziz/beacon/issues/20), from the 2026-06-08 UX audit): make failure states legible + add onboarding/lifecycle — loud auto-deny-on-disconnect + bridge-bind alerts, distinct BLE connection-state glyphs, a first-run setup window with an **Install hooks** button (no more hand-editing `settings.json`), login item + graceful quit drain + forget/re-pair, and 401 token self-heal + a "pairing failed / try again" escalation. Hub-side policies in [`hub/CONTRACT.md`](hub/CONTRACT.md) §D.1.
-- [ ] **P3 — Input polish**: IMU + touch gestures
+- [x] Research: device capability map, integrations, prior art
+- [x] Design system: 7 themes from shared tokens ([`DESIGN.md`](DESIGN.md))
+- [x] Hardware spikes: display/power bring-up; WiFi + BLE coexistence
+- [x] **P0 — Foundation**: swipe carousel, theme engine, persistence, on-device WiFi setup, time
+- [x] **P1 — Ambient screens**: Home + Finance on live data, with truthful loading/stale/offline states
+- [x] **P2 — Hub + AI**: macOS hub, AI Usage and Coding Buddy over BLE, running on hardware; hub onboarding/lifecycle hardening (epic [#20](https://github.com/angaziz/beacon/issues/20))
+  - [ ] last item: capture real upstream payload fixtures into [`hub/CONTRACT.md`](hub/CONTRACT.md) §C
+- [ ] **P3 — Input polish**: IMU motion + richer touch gestures
 - [ ] **P4 — Now-Playing**: Spotify control
 - [ ] **Explore**: Hermes agent, voice
 
 ## Security
 
-- **Never commit WiFi credentials or API tokens.** The spike sketches use placeholder
-  constants you edit locally; `.gitignore` excludes `secrets.h` / `.env` style files.
-- Claude/Codex credentials are designed to stay on the macOS hub and never reach the device.
+- **Never commit WiFi credentials or API tokens.** The spike sketches use placeholder constants you edit locally; `.gitignore` excludes `secrets.h` / `.env` style files. The product firmware needs no secrets at all — WiFi is configured on-device.
+- Claude/Codex credentials stay on the macOS hub and never reach the device.
 
 ## Built on / thanks
 
 - [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16) — board, drivers, examples
 - [LVGL](https://lvgl.io) · [GFX Library for Arduino](https://github.com/moononournation/Arduino_GFX) · [XPowersLib](https://github.com/lewisxhe/XPowersLib) · [SensorLib](https://github.com/lewisxhe/SensorLib) · ESP32 BLE (the Arduino-ESP32 core `BLE*` wrapper — NimBLE-backed on the pinned esp32s3 libs)
+- [ESP Web Tools](https://esphome.github.io/esp-web-tools/) — the browser flasher
 - Prior art that informed the design: [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter), [claude-desktop-buddy-esp32](https://github.com/vthinkxie/claude-desktop-buddy-esp32)
 
 ## Disclaimer
 
-Personal, unofficial project. Not affiliated with or endorsed by Anthropic, OpenAI, Spotify,
-or Waveshare. Some integrations rely on unofficial/unpublished endpoints that may change or
-break. Use at your own risk.
+Personal, unofficial project. Not affiliated with or endorsed by Anthropic, OpenAI, Spotify, or Waveshare. Some integrations rely on unofficial/unpublished endpoints that may change or break. Use at your own risk.
 
 ## License
 

@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same branch/PR cancels the in-flight run (macOS minutes are the costly ones).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Path filter: doc-only changes skip the build jobs entirely.
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      firmware: ${{ steps.filter.outputs.firmware }}
+      hub: ${{ steps.filter.outputs.hub }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            firmware:
+              - 'firmware/**'
+              - '.github/workflows/ci.yml'
+            hub:
+              - 'hub/**'
+              - '.github/workflows/ci.yml'
+
+  firmware-tests:
+    name: Firmware native tests
+    needs: changes
+    if: needs.changes.outputs.firmware == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install platformio
+      - name: Run host unit tests
+        working-directory: firmware
+        run: pio test -e native
+
+  firmware-build:
+    name: Firmware device build
+    needs: changes
+    if: needs.changes.outputs.firmware == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # pyyaml: the pioarduino builder imports it (firmware/README.md)
+      - run: pip install platformio pyyaml
+      - name: Cache toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
+      - name: Build
+        working-directory: firmware
+        run: pio run -e beacon
+      - name: Size guard (app partition is 3MB; fail at 85%)
+        working-directory: firmware
+        run: |
+          set -euo pipefail
+          APP_MAX=$((0x300000))   # app0/app1 size in partitions.csv
+          SIZE=$(stat -c%s .pio/build/beacon/firmware.bin)
+          PCT=$((SIZE * 100 / APP_MAX))
+          echo "firmware.bin: ${SIZE} bytes — ${PCT}% of the ${APP_MAX}-byte app partition" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$PCT" -ge 85 ]; then
+            echo "::error::firmware.bin is at ${PCT}% of the app partition (limit 85%). Trim before it stops fitting."
+            exit 1
+          fi
+      - name: Upload firmware artifact (flash a PR without a local build)
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-bin
+          path: firmware/.pio/build/beacon/firmware.bin
+          retention-days: 14
+
+  hub:
+    name: Hub tests + bundle
+    needs: changes
+    if: needs.changes.outputs.hub == 'true'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests
+        working-directory: hub
+        run: swift test
+      - name: Bundle .app (ad-hoc signed, same as releases)
+        working-directory: hub
+        run: |
+          ./build-app.sh release
+          ditto -c -k --keepParent "Beacon Hub.app" "Beacon-Hub-dev.zip"
+      - name: Upload hub artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hub-app-dev
+          path: hub/Beacon-Hub-dev.zip
+          retention-days: 14

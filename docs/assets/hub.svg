@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="420" viewBox="0 0 900 420">
+  <rect width="900" height="420" fill="#0b0e14"/>
+  <rect x="8" y="8" width="884" height="404" fill="none" stroke="#2a3142" stroke-width="2" stroke-dasharray="12 8" rx="16"/>
+  <text x="450" y="190" fill="#8b93a7" font-family="Menlo, monospace" font-size="24" text-anchor="middle">[ SCREENSHOT PLACEHOLDER ]</text>
+  <text x="450" y="230" fill="#5c6478" font-family="Menlo, monospace" font-size="16" text-anchor="middle">Beacon Hub menubar panel (usage bars + buddy prompt)</text>
+  <text x="450" y="260" fill="#3d4456" font-family="Menlo, monospace" font-size="13" text-anchor="middle">replace docs/assets/hub.svg with a real screenshot</text>
+</svg>
