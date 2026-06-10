@@ -37,7 +37,7 @@ Five screens, navigated by swipe + motion gestures:
 ```
    Public internet (direct, WiFi+TLS)          Mac companion hub (BLE)
    - finance / weather / time                   - Claude + Codex usage
-   - Hermes agent (device -> VPS)               - coding buddy (approve/deny)
+                                                - coding buddy (approve/deny)
                                                 - holds Claude/Codex secrets; none reach the device
                        \                        /
                         \                      /

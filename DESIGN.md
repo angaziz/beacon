@@ -145,7 +145,7 @@ The device can approve tool execution, so the control path is security-sensitive
 - **BLE**: LE Secure Connections bonding + device allowlist; characteristics encrypted. Only the bonded hub may drive the buddy.
 - **Permission decisions**: each carries the prompt's `id`; the hub matches it to the originating request (reject stale/unknown ids) so a decision can't apply to the wrong call.
 - **LAN WebSocket fallback**: bind local-only, require a shared token, reject off-LAN origins.
-- **Tokens**: Claude/Codex credentials never leave the Mac hub. Device-plane tokens (Hermes) are scoped and, where possible, held by a proxy rather than on-device.
+- **Tokens**: Claude/Codex credentials never leave the Mac hub.
 - **Audit**: the hub logs approve/deny decisions with timestamp + prompt id.
 
 ## Technical constraints & risks
