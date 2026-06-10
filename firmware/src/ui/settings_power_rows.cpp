@@ -3,12 +3,12 @@
 #include "ui/durations.h"
 #include "ui/idle_glue.h"
 #include "core/nvs.h"
-#include <string.h>
+#include <stdio.h>
 
+// Trailing " >" mirrors the Theme row: signals the row opens a list of options.
 static void copy_label(char* out, size_t cap, uint8_t idx) {
   if (idx >= DURATION_COUNT) idx = 0;
-  strncpy(out, DURATIONS[idx].label, cap - 1);
-  out[cap - 1] = 0;
+  snprintf(out, cap, "%s >", DURATIONS[idx].label);
 }
 
 static void on_dim(uint8_t idx)   { nvs_set_dim_idx(idx);   idle_apply_config_from_nvs(); }
