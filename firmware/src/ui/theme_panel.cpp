@@ -92,3 +92,7 @@ void theme_panel_open(void) {
 }
 
 bool theme_panel_is_open(void) { return s_root != nullptr; }
+
+// Public wrapper: allows external callers (e.g. IMU shake dispatcher) to close
+// without exposing the static close_panel internals.
+void theme_panel_close(void) { close_panel(); }
