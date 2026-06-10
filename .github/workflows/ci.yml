@@ -21,7 +21,7 @@ jobs:
       firmware: ${{ steps.filter.outputs.firmware }}
       hub: ${{ steps.filter.outputs.hub }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -39,7 +39,7 @@ jobs:
     if: needs.changes.outputs.firmware == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -54,7 +54,7 @@ jobs:
     if: needs.changes.outputs.firmware == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -91,9 +91,9 @@ jobs:
     name: Hub tests + bundle
     needs: changes
     if: needs.changes.outputs.hub == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Unit tests
         working-directory: hub
         run: swift test
