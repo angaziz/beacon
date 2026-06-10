@@ -40,7 +40,7 @@ static void add_row(lv_obj_t* list, const beacon_theme_t* t, const char* name, c
   lv_obj_t* nm = lv_label_create(row); mklabel(nm, t->f_body, t->ink_dim);
   lv_label_set_text(nm, name); lv_obj_align(nm, LV_ALIGN_LEFT_MID, 2, 0);
 
-  lv_obj_t* val = lv_label_create(row); mklabel(val, t->f_display, t->ink);
+  lv_obj_t* val = lv_label_create(row); mklabel(val, t->f_mono, t->ink);
   lv_obj_set_width(val, SCREEN_W - 2 * SAFE_INSET - 90);
   lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_RIGHT, 0);
   lv_obj_align(val, LV_ALIGN_RIGHT_MID, -2, 0);
