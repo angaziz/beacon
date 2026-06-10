@@ -8,15 +8,15 @@
 #include "core/nvs.h"
 #include "core/fetch_task.h"
 #include "config/layout.h"
+#include "util/log.h"
 #include "ui/screens/screen_home.h"
 #include "ui/screens/screen_finance.h"
 #include "ui/screens/screen_usage.h"
 #include "ui/screens/screen_buddy.h"
-#include "ui/screens/screen_nowplaying.h"
 #include "ui/screens/screen_settings.h"
 
 static const screen_module_t* MODULES[] = {
-  &home_module, &finance_module, &usage_module, &buddy_module, &nowplaying_module, &settings_module,
+  &home_module, &finance_module, &usage_module, &buddy_module, &settings_module,
 };
 static const int COUNT = (int)(sizeof(MODULES) / sizeof(MODULES[0]));
 
@@ -76,7 +76,9 @@ static void scrollend_cb(lv_event_t*) {
 }
 
 static void gesture_cb(lv_event_t* e) {
-  if (lv_indev_get_gesture_dir(lv_indev_get_act()) != LV_DIR_BOTTOM) return;
+  lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
+  LOGI("gesture dir=%d scr=%d", (int)dir, carousel_current());   // TEMP: swipe-down-refresh diagnosis
+  if (dir != LV_DIR_BOTTOM) return;
   int scr = carousel_current();
   if (scr == 0 || scr == 1) fetch_task_refresh_all();   // Home weather + Finance tickers
 }

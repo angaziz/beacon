@@ -4,15 +4,15 @@
 >
 > **Companion docs:** `PRODUCT.md` (strategy/why) · `DESIGN.md` (visual system + theme tokens) · [`tech.md`](tech.md) (technical constitution: how it's built, NFRs, conventions) · `docs/research/` (evidence) · `docs/spikes/` (proven hardware experiments). Where this doc and `tech.md` disagree on *how*, `tech.md` wins; where strategy is unclear, `PRODUCT.md` wins.
 >
-> **Status (2026-06-08):** **P0 + P1 complete and running on-device** (in `firmware/`). Foundation (bring-up, frozen contracts + theme engine, swipe carousel/42 views, NVS persistence FR-PLAT-3, time service FR-PLAT-8 NTP+RTC, WiFi provisioning FR-SET-1) and the ambient screens (FR-HOME clock+weather, FR-FIN live FX→IDR/BTC/indices, FR-STATE screen-state model) are validated on hardware over real WiFi. Beyond spec: multi-network WiFi (WiFiMulti) + on-device Wi-Fi manager (incl. on-demand add-network, no reboot), IP-based auto-geolocation. **Deferred:** FR-SET-4 (on-device ticker/location editing, SHOULD), FR-PLAT-7 idle dim/sleep. **In progress:** P2 (macOS hub + AI Usage / Coding Buddy over BLE) — code complete and validated on hardware; AI Usage is live on-device over BLE and the buddy permission round-trip is validated (approve/deny honored on the Mac); **last item:** P2-0 contract capture (record real token-redacted upstream payloads into `hub/CONTRACT.md` §C) (see §7 P2 progress). Conventions: requirement IDs are stable; priority is MoSCoW (MUST/SHOULD/COULD); each requirement has a Phase (see §7).
+> **Status (2026-06-08):** **P0 + P1 complete and running on-device** (in `firmware/`). Foundation (bring-up, frozen contracts + theme engine, swipe carousel/35 views, NVS persistence FR-PLAT-3, time service FR-PLAT-8 NTP+RTC, WiFi provisioning FR-SET-1) and the ambient screens (FR-HOME clock+weather, FR-FIN live FX→IDR/BTC/indices, FR-STATE screen-state model) are validated on hardware over real WiFi. Beyond spec: multi-network WiFi (WiFiMulti) + on-device Wi-Fi manager (incl. on-demand add-network, no reboot), IP-based auto-geolocation. **Deferred:** FR-SET-4 (on-device ticker/location editing, SHOULD), FR-PLAT-7 idle dim/sleep. **In progress:** P2 (macOS hub + AI Usage / Coding Buddy over BLE) — code complete and validated on hardware; AI Usage is live on-device over BLE and the buddy permission round-trip is validated (approve/deny honored on the Mac); **last item:** P2-0 contract capture (record real token-redacted upstream payloads into `hub/CONTRACT.md` §C) (see §7 P2 progress). Conventions: requirement IDs are stable; priority is MoSCoW (MUST/SHOULD/COULD); each requirement has a Phase (see §7).
 
 ---
 
 ## 1. Vision & scope
 
-**BLUF:** Beacon is a 2.16" AMOLED desk device that, at a glance, shows a developer their Claude Code / Codex usage, live markets, weather/time, and now-playing music, and lets them approve Claude tool-permission prompts — without breaking focus on their Mac. It is a **companion to the Mac** (private AI data over BLE) and **independent over WiFi** (public data direct), themeable, gesture-driven.
+**BLUF:** Beacon is a 2.16" AMOLED desk device that, at a glance, shows a developer their Claude Code / Codex usage, live markets, weather/time, and lets them approve Claude tool-permission prompts — without breaking focus on their Mac. It is a **companion to the Mac** (private AI data over BLE) and **independent over WiFi** (public data direct), themeable, gesture-driven.
 
-**In scope (MVP):** six on-device screens (Home, Finance, AI Usage, Coding Buddy, Now-Playing, Settings), the 7-theme engine, and a macOS hub app that feeds the two BLE-fed screens.
+**In scope (MVP):** five on-device screens (Home, Finance, AI Usage, Coding Buddy, Settings), the 7-theme engine, and a macOS hub app that feeds the two BLE-fed screens.
 
 **Out of scope (MVP):** on-device voice / wake word; Hermes agent; on-device audio playback (incl. Spotify audio); multi-user; cloud account/sync; companion app for Windows/Linux. (Hermes + voice are documented as Explore — §5.11.)
 
@@ -39,8 +39,8 @@ Single owner-user: a developer at their desk. Beacon is **peripheral** — glanc
    DEVICE-DIRECT PLANE (WiFi+TLS)              HUB PLANE (BLE)
    - Finance (FX/crypto/indices/ETF)           - Claude usage (5h + 7d)
    - Weather + time (NTP)                       - Codex usage (5h + 7d)
-   - Now-Playing (Spotify Web API)              - Coding Buddy (state, approve/deny)
-   - Hermes (device -> VPS) [Explore]           - Hub holds Claude/Codex secrets (never reach device)
+   - Hermes (device -> VPS) [Explore]           - Coding Buddy (state, approve/deny)
+                                                - Hub holds Claude/Codex secrets (never reach device)
                          \                      /
                           [ Beacon device ] --- local NVS: settings, theme, WiFi, tickers
 ```

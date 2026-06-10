@@ -1,7 +1,7 @@
 #pragma once
 #include <lvgl.h>
 
-// Builds the swipe carousel from the six screen modules + the dot indicator, applies the initial
+// Builds the swipe carousel from the five screen modules + the dot indicator, applies the initial
 // theme, and starts the ~500 ms visible-screen update timer. Call after styles_init() + datastore_init().
 void carousel_init(void);
 int  carousel_current(void);     // current page index
