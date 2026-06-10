@@ -13,3 +13,6 @@
 // Measured on hardware (P0-A): offset 0 lost top-left, 14 lost bottom-right; 8 centers + stays even.
 #define LCD_X_OFFSET 8
 #define LCD_Y_OFFSET 8
+
+// Hit-slop (px) on buddy approve/deny buttons; glance-and-tap reachability across all themes.
+#define BUDDY_HIT_SLOP 24

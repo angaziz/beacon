@@ -89,6 +89,7 @@ static void build(lv_obj_t* page) {
   lv_obj_set_style_text_font(s_deny, t->f_mono, 0);
   lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
   lv_obj_add_flag(s_deny, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_ext_click_area(s_deny, BUDDY_HIT_SLOP);
   lv_obj_add_event_cb(s_deny, deny_cb, LV_EVENT_CLICKED, NULL);
 
   s_approve = lv_label_create(s_actions);
@@ -96,6 +97,7 @@ static void build(lv_obj_t* page) {
   lv_obj_set_style_text_font(s_approve, t->f_mono, 0);
   lv_obj_set_style_text_color(s_approve, t->accent, 0);
   lv_obj_add_flag(s_approve, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_ext_click_area(s_approve, BUDDY_HIT_SLOP);
   lv_obj_add_event_cb(s_approve, approve_cb, LV_EVENT_CLICKED, NULL);
 
   // Idle layout (activity log).

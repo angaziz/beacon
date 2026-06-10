@@ -17,7 +17,7 @@ static lv_obj_t* mk_btn(lv_obj_t* page, const char* txt, lv_align_t al, long app
   lv_label_set_text(b, txt);
   lv_obj_align(b, al, al == LV_ALIGN_BOTTOM_LEFT ? SAFE_INSET : -SAFE_INSET, -SAFE_INSET);
   lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_ext_click_area(b, 24);
+  lv_obj_set_ext_click_area(b, BUDDY_HIT_SLOP);
   lv_obj_add_event_cb(b, decide_cb, LV_EVENT_CLICKED, (void*)approve);
   return b;
 }
