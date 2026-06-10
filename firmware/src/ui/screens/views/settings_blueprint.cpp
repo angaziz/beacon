@@ -45,7 +45,7 @@ static lv_obj_t* make_row(lv_obj_t* parent, const beacon_theme_t* t, int y,
                           lv_event_cb_t tap) {
   lv_obj_t* row = lv_obj_create(parent);
   lv_obj_remove_style_all(row);
-  lv_obj_set_size(row, SCREEN_W - 2 * SAFE_INSET, 46);
+  lv_obj_set_size(row, SCREEN_W - 2 * SAFE_INSET, 40);
   lv_obj_set_pos(row, SAFE_INSET, y);
   lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
   if (tap) {
@@ -90,7 +90,7 @@ static void build(lv_obj_t* page) {
   lv_obj_align(ver, LV_ALIGN_TOP_RIGHT, -SAFE_INSET, SAFE_INSET);
 
   const int top = SAFE_INSET + 36;
-  const int pitch = 48;
+  const int pitch = 42;   // 8 rows (Dim+Sleep added) must clear the bottom arc on the 466px round panel
   s_bright_idx = bright_step_for_nvs(BRIGHT_PCT, sizeof(BRIGHT_PCT) / sizeof(BRIGHT_PCT[0]));
   char bb[8]; snprintf(bb, sizeof(bb), "%u%%", BRIGHT_PCT[s_bright_idx]);
   char tk[24]; snprintf(tk, sizeof(tk), "%u assets >", (unsigned)ds_get_finance_count());
