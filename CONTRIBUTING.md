@@ -18,9 +18,9 @@ shows it works beats a long argument.
 
 ## Repo areas
 
-- `docs/spikes/` — throwaway Arduino (C++) hardware spikes + setup/flashing guide
-  (`docs/spikes/SETUP.md`). The product firmware will live under a top-level `firmware/`
-  once the build phase starts.
+- `firmware/` — the product firmware (PlatformIO; build/flash guide in `firmware/README.md`).
+- `hub/` — the macOS menubar hub (SwiftPM; install/dev guide in `hub/README.md`).
+- `docs/spikes/` — throwaway Arduino (C++) hardware spikes + setup/flashing guide (`docs/spikes/SETUP.md`), kept separate from the product firmware.
 - `docs/design/mockups/` — HTML theme mockups. Iterate here, render with the Playwright helper
   in `docs/design/tooling/` (`node docs/design/tooling/shoot.mjs <file.html> <out-dir>`), then
   eyeball the PNGs. Keep new themes token-driven per `DESIGN.md`.
@@ -42,7 +42,7 @@ shows it works beats a long argument.
 
 1. Open an issue describing the change (especially for hardware-facing or architectural work).
 2. Branch from `main`.
-3. For firmware: confirm it compiles and runs on the board; note the board settings used.
+3. For firmware: confirm it compiles and runs on the board; note the board settings used. CI builds the device firmware and runs the host unit tests (`pio test -e native`) and the hub tests (`swift test`) on every PR.
 4. For design: include rendered PNG(s) of the affected screen(s).
 5. Open a PR with a clear description and any before/after evidence.
 

@@ -2,6 +2,10 @@
 
 PlatformIO project for the Waveshare ESP32-S3-Touch-AMOLED-2.16. Spike sketches (Arduino IDE) live under `docs/spikes/`; this is the product firmware (`tech.md` §12).
 
+> **Just want it on the device?** Tagged releases ship prebuilt images — use the [web flasher](https://angaziz.github.io/beacon/) (Chrome/Edge, no toolchain), or grab `beacon-<tag>-full.bin` from [Releases](https://github.com/angaziz/beacon/releases) and `esptool.py --chip esp32s3 write_flash 0x0 beacon-<tag>-full.bin`. The firmware needs no compiled-in secrets: WiFi is configured on-device via the `Beacon-setup` captive portal (`secrets.example.h` is a dev convenience, unused by the product build).
+
+The rest of this file is for building from source.
+
 ## Toolchain (pinned for a reason — read before changing versions)
 
 The version matrix is tighter than `tech.md` §5 implies. Discovered empirically during P0-A.
@@ -22,6 +26,8 @@ brew install python@3.13
 ```
 
 Use the venv's `pio` for everything (a bare `pio` from Homebrew runs on Python 3.14 and will fail this project). Optional convenience: `alias bpio="$HOME/.beacon-pio/bin/pio"`.
+
+Other platforms: any Python 3.10–3.13 venv with `platformio` + `pyyaml` works the same way (CI builds this project on Ubuntu); only the paths above are macOS-specific.
 
 ## Build / flash / monitor
 
