@@ -12,6 +12,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let central = BeaconCentral()
     private var bridge: ClaudeCodeBridge?
     private let poller = UsagePoller()
+    private let history = UsageHistoryStore()
+    private let costReader = TranscriptCostReader()
+    private var claudePace = BurnPaceEstimator()
+    private var codexPace = BurnPaceEstimator()
     private let firstRun = FirstRunWindowController()
     private let forgetWindow = ForgetWindowController()
 
@@ -27,11 +31,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pollerCodex: ProviderUsage = .unavailable
     private var statuslineClaude: ProviderUsage?
     private var usageErrors: [String] = []
+    // Latest statusline total_cost_usd per active session (CC >= 2.1.90). Captured as the live per-session
+    // cross-check; surfacing it (freshness indicator) is a documented follow-up, out of scope for #57.
+    private var statuslineSessionCost: [String: Double] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         startBridge()
         startCentral()
         startPoller()
+        startTrends()
         startFirstRun()
         startLoginItem()
 
@@ -145,6 +153,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         b.onClaudeUsage = { [weak self] c in
             Task { @MainActor in self?.onStatuslineClaude(c) }
         }
+        b.onSessionCost = { [weak self] sid, usd in
+            Task { @MainActor in self?.statuslineSessionCost[sid ?? "_"] = usd }
+        }
         b.onPromptUndeliverable = { [weak self] reason in
             Task { @MainActor in self?.menubar.setAlert("Auto-denied: \(reason)") }
         }
@@ -237,6 +248,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildUsage()
     }
 
+    // --- trends (issue #57): history ring buffer + background cost reader + burn pace ---
+
+    private func startTrends() {
+        history.start()
+        costReader.onUpdate = { [weak self] in self?.refreshCost() }
+        costReader.start()
+        // Republish the cost breakdown when the period selection changes.
+        menubar.onPeriodChanged = { [weak self] in self?.refreshCost() }
+    }
+
+    private func refreshCost() {
+        let period = menubar.currentCostPeriod()
+        let bd = costReader.breakdown(period: period)
+        menubar.setCost(bd)
+    }
+
+    // Feed the 5h-window pct of each provider into its EMA estimator and publish the pace rows.
+    private func updatePace(_ usage: Usage) {
+        let now = Int(Date().timeIntervalSince1970)
+        let c = usage.claude.h5
+        let x = usage.codex.h5
+        let cPace = c.pct.map { claudePace.update(pct: $0, reset: c.reset, now: now) }
+            ?? BurnPaceResult(pace: nil, capEpoch: nil, style: nil)
+        let xPace = x.pct.map { codexPace.update(pct: $0, reset: x.reset, now: now) }
+            ?? BurnPaceResult(pace: nil, capEpoch: nil, style: nil)
+        menubar.setPace(claude: cPace, codex: xPace)
+    }
+
     // Claude usage from Claude Code's statusline rate_limits (overrides the poller; survives a 429).
     private func onStatuslineClaude(_ c: ProviderUsage) {
         statuslineClaude = c
@@ -250,6 +289,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let errors = statuslineClaude == nil ? usageErrors
             : usageErrors.filter { !$0.lowercased().contains("claude") }
         menubar.setUsage(usage, errors: errors)
+        history.record(usage)
+        history.snapshot { [weak self] samples in self?.menubar.setHistory(samples) }
+        updatePace(usage)
         sendFrame(StatusFrame(usage: usage))
     }
 

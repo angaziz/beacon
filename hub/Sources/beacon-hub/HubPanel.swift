@@ -15,6 +15,25 @@ struct HubPanel: View {
                 Banner(text: banner)
             }
             HeaderModule(model: model, closeAndRun: closeAndRun)
+            TabSwitcher(tab: $model.tab)
+            switch model.tab {
+            case .now:    NowTab(model: model)
+            case .trends: TrendsView(model: model)
+            }
+            ActionBar(model: model, closeAndRun: closeAndRun)
+        }
+        .padding(12)
+        .frame(width: 340)
+    }
+}
+
+// The unchanged "Now" surface: errors, the two provider cards, and the toggles. Extracted verbatim from
+// the pre-Trends panel so the Now tab is pixel-identical to the original layout. Kept in this file so its
+// private dependencies (ProviderCard / TogglesModule) stay reachable.
+private struct NowTab: View {
+    @ObservedObject var model: HubViewModel
+    var body: some View {
+        VStack(spacing: 10) {
             if !model.errors.isEmpty {
                 Module {
                     VStack(alignment: .leading, spacing: 4) {
@@ -30,10 +49,29 @@ struct HubPanel: View {
                 ProviderCard(name: "Codex", usage: model.usage.codex, now: model.now)
             }
             TogglesModule(model: model)
-            ActionBar(model: model, closeAndRun: closeAndRun)
         }
-        .padding(12)
-        .frame(width: 340)
+    }
+}
+
+// Top-level Now | Trends segmented control (mockup Option B). Tap-driven; persistence lives in the VM.
+private struct TabSwitcher: View {
+    @Binding var tab: HubTab
+    var body: some View {
+        HStack(spacing: 0) {
+            segment("Now", .now)
+            segment("Trends", .trends)
+        }
+        .padding(2)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+    }
+    private func segment(_ title: String, _ value: HubTab) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .frame(maxWidth: .infinity).padding(.vertical, 4)
+            .background(tab == value ? Color.primary.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .foregroundStyle(tab == value ? .primary : .secondary)
+            .contentShape(Rectangle())
+            .onTapGesture { tab = value }
     }
 }
 
@@ -335,6 +373,16 @@ private struct ActionButton: View {
                               d7: UsageWindow(pct: 0, reset: 1_734_200_000)),
         codex: ProviderUsage(h5: UsageWindow(pct: 1, reset: 1_733_821_000),
                              d7: UsageWindow(pct: 93, reset: 1_734_300_000)))
+    m.tab = .trends
+    m.historySamples = (0..<60).map { i in
+        UsageSample(ts: 1_733_800_000 - (60 - i) * 60, provider: .claude, h5: i, d7: i / 8)
+    } + (0..<60).map { i in
+        UsageSample(ts: 1_733_800_000 - (60 - i) * 60, provider: .codex, h5: i / 3, d7: 50 + i / 12)
+    }
+    m.cost = CostBreakdown(rows: [
+        ModelCostRow(model: "claude-opus-4-8", tokens: 1_200_000, costUSD: 14.10),
+        ModelCostRow(model: "gpt-5.5", tokens: 1_800_000, costUSD: 2.50),
+    ], totalUSD: 16.60)
     return HubPanel(model: m, closeAndRun: { $0() })
 }
 #endif

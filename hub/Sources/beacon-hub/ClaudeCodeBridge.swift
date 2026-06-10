@@ -18,6 +18,9 @@ final class ClaudeCodeBridge {
 
     var onBuddyUpdate: ((BuddyState) -> Void)?
     var onClaudeUsage: ((ProviderUsage) -> Void)?   // Claude 5h/7d from statusline rate_limits
+    // Per-session live cost from the statusline `cost` object (CC >= 2.1.90). Optional cross-check only;
+    // never gates the context_window/rate_limits path. nil-safe: absent field => callback not fired.
+    var onSessionCost: ((_ sessionId: String?, _ totalUSD: Double) -> Void)?
     var onPromptUndeliverable: ((String) -> Void)?  // a prompt couldn't be shown (device offline)
     var onPromptArrived: (() -> Void)?              // a deliverable prompt was shown on the device (cue the user)
     var onBridgeStatus: ((String?) -> Void)?        // non-nil = bind failed (loud); nil = recovered
@@ -448,6 +451,12 @@ final class ClaudeCodeBridge {
             sessionStats[sid ?? "_"] = (tokens: inTok + outTok, ctxPct: pct)
             buddy.tokens = sessionStats.values.reduce(0) { $0 + $1.tokens }   // total work in flight.
             buddy.contextPct = sessionStats.values.map(\.ctxPct).max() ?? 0   // most-pressured context.
+        }
+        // Optional `cost` object (CC >= 2.1.90): total_cost_usd is a per-session cross-check. Guarded so a
+        // missing field leaves context_window/rate_limits handling untouched.
+        if let cost = body["cost"] as? [String: Any], let usd = Self.double(cost["total_cost_usd"]) {
+            let cb = onSessionCost
+            DispatchQueue.main.async { cb?(sid, usd) }
         }
         // Claude usage is also in the statusline (rate_limits) -- authoritative, no token/endpoint, so
         // it survives the oauth/usage 429. AppDelegate prefers this over the poller's Claude value.

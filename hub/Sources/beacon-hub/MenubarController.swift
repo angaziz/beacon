@@ -70,6 +70,7 @@ final class MenubarController: NSObject {
         model.onRetryPairing = { [weak self] in self?.onRetryPairing?() }
         model.onOpenFixURL = { [weak self] in self?.openLink() }
         model.onQuit = { NSApp.terminate(nil) }
+        model.onPeriodChange = { [weak self] in self?.onPeriodChanged?() }
     }
 
     private func buildPopover() {
@@ -139,6 +140,18 @@ final class MenubarController: NSObject {
         model.errors = errors
         model.lastSync = Date()
         model.now = Date()   // restamp so reset hints stay fresh even while the popover is open
+    }
+
+    // --- Trends payloads (issue #57). AppDelegate pushes cached values computed off the UI path. ---
+    func setHistory(_ samples: [UsageSample]) { model.historySamples = samples }
+    func setCost(_ cost: CostBreakdown) { model.cost = cost }
+    func setPace(claude: BurnPaceResult, codex: BurnPaceResult) {
+        model.claudePace = claude
+        model.codexPace = codex
+    }
+    var onPeriodChanged: (() -> Void)?
+    func currentCostPeriod() -> CostPeriod {
+        switch model.period { case .h6: return .last6h; case .h24: return .day; case .d7: return .week }
     }
 
     // contentTintColor must be assigned (color OR nil) on EVERY call: AppKit only tints template images,
