@@ -92,6 +92,7 @@ static void build(lv_obj_t* page) {
   lv_obj_set_style_text_font(s_deny, t->f_mono, 0);
   lv_obj_align(s_deny, LV_ALIGN_BOTTOM_LEFT, SAFE_INSET, -SAFE_INSET);
   lv_obj_add_flag(s_deny, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_ext_click_area(s_deny, BUDDY_HIT_SLOP);
   lv_obj_add_event_cb(s_deny, decide_cb, LV_EVENT_CLICKED, (void*)(intptr_t)false);
 
   s_approve = lv_label_create(page);
@@ -100,6 +101,7 @@ static void build(lv_obj_t* page) {
   lv_obj_set_style_text_font(s_approve, t->f_mono, 0);
   lv_obj_align(s_approve, LV_ALIGN_BOTTOM_RIGHT, -SAFE_INSET, -SAFE_INSET);
   lv_obj_add_flag(s_approve, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_ext_click_area(s_approve, BUDDY_HIT_SLOP);
   lv_obj_add_event_cb(s_approve, decide_cb, LV_EVENT_CLICKED, (void*)(intptr_t)true);
 
   // Idle layout (recent entries / "idle"), hidden when a prompt is present.

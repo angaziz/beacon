@@ -100,7 +100,7 @@ static void build(lv_obj_t* page) {
   lv_obj_set_style_text_letter_space(s_deny, 2, 0);
   lv_obj_align(s_deny, LV_ALIGN_BOTTOM_LEFT, SAFE_INSET + 4, -SAFE_INSET);
   lv_obj_add_flag(s_deny, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_ext_click_area(s_deny, 24);
+  lv_obj_set_ext_click_area(s_deny, BUDDY_HIT_SLOP);
   lv_obj_add_event_cb(s_deny, on_deny, LV_EVENT_CLICKED, NULL);
 
   s_approve = lv_label_create(page);
@@ -110,7 +110,7 @@ static void build(lv_obj_t* page) {
   lv_obj_set_style_text_letter_space(s_approve, 2, 0);
   lv_obj_align(s_approve, LV_ALIGN_BOTTOM_RIGHT, -(SAFE_INSET + 4), -SAFE_INSET);
   lv_obj_add_flag(s_approve, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_ext_click_area(s_approve, 24);
+  lv_obj_set_ext_click_area(s_approve, BUDDY_HIT_SLOP);
   lv_obj_add_event_cb(s_approve, on_approve, LV_EVENT_CLICKED, NULL);
 
   // Idle entries (shown when no prompt), centered stack.
