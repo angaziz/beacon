@@ -22,7 +22,7 @@ jobs:
       hub: ${{ steps.filter.outputs.hub }}
     steps:
       - uses: actions/checkout@v5
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
