@@ -24,8 +24,8 @@ struct TrendsView: View {
                 }
                 UsageChart(claude: claudeSeries, codex: codexSeries, range: chartRange, axisLabels: axisLabels)
                 HStack(spacing: 14) {
-                    Legend(color: .blue, text: "Claude \(legendPct(model.usage.claude))")
-                    Legend(color: .purple, text: "Codex \(legendPct(model.usage.codex))")
+                    Legend(color: .blue, text: "Claude \(legendPct(.claude, model.usage.claude))")
+                    Legend(color: .purple, text: "Codex \(legendPct(.codex, model.usage.codex))")
                 }
                 if claudeSeries.segments.isEmpty && codexSeries.segments.isEmpty {
                     Text("line breaks = Hub not running; history starts at install")
@@ -75,10 +75,11 @@ struct TrendsView: View {
         return (now - span)...now
     }
     // Break threshold scales with zoom. Live samples are ~1/min, but Codex backfill is one point per turn
-    // (irregular, minutes-to-hours apart) — a short threshold would fragment a legitimately-active session
-    // into dots. Only a gap larger than this (real Hub-down time) should break the line.
+    // (irregular, minutes-to-hours apart) — a tight threshold fragments a legitimately-active stretch into
+    // dots. Use a generous gap so backfill connects into a trend line; only a genuine multi-hour outage
+    // (Hub down / Mac asleep) breaks it. The minor cost is that a short real gap gets interpolated.
     private var breakSeconds: Int {
-        switch model.period { case .h6: return 900; case .h24: return 1800; case .d7: return 3*3600 }
+        switch model.period { case .h6: return 3600; case .h24: return 3*3600; case .d7: return 6*3600 }
     }
     private var claudeSeries: ChartSeries {
         ChartSeries.build(samples: model.historySamples, provider: .claude, metric: chartMetric, range: chartRange, breakSeconds: breakSeconds)
@@ -100,9 +101,16 @@ struct TrendsView: View {
     private var costScopeLabel: String {
         switch model.period { case .h6: return "COST - LAST 6H"; case .h24: return "COST - TODAY"; case .d7: return "COST - THIS WEEK" }
     }
-    private func legendPct(_ p: ProviderUsage) -> String {
-        let w = model.period == .d7 ? p.d7 : p.h5
-        return w.pct.map { "\($0)%" } ?? "--"
+    // Prefer the current usage pct; if it is unavailable (e.g. a usage-endpoint 429), fall back to the most
+    // recent recorded sample so the legend agrees with the line/dot the chart is actually showing.
+    private func legendPct(_ provider: UsageProviderKind, _ p: ProviderUsage) -> String {
+        let current = model.period == .d7 ? p.d7.pct : p.h5.pct
+        if let c = current { return "\(c)%" }
+        let latest = model.historySamples
+            .filter { $0.provider == provider }
+            .max(by: { $0.ts < $1.ts })
+            .flatMap { model.period == .d7 ? $0.d7 : $0.h5 }
+        return latest.map { "\($0)%" } ?? "--"
     }
 }
 
