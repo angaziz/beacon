@@ -41,6 +41,8 @@ jobs:
       - run: pip install platformio pyyaml "esptool~=4.8"
       - name: Build
         working-directory: firmware
+        env:
+          FIRMWARE_VERSION: ${{ github.ref_name }}   # e.g. v0.1.0; baked into the About panel
         run: pio run -e beacon
       - name: Assemble flashable images
         working-directory: firmware

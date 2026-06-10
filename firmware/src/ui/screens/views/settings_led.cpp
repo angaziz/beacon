@@ -3,7 +3,9 @@
 #include "ui/state_view.h"
 #include "ui/theme.h"
 #include "ui/theme_panel.h"
+#include "ui/about_panel.h"
 #include "config/layout.h"
+#include "config/version.h"
 #include "hal/display.h"
 #include "hal/power.h"
 #include "core/net.h"
@@ -23,6 +25,7 @@ static const uint8_t BRIGHT_STEPS[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;  // default 80%
 
 static void theme_cb(lv_event_t*) { theme_panel_open(); }
+static void about_cb(lv_event_t*) { about_panel_open(); }
 
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
 static void dim_cb(lv_event_t*)   { settings_power_open_dim(); }
@@ -70,7 +73,7 @@ static void build(lv_obj_t* page) {
   lv_obj_align(eb, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET);
 
   lv_obj_t* ver = lv_label_create(page);
-  lv_label_set_text(ver, "V0.1");
+  lv_label_set_text(ver, FIRMWARE_VERSION);
   lv_obj_set_style_text_font(ver, t->f_mono, 0);
   lv_obj_set_style_text_color(ver, t->ink_dim, 0);
   lv_obj_align(ver, LV_ALIGN_TOP_RIGHT, -SAFE_INSET, SAFE_INSET);
@@ -114,7 +117,9 @@ static void build(lv_obj_t* page) {
   lv_obj_add_flag(sr, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(sr, sleep_cb, LV_EVENT_CLICKED, NULL);
 
-  make_row(list, t, "ABOUT", ">", t->ink_dim);
+  lv_obj_t* ab = make_row(list, t, "ABOUT", ">", t->ink_dim);
+  lv_obj_add_flag(ab, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(ab, about_cb, LV_EVENT_CLICKED, NULL);
 }
 
 static void update(void) {

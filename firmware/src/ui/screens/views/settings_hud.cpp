@@ -11,6 +11,7 @@
 #include "ui/screens/screen_common.h"
 #include "ui/wifi_panel.h"
 #include "ui/theme_panel.h"
+#include "ui/about_panel.h"
 #include "ui/settings_power_rows.h"
 #include <Arduino.h>
 
@@ -30,6 +31,7 @@ static const uint8_t BRIGHT_STEPS[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;   // 80%
 
 static void theme_tap(lv_event_t* e) { (void)e; theme_panel_open(); }
+static void about_cb(lv_event_t*) { about_panel_open(); }
 
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
 static void dim_cb(lv_event_t*)   { settings_power_open_dim(); }
@@ -111,7 +113,7 @@ static void build(lv_obj_t* page) {
   s_theme_val    = make_row(list, t, "Theme", thv, theme_tap);
   s_dim_val      = make_row(list, t, "Dim", "", dim_cb);
   s_sleep_val    = make_row(list, t, "Sleep", "", sleep_cb);
-  make_row(list, t, "About", ">", NULL);
+  make_row(list, t, "About", ">", about_cb);
 }
 
 static void update(void) {
