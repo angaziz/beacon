@@ -12,6 +12,7 @@
 #include "ui/screens/screen_common.h"
 #include "ui/wifi_panel.h"
 #include "ui/theme_panel.h"
+#include "ui/settings_power_rows.h"
 #include <Arduino.h>
 
 // Aerospace HUD / Settings. "// SETTINGS" eyebrow + version (right) + a list of rows:
@@ -24,6 +25,8 @@ static lv_obj_t *s_bright_val;
 static lv_obj_t *s_tickers_val;
 static lv_obj_t *s_batt_val;
 static lv_obj_t *s_wifi_val;
+static lv_obj_t *s_dim_val;
+static lv_obj_t *s_sleep_val;
 
 static const uint8_t BRIGHT_STEPS[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;   // 80%
@@ -31,6 +34,8 @@ static uint8_t s_bright_idx = 2;   // 80%
 static void theme_tap(lv_event_t* e) { (void)e; theme_panel_open(); }
 
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
+static void dim_cb(lv_event_t*)   { settings_power_open_dim(); }
+static void sleep_cb(lv_event_t*) { settings_power_open_sleep(); }
 
 static void bright_tap(lv_event_t* e) {
   (void)e;
@@ -109,7 +114,8 @@ static void build(lv_obj_t* page) {
   char tk[16];
   snprintf(tk, sizeof(tk), "%u assets", (unsigned)ds_get_finance_count());
   s_tickers_val  = make_row(list, t, "Tickers", tk, NULL);
-  make_row(list, t, "Sleep", "5 min", NULL);
+  s_dim_val      = make_row(list, t, "Dim", "", dim_cb);
+  s_sleep_val    = make_row(list, t, "Sleep", "", sleep_cb);
   make_row(list, t, "About", ">", NULL);
 }
 
@@ -119,6 +125,10 @@ static void update(void) {
   char tk[16];
   snprintf(tk, sizeof(tk), "%u assets", (unsigned)ds_get_finance_count());
   lv_label_set_text(s_tickers_val, tk);
+
+  char db[12], sb[12];
+  settings_power_dim_label(db, sizeof(db));   lv_label_set_text(s_dim_val, db);
+  settings_power_sleep_label(sb, sizeof(sb)); lv_label_set_text(s_sleep_val, sb);
 
   int pct = power_battery_pct();
   char bt[8];

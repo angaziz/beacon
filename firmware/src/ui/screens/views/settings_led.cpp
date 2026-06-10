@@ -11,6 +11,7 @@
 #include "core/nvs.h"
 #include "ui/screens/screen_common.h"
 #include "ui/wifi_panel.h"
+#include "ui/settings_power_rows.h"
 #include <Arduino.h>
 #include <ctype.h>
 
@@ -18,12 +19,15 @@
 // Brightness tap cycles 40/60/80/100% inline.
 
 static lv_obj_t *s_theme_val, *s_bright_val, *s_tickers_val, *s_batt_val, *s_wifi_val;
+static lv_obj_t *s_dim_val, *s_sleep_val;
 static const uint8_t BRIGHT_STEPS[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;  // default 80%
 
 static void theme_cb(lv_event_t*) { theme_panel_open(); }
 
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
+static void dim_cb(lv_event_t*)   { settings_power_open_dim(); }
+static void sleep_cb(lv_event_t*) { settings_power_open_sleep(); }
 
 static void bright_cb(lv_event_t*) {
   s_bright_idx = (s_bright_idx + 1) % (sizeof(BRIGHT_STEPS) / sizeof(BRIGHT_STEPS[0]));
@@ -106,7 +110,16 @@ static void build(lv_obj_t* page) {
   lv_obj_t* tr = make_row(list, t, "TICKERS", tk, t->ink_dim);
   s_tickers_val = (lv_obj_t*)lv_obj_get_user_data(tr);
 
-  make_row(list, t, "SLEEP", "5 MIN", t->ink);
+  lv_obj_t* dr = make_row(list, t, "DIM", "", t->ink);
+  s_dim_val = (lv_obj_t*)lv_obj_get_user_data(dr);
+  lv_obj_add_flag(dr, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(dr, dim_cb, LV_EVENT_CLICKED, NULL);
+
+  lv_obj_t* sr = make_row(list, t, "SLEEP", "", t->ink);
+  s_sleep_val = (lv_obj_t*)lv_obj_get_user_data(sr);
+  lv_obj_add_flag(sr, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(sr, sleep_cb, LV_EVENT_CLICKED, NULL);
+
   make_row(list, t, "ABOUT", ">", t->ink_dim);
 }
 
@@ -126,6 +139,16 @@ static void update(void) {
     char tk[20];
     snprintf(tk, sizeof(tk), "%u ASSETS >", (unsigned)ds_get_finance_count());
     lv_label_set_text(s_tickers_val, tk);
+  }
+  if (s_dim_val) {
+    char db[12]; settings_power_dim_label(db, sizeof(db));
+    for (char* p = db; *p; p++) *p = (char)toupper((unsigned char)*p);
+    lv_label_set_text(s_dim_val, db);
+  }
+  if (s_sleep_val) {
+    char sb[12]; settings_power_sleep_label(sb, sizeof(sb));
+    for (char* p = sb; *p; p++) *p = (char)toupper((unsigned char)*p);
+    lv_label_set_text(s_sleep_val, sb);
   }
   if (s_batt_val) {
     int pct = power_battery_pct();
