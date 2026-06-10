@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Beacon Hub - Usage Panel Presentation Options</title>
+<style>
+  :root {
+    --panel-bg: #28282c;
+    --panel-bg2: #2f2f34;
+    --card: #38383e;
+    --card2: #404048;
+    --text: #f2f2f4;
+    --text2: #9a9aa2;
+    --text3: #6e6e76;
+    --green: #34c759;
+    --orange: #ff9f0a;
+    --red: #ff453a;
+    --blue: #0a84ff;
+    --sep: rgba(255,255,255,0.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #161618;
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    padding: 40px;
+  }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+  .sub { color: var(--text2); font-size: 13px; margin-bottom: 36px; }
+  .options { display: flex; gap: 48px; align-items: flex-start; flex-wrap: wrap; }
+  .option { display: flex; flex-direction: column; gap: 14px; }
+  .option h2 { font-size: 15px; font-weight: 600; }
+  .option h2 .tag {
+    font-size: 11px; font-weight: 600; color: var(--blue);
+    border: 1px solid var(--blue); border-radius: 99px;
+    padding: 2px 8px; margin-left: 8px; vertical-align: 2px;
+  }
+  .proscons { width: 340px; font-size: 12px; color: var(--text2); line-height: 1.5; }
+  .proscons.wide { width: 560px; }
+  .proscons b { color: var(--text); }
+
+  /* ---- popover chrome ---- */
+  .popover {
+    width: 340px;
+    background: var(--panel-bg);
+    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+    padding: 14px;
+    display: flex; flex-direction: column; gap: 12px;
+    position: relative;
+  }
+  .popover.wide { width: 560px; }
+  .popover::before {
+    content: ""; position: absolute; top: -7px; left: 50%; margin-left: -7px;
+    width: 14px; height: 14px; background: var(--panel-bg);
+    border-left: 1px solid rgba(255,255,255,0.10);
+    border-top: 1px solid rgba(255,255,255,0.10);
+    transform: rotate(45deg); border-radius: 3px 0 0 0;
+  }
+
+  /* ---- header (existing) ---- */
+  .hdr { display: flex; align-items: center; gap: 9px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px rgba(52,199,89,.7); }
+  .hdr .name { font-size: 13px; font-weight: 600; }
+  .hdr .sync { font-size: 11px; color: var(--text3); margin-left: auto; }
+
+  /* ---- provider cards (existing style) ---- */
+  .cards { display: flex; gap: 10px; }
+  .pcard {
+    flex: 1; background: var(--card); border-radius: 10px; padding: 10px 11px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .pcard .pname { font-size: 12px; font-weight: 700; letter-spacing: .02em; display: flex; align-items: center; }
+  .row .lbl { font-size: 10px; font-weight: 600; color: var(--text3); width: 18px; }
+  .row { display: flex; align-items: center; gap: 7px; margin-top: 2px; }
+  .row .pct { font-size: 11px; font-weight: 600; width: 32px; text-align: right; }
+  .bar { flex: 1; height: 5px; border-radius: 99px; background: rgba(255,255,255,0.10); overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 99px; }
+  .reset { font-size: 10px; color: var(--text3); }
+  .chev {
+    margin-left: auto; color: var(--text3); font-size: 10px;
+    transition: transform .15s;
+  }
+  .chev.open { transform: rotate(90deg); color: var(--text2); }
+
+  /* ---- expanded detail (Option A) ---- */
+  .detail {
+    background: var(--card); border-radius: 10px; padding: 11px;
+    display: flex; flex-direction: column; gap: 10px;
+    border: 1px solid rgba(10,132,255,0.35);
+  }
+  .detail .dh { font-size: 11px; font-weight: 700; color: var(--text2); letter-spacing: .04em; }
+  .kv { display: flex; justify-content: space-between; font-size: 12px; }
+  .kv .k { color: var(--text2); }
+  .kv .v { font-weight: 600; }
+  .kv .v.warn { color: var(--orange); }
+  .spark { width: 100%; height: 44px; }
+  .axis { display: flex; justify-content: space-between; font-size: 9px; color: var(--text3); margin-top: -4px; }
+  .mrow { display: flex; align-items: baseline; gap: 8px; font-size: 11px; }
+  .mrow .m { width: 86px; color: var(--text); font-weight: 600; }
+  .mrow .tok { color: var(--text2); width: 64px; }
+  .mrow .mbar { flex: 1; height: 4px; border-radius: 99px; background: rgba(255,255,255,0.10); }
+  .mrow .mbar i { display: block; height: 100%; border-radius: 99px; background: var(--blue); }
+  .mrow .cost { width: 50px; text-align: right; font-weight: 600; }
+  .estnote { font-size: 9px; color: var(--text3); }
+
+  /* ---- segmented control (Option B) ---- */
+  .seg {
+    display: flex; background: rgba(255,255,255,0.08); border-radius: 8px; padding: 2px;
+  }
+  .seg span {
+    flex: 1; text-align: center; font-size: 11px; font-weight: 600;
+    padding: 4px 0; border-radius: 6px; color: var(--text2);
+  }
+  .seg span.on { background: var(--card2); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+
+  .legend { display: flex; gap: 14px; font-size: 10px; color: var(--text2); }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+  /* ---- toggles + actions (existing) ---- */
+  .toggles { display: flex; flex-direction: column; gap: 8px; padding-top: 2px; border-top: 1px solid var(--sep); }
+  .toggle { display: flex; align-items: center; font-size: 12px; color: var(--text); }
+  .switch { margin-left: auto; width: 32px; height: 19px; border-radius: 99px; background: var(--green); position: relative; }
+  .switch.off { background: rgba(255,255,255,0.18); }
+  .switch::after { content: ""; position: absolute; top: 2px; right: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; }
+  .switch.off::after { right: auto; left: 2px; }
+  .actions { display: flex; gap: 8px; padding-top: 10px; border-top: 1px solid var(--sep); }
+  .btn {
+    flex: 1; text-align: center; font-size: 11px; font-weight: 600;
+    background: rgba(255,255,255,0.09); border-radius: 7px; padding: 6px 0; color: var(--text);
+  }
+  .btn.quit { color: var(--red); }
+
+  /* ---- Option C two-column ---- */
+  .cols { display: flex; gap: 14px; }
+  .col { display: flex; flex-direction: column; gap: 12px; }
+  .col.left { width: 230px; }
+  .col.right { flex: 1; }
+  .col.left .cards { flex-direction: column; }
+</style>
+</head>
+<body>
+
+<h1>Hub usage panel - presentation options</h1>
+<div class="sub">All three stay inside the existing NSPopover (no new windows). New content: sparkline history, burn pace + ETA, cost est, per-model breakdown.</div>
+
+<div class="options">
+
+  <!-- ============ OPTION A ============ -->
+  <div class="option">
+    <h2>Option A - Expand in place <span class="tag">recommended</span></h2>
+    <div class="popover">
+      <div class="hdr"><div class="dot"></div><div class="name">Beacon</div><div class="sync">synced 12s ago</div></div>
+
+      <div class="cards">
+        <div class="pcard" style="border: 1px solid rgba(10,132,255,0.45);">
+          <div class="pname">CLAUDE <span class="chev open">&#9656;</span></div>
+          <div class="row"><span class="lbl">5h</span><div class="bar"><i style="width:62%;background:var(--orange)"></i></div><span class="pct">62%</span></div>
+          <div class="reset">resets 4:40 PM</div>
+          <div class="row"><span class="lbl">7d</span><div class="bar"><i style="width:38%;background:var(--green)"></i></div><span class="pct">38%</span></div>
+          <div class="reset">resets Mon</div>
+        </div>
+        <div class="pcard">
+          <div class="pname">CODEX <span class="chev">&#9656;</span></div>
+          <div class="row"><span class="lbl">5h</span><div class="bar"><i style="width:21%;background:var(--green)"></i></div><span class="pct">21%</span></div>
+          <div class="reset">resets 5:10 PM</div>
+          <div class="row"><span class="lbl">7d</span><div class="bar"><i style="width:54%;background:var(--green)"></i></div><span class="pct">54%</span></div>
+          <div class="reset">resets Wed</div>
+        </div>
+      </div>
+
+      <!-- expanded detail for Claude; popover grows downward -->
+      <div class="detail">
+        <div class="dh">CLAUDE - LAST 6H</div>
+        <svg class="spark" viewBox="0 0 300 44" preserveAspectRatio="none">
+          <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#0a84ff" stop-opacity=".35"/><stop offset="1" stop-color="#0a84ff" stop-opacity="0"/>
+          </linearGradient></defs>
+          <path d="M0,40 L30,38 L60,36 L90,30 L120,31 L150,26 L180,20 L210,21 L240,14 L270,10 L300,7 L300,44 L0,44 Z" fill="url(#g1)"/>
+          <path d="M0,40 L30,38 L60,36 L90,30 L120,31 L150,26 L180,20 L210,21 L240,14 L270,10 L300,7" fill="none" stroke="#0a84ff" stroke-width="1.5"/>
+        </svg>
+        <div class="axis"><span>10 AM</span><span>1 PM</span><span>now</span></div>
+        <div class="kv"><span class="k">Pace</span><span class="v warn">+9%/h &middot; caps ~3:40 PM</span></div>
+        <div class="kv"><span class="k">Cost today</span><span class="v">$21.40 est.</span></div>
+        <div class="mrow"><span class="m">Opus 4.8</span><span class="tok">1.2M tok</span><div class="mbar"><i style="width:66%"></i></div><span class="cost">$14.10</span></div>
+        <div class="mrow"><span class="m">Sonnet 4.6</span><span class="tok">3.4M tok</span><div class="mbar"><i style="width:29%"></i></div><span class="cost">$6.20</span></div>
+        <div class="mrow"><span class="m">Haiku 4.5</span><span class="tok">2.1M tok</span><div class="mbar"><i style="width:5%"></i></div><span class="cost">$1.10</span></div>
+        <div class="estnote">est. from transcripts at API list prices - plan is flat-rate</div>
+      </div>
+
+      <div class="toggles">
+        <div class="toggle">Mute prompt sound <div class="switch off"></div></div>
+        <div class="toggle">Start at login <div class="switch"></div></div>
+      </div>
+      <div class="actions"><div class="btn">Setup&hellip;</div><div class="btn">Forget / re-pair</div><div class="btn quit">Quit</div></div>
+    </div>
+    <div class="proscons">
+      <b>Click a provider card to expand; popover animates taller.</b> One provider open at a time.<br>
+      + Glance data never hidden; detail is scoped to what you clicked<br>
+      + Smallest change to existing layout; zero new chrome when collapsed<br>
+      - 318pt of usable width is tight (fine for sparkline, tight for dual-line charts)<br>
+      - Tall popover when expanded (~520pt)
+    </div>
+  </div>
+
+  <!-- ============ OPTION B ============ -->
+  <div class="option">
+    <h2>Option B - Segmented tabs</h2>
+    <div class="popover">
+      <div class="hdr"><div class="dot"></div><div class="name">Beacon</div><div class="sync">synced 12s ago</div></div>
+
+      <div class="seg"><span>Now</span><span class="on">Trends</span></div>
+
+      <!-- Trends tab content -->
+      <div class="pcard" style="gap:10px;">
+        <div class="dh" style="font-size:11px;font-weight:700;color:var(--text2);letter-spacing:.04em;">5H WINDOW - LAST 12H</div>
+        <svg class="spark" style="height:64px" viewBox="0 0 300 64" preserveAspectRatio="none">
+          <path d="M0,58 L25,55 L50,50 L75,52 L100,44 L125,38 L150,40 L175,30 L200,24 L225,26 L250,18 L275,12 L300,9" fill="none" stroke="#0a84ff" stroke-width="1.5"/>
+          <path d="M0,60 L25,59 L50,57 L75,58 L100,55 L125,54 L150,55 L175,52 L200,50 L225,51 L250,49 L275,48 L300,47" fill="none" stroke="#bf5af2" stroke-width="1.5"/>
+          <line x1="0" y1="13" x2="300" y2="13" stroke="rgba(255,69,58,.4)" stroke-width="1" stroke-dasharray="3,3"/>
+        </svg>
+        <div class="axis"><span>4 AM</span><span>10 AM</span><span>now</span></div>
+        <div class="legend"><span><i style="background:#0a84ff"></i>Claude 62%</span><span><i style="background:#bf5af2"></i>Codex 21%</span></div>
+      </div>
+
+      <div class="pcard" style="gap:8px;">
+        <div class="kv"><span class="k">Claude pace</span><span class="v warn">+9%/h &middot; caps ~3:40 PM</span></div>
+        <div class="kv"><span class="k">Codex pace</span><span class="v">+2%/h &middot; safe past reset</span></div>
+        <div class="kv"><span class="k">Cost today</span><span class="v">$23.90 est.</span></div>
+        <div class="mrow"><span class="m">Opus 4.8</span><span class="tok">1.2M tok</span><div class="mbar"><i style="width:66%"></i></div><span class="cost">$14.10</span></div>
+        <div class="mrow"><span class="m">Sonnet 4.6</span><span class="tok">3.4M tok</span><div class="mbar"><i style="width:29%"></i></div><span class="cost">$6.20</span></div>
+        <div class="mrow"><span class="m">GPT-5.4</span><span class="tok">1.8M tok</span><div class="mbar"><i style="width:12%;background:#bf5af2"></i></div><span class="cost">$2.50</span></div>
+        <div class="estnote">est. from transcripts at API list prices - plan is flat-rate</div>
+      </div>
+
+      <div class="actions"><div class="btn">Setup&hellip;</div><div class="btn">Forget / re-pair</div><div class="btn quit">Quit</div></div>
+    </div>
+    <div class="proscons">
+      <b>"Now" tab = today's exact panel. "Trends" tab = charts + pace + cost.</b><br>
+      + Full panel width for charts; both providers on one chart<br>
+      + Fixed, predictable popover size<br>
+      - Glance bars hidden while on Trends (popover is transient, so it reopens on Now)<br>
+      - Adds permanent chrome (segmented control) to a previously minimal panel
+    </div>
+  </div>
+
+  <!-- ============ OPTION C ============ -->
+  <div class="option">
+    <h2>Option C - Widen into two columns</h2>
+    <div class="popover wide">
+      <div class="hdr"><div class="dot"></div><div class="name">Beacon</div><div class="sync">synced 12s ago</div><span style="font-size:11px;color:var(--blue);font-weight:600;margin-left:10px;">Insights &#9662;</span></div>
+      <div class="cols">
+        <div class="col left">
+          <div class="cards">
+            <div class="pcard">
+              <div class="pname">CLAUDE</div>
+              <div class="row"><span class="lbl">5h</span><div class="bar"><i style="width:62%;background:var(--orange)"></i></div><span class="pct">62%</span></div>
+              <div class="reset">resets 4:40 PM</div>
+              <div class="row"><span class="lbl">7d</span><div class="bar"><i style="width:38%;background:var(--green)"></i></div><span class="pct">38%</span></div>
+              <div class="reset">resets Mon</div>
+            </div>
+            <div class="pcard">
+              <div class="pname">CODEX</div>
+              <div class="row"><span class="lbl">5h</span><div class="bar"><i style="width:21%;background:var(--green)"></i></div><span class="pct">21%</span></div>
+              <div class="reset">resets 5:10 PM</div>
+              <div class="row"><span class="lbl">7d</span><div class="bar"><i style="width:54%;background:var(--green)"></i></div><span class="pct">54%</span></div>
+              <div class="reset">resets Wed</div>
+            </div>
+          </div>
+          <div class="toggles">
+            <div class="toggle">Mute prompt sound <div class="switch off"></div></div>
+            <div class="toggle">Start at login <div class="switch"></div></div>
+          </div>
+          <div class="actions"><div class="btn">Setup&hellip;</div><div class="btn quit">Quit</div></div>
+        </div>
+        <div class="col right">
+          <div class="pcard" style="gap:10px;">
+            <div class="dh" style="font-size:11px;font-weight:700;color:var(--text2);letter-spacing:.04em;">5H WINDOW - LAST 12H</div>
+            <svg class="spark" style="height:58px" viewBox="0 0 300 58" preserveAspectRatio="none">
+              <path d="M0,52 L25,50 L50,46 L75,47 L100,40 L125,35 L150,36 L175,27 L200,22 L225,24 L250,16 L275,11 L300,8" fill="none" stroke="#0a84ff" stroke-width="1.5"/>
+              <path d="M0,54 L25,53 L50,52 L75,52 L100,50 L125,49 L150,50 L175,47 L200,45 L225,46 L250,44 L275,43 L300,42" fill="none" stroke="#bf5af2" stroke-width="1.5"/>
+            </svg>
+            <div class="legend"><span><i style="background:#0a84ff"></i>Claude</span><span><i style="background:#bf5af2"></i>Codex</span></div>
+            <div class="kv"><span class="k">Claude pace</span><span class="v warn">+9%/h &middot; caps ~3:40 PM</span></div>
+            <div class="kv"><span class="k">Cost today</span><span class="v">$23.90 est.</span></div>
+            <div class="mrow"><span class="m">Opus 4.8</span><span class="tok">1.2M tok</span><div class="mbar"><i style="width:66%"></i></div><span class="cost">$14.10</span></div>
+            <div class="mrow"><span class="m">Sonnet 4.6</span><span class="tok">3.4M tok</span><div class="mbar"><i style="width:29%"></i></div><span class="cost">$6.20</span></div>
+            <div class="estnote">est. from transcripts at API list prices</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="proscons wide">
+      <b>"Insights" toggle in header widens the popover 340 -> 560pt; right column holds charts + cost.</b> State remembered across opens.<br>
+      + Glance data and detail visible simultaneously; most room for charts<br>
+      + Height stays compact<br>
+      - Largest visual change; 560pt popover starts feeling like a window, which is what you wanted to avoid<br>
+      - Two-column SwiftUI restructure of HubPanel (biggest diff of the three)
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Beacon Hub - Trends Tab Depth Options</title>
+<style>
+  :root {
+    --panel-bg: #28282c;
+    --card: #38383e;
+    --card2: #404048;
+    --text: #f2f2f4;
+    --text2: #9a9aa2;
+    --text3: #6e6e76;
+    --green: #34c759;
+    --orange: #ff9f0a;
+    --red: #ff453a;
+    --blue: #0a84ff;
+    --purple: #bf5af2;
+    --sep: rgba(255,255,255,0.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #161618;
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    padding: 40px;
+  }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+  .sub { color: var(--text2); font-size: 13px; margin-bottom: 36px; max-width: 760px; line-height: 1.5; }
+  .options { display: flex; gap: 44px; align-items: flex-start; flex-wrap: wrap; }
+  .option { display: flex; flex-direction: column; gap: 14px; }
+  .option h2 { font-size: 15px; font-weight: 600; }
+  .option h2 .tag {
+    font-size: 11px; font-weight: 600; color: var(--blue);
+    border: 1px solid var(--blue); border-radius: 99px;
+    padding: 2px 8px; margin-left: 8px; vertical-align: 2px;
+  }
+  .option h3 { font-size: 12px; font-weight: 600; color: var(--text2); }
+  .proscons { width: 340px; font-size: 12px; color: var(--text2); line-height: 1.5; }
+  .proscons b { color: var(--text); }
+
+  .popover {
+    width: 340px;
+    background: var(--panel-bg);
+    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+    padding: 14px;
+    display: flex; flex-direction: column; gap: 12px;
+    position: relative;
+  }
+  .popover::before {
+    content: ""; position: absolute; top: -7px; left: 50%; margin-left: -7px;
+    width: 14px; height: 14px; background: var(--panel-bg);
+    border-left: 1px solid rgba(255,255,255,0.10);
+    border-top: 1px solid rgba(255,255,255,0.10);
+    transform: rotate(45deg); border-radius: 3px 0 0 0;
+  }
+
+  .hdr { display: flex; align-items: center; gap: 9px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px rgba(52,199,89,.7); }
+  .hdr .name { font-size: 13px; font-weight: 600; }
+  .hdr .sync { font-size: 11px; color: var(--text3); margin-left: auto; }
+
+  .seg { display: flex; background: rgba(255,255,255,0.08); border-radius: 8px; padding: 2px; }
+  .seg span {
+    flex: 1; text-align: center; font-size: 11px; font-weight: 600;
+    padding: 4px 0; border-radius: 6px; color: var(--text2);
+  }
+  .seg span.on { background: var(--card2); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+  .seg.mini { width: 150px; padding: 2px; }
+  .seg.mini span { font-size: 10px; padding: 3px 0; }
+  .tabrow { display: flex; align-items: center; justify-content: space-between; }
+
+  .pcard { background: var(--card); border-radius: 10px; padding: 11px; display: flex; flex-direction: column; gap: 10px; }
+  .dh { font-size: 11px; font-weight: 700; color: var(--text2); letter-spacing: .04em; }
+  .spark { width: 100%; }
+  .axis { display: flex; justify-content: space-between; font-size: 9px; color: var(--text3); margin-top: -4px; }
+  .legend { display: flex; gap: 14px; font-size: 10px; color: var(--text2); }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .kv { display: flex; justify-content: space-between; font-size: 12px; }
+  .kv .k { color: var(--text2); }
+  .kv .v { font-weight: 600; }
+  .kv .v.warn { color: var(--orange); }
+  .kv .v.ok { color: var(--green); }
+  .mrow { display: flex; align-items: baseline; gap: 8px; font-size: 11px; }
+  .mrow .m { width: 86px; color: var(--text); font-weight: 600; }
+  .mrow .tok { color: var(--text2); width: 64px; }
+  .mrow .mbar { flex: 1; height: 4px; border-radius: 99px; background: rgba(255,255,255,0.10); }
+  .mrow .mbar i { display: block; height: 100%; border-radius: 99px; background: var(--blue); }
+  .mrow .cost { width: 50px; text-align: right; font-weight: 600; }
+  .estnote { font-size: 9px; color: var(--text3); }
+  .actions { display: flex; gap: 8px; padding-top: 10px; border-top: 1px solid var(--sep); }
+  .btn { flex: 1; text-align: center; font-size: 11px; font-weight: 600; background: rgba(255,255,255,0.09); border-radius: 7px; padding: 6px 0; color: var(--text); }
+  .btn.quit { color: var(--red); }
+  .gapnote { font-size: 9px; color: var(--text3); font-style: italic; }
+  .pair { display: flex; gap: 24px; flex-wrap: wrap; }
+  .state { display: flex; flex-direction: column; gap: 10px; }
+</style>
+</head>
+<body>
+
+<h1>Trends tab - how deep?</h1>
+<div class="sub">
+  Both variants live behind the "Now | Trends" segmented control you approved (Option B). The "Now" tab is unchanged - exact current panel with 5h/7d bars.
+  This page only compares the Trends tab itself: <b>Variant 1</b> has a 6h/24h/7d period selector that rescopes the chart and the cost section together;
+  <b>Variant 2</b> is fixed at 24h with no extra control. Variant 1 is shown in two states so you can see how the 7d view differs.
+</div>
+
+<div class="options">
+
+  <!-- ============ VARIANT 1 ============ -->
+  <div class="option">
+    <h2>Variant 1 - Period selector</h2>
+    <div class="pair">
+
+      <!-- state: 24h -->
+      <div class="state">
+        <h3>State: 24h selected</h3>
+        <div class="popover">
+          <div class="hdr"><div class="dot"></div><div class="name">Beacon</div><div class="sync">synced 12s ago</div></div>
+          <div class="seg"><span>Now</span><span class="on">Trends</span></div>
+
+          <div class="pcard">
+            <div class="tabrow">
+              <div class="dh">5H WINDOW</div>
+              <div class="seg mini"><span>6h</span><span class="on">24h</span><span>7d</span></div>
+            </div>
+            <svg class="spark" style="height:64px" viewBox="0 0 300 64" preserveAspectRatio="none">
+              <!-- Claude: sawtooth, two resets over 24h -->
+              <path d="M0,50 L20,44 L40,36 L60,28 L75,20 L75,58 L95,52 L115,46 L135,38 L150,30 L150,58 L170,50 L195,40 L220,32 L245,26 L270,18 L300,10" fill="none" stroke="#0a84ff" stroke-width="1.5"/>
+              <!-- Codex: shallow -->
+              <path d="M0,58 L40,56 L75,55 L75,60 L115,58 L150,57 L150,60 L195,57 L245,54 L300,51" fill="none" stroke="#bf5af2" stroke-width="1.5"/>
+              <line x1="0" y1="8" x2="300" y2="8" stroke="rgba(255,69,58,.4)" stroke-width="1" stroke-dasharray="3,3"/>
+            </svg>
+            <div class="axis"><span>2 PM yest</span><span>2 AM</span><span>now</span></div>
+            <div class="legend"><span><i style="background:#0a84ff"></i>Claude 62%</span><span><i style="background:#bf5af2"></i>Codex 21%</span></div>
+            <div class="kv"><span class="k">Claude pace</span><span class="v warn">+9%/h &middot; caps ~3:40 PM</span></div>
+            <div class="kv"><span class="k">Codex pace</span><span class="v ok">+2%/h &middot; safe past reset</span></div>
+          </div>
+
+          <div class="pcard" style="gap:8px;">
+            <div class="dh">COST - TODAY</div>
+            <div class="kv"><span class="k">Total</span><span class="v">$23.90 est.</span></div>
+            <div class="mrow"><span class="m">Opus 4.8</span><span class="tok">1.2M tok</span><div class="mbar"><i style="width:66%"></i></div><span class="cost">$14.10</span></div>
+            <div class="mrow"><span class="m">Sonnet 4.6</span><span class="tok">3.4M tok</span><div class="mbar"><i style="width:29%"></i></div><span class="cost">$6.20</span></div>
+            <div class="mrow"><span class="m">GPT-5.4</span><span class="tok">1.8M tok</span><div class="mbar"><i style="width:12%;background:#bf5af2"></i></div><span class="cost">$2.50</span></div>
+            <div class="mrow"><span class="m">Haiku 4.5</span><span class="tok">2.1M tok</span><div class="mbar"><i style="width:5%"></i></div><span class="cost">$1.10</span></div>
+            <div class="estnote">est. from transcripts at API list prices - plan is flat-rate</div>
+          </div>
+
+          <div class="actions"><div class="btn">Setup&hellip;</div><div class="btn">Forget / re-pair</div><div class="btn quit">Quit</div></div>
+        </div>
+      </div>
+
+      <!-- state: 7d -->
+      <div class="state">
+        <h3>State: 7d selected (week one - sparse history)</h3>
+        <div class="popover">
+          <div class="hdr"><div class="dot"></div><div class="name">Beacon</div><div class="sync">synced 12s ago</div></div>
+          <div class="seg"><span>Now</span><span class="on">Trends</span></div>
+
+          <div class="pcard">
+            <div class="tabrow">
+              <div class="dh">7D WINDOW</div>
+              <div class="seg mini"><span>6h</span><span>24h</span><span class="on">7d</span></div>
+            </div>
+            <svg class="spark" style="height:64px" viewBox="0 0 300 64" preserveAspectRatio="none">
+              <!-- 7d pct: slow climb, gaps where Mac slept / pre-ship -->
+              <path d="M130,54 L150,50 L168,47" fill="none" stroke="#0a84ff" stroke-width="1.5"/>
+              <path d="M186,44 L210,40 L235,36 L258,32 L280,28 L300,25" fill="none" stroke="#0a84ff" stroke-width="1.5"/>
+              <path d="M130,58 L168,56" fill="none" stroke="#bf5af2" stroke-width="1.5"/>
+              <path d="M186,55 L235,50 L300,44" fill="none" stroke="#bf5af2" stroke-width="1.5"/>
+            </svg>
+            <div class="axis"><span>Jun 3</span><span>Jun 6</span><span>now</span></div>
+            <div class="legend"><span><i style="background:#0a84ff"></i>Claude 7d 38%</span><span><i style="background:#bf5af2"></i>Codex 7d 54%</span></div>
+            <div class="gapnote">line breaks = Hub not running (Mac asleep); history starts at install</div>
+            <div class="kv"><span class="k">Claude pace</span><span class="v warn">+9%/h &middot; caps ~3:40 PM</span></div>
+            <div class="kv"><span class="k">Codex pace</span><span class="v ok">+2%/h &middot; safe past reset</span></div>
+          </div>
+
+          <div class="pcard" style="gap:8px;">
+            <div class="dh">COST - THIS WEEK</div>
+            <div class="kv"><span class="k">Total</span><span class="v">$148.20 est.</span></div>
+            <div class="mrow"><span class="m">Opus 4.8</span><span class="tok">8.4M tok</span><div class="mbar"><i style="width:72%"></i></div><span class="cost">$96.40</span></div>
+            <div class="mrow"><span class="m">Sonnet 4.6</span><span class="tok">19.1M tok</span><div class="mbar"><i style="width:24%"></i></div><span class="cost">$31.80</span></div>
+            <div class="mrow"><span class="m">GPT-5.4</span><span class="tok">9.2M tok</span><div class="mbar"><i style="width:10%;background:#bf5af2"></i></div><span class="cost">$13.60</span></div>
+            <div class="mrow"><span class="m">Haiku 4.5</span><span class="tok">11.7M tok</span><div class="mbar"><i style="width:5%"></i></div><span class="cost">$6.40</span></div>
+            <div class="estnote">cost is complete from day one (transcripts) even where the chart is sparse</div>
+          </div>
+
+          <div class="actions"><div class="btn">Setup&hellip;</div><div class="btn">Forget / re-pair</div><div class="btn quit">Quit</div></div>
+        </div>
+      </div>
+
+    </div>
+    <div class="proscons">
+      <b>One mini selector rescopes chart + cost together.</b><br>
+      + Answers "this week" questions: weekly cost per model is accurate from day one (transcripts)<br>
+      + 7d chart shows your weekly rhythm once history accrues<br>
+      - Second segmented control inside a tab - two levels of switching in a small popover<br>
+      - 7d chart is mostly empty for the first week and gappy if the Mac sleeps a lot
+    </div>
+  </div>
+
+  <!-- ============ VARIANT 2 ============ -->
+  <div class="option">
+    <h2>Variant 2 - Fixed 24h <span class="tag">recommended v1</span></h2>
+    <div class="state">
+      <h3>Single state - no extra controls</h3>
+      <div class="popover">
+        <div class="hdr"><div class="dot"></div><div class="name">Beacon</div><div class="sync">synced 12s ago</div></div>
+        <div class="seg"><span>Now</span><span class="on">Trends</span></div>
+
+        <div class="pcard">
+          <div class="dh">5H WINDOW - LAST 24H</div>
+          <svg class="spark" style="height:64px" viewBox="0 0 300 64" preserveAspectRatio="none">
+            <path d="M0,50 L20,44 L40,36 L60,28 L75,20 L75,58 L95,52 L115,46 L135,38 L150,30 L150,58 L170,50 L195,40 L220,32 L245,26 L270,18 L300,10" fill="none" stroke="#0a84ff" stroke-width="1.5"/>
+            <path d="M0,58 L40,56 L75,55 L75,60 L115,58 L150,57 L150,60 L195,57 L245,54 L300,51" fill="none" stroke="#bf5af2" stroke-width="1.5"/>
+            <line x1="0" y1="8" x2="300" y2="8" stroke="rgba(255,69,58,.4)" stroke-width="1" stroke-dasharray="3,3"/>
+          </svg>
+          <div class="axis"><span>2 PM yest</span><span>2 AM</span><span>now</span></div>
+          <div class="legend"><span><i style="background:#0a84ff"></i>Claude 62%</span><span><i style="background:#bf5af2"></i>Codex 21%</span></div>
+          <div class="kv"><span class="k">Claude pace</span><span class="v warn">+9%/h &middot; caps ~3:40 PM</span></div>
+          <div class="kv"><span class="k">Codex pace</span><span class="v ok">+2%/h &middot; safe past reset</span></div>
+        </div>
+
+        <div class="pcard" style="gap:8px;">
+          <div class="dh">COST - TODAY</div>
+          <div class="kv"><span class="k">Total</span><span class="v">$23.90 est.</span></div>
+          <div class="mrow"><span class="m">Opus 4.8</span><span class="tok">1.2M tok</span><div class="mbar"><i style="width:66%"></i></div><span class="cost">$14.10</span></div>
+          <div class="mrow"><span class="m">Sonnet 4.6</span><span class="tok">3.4M tok</span><div class="mbar"><i style="width:29%"></i></div><span class="cost">$6.20</span></div>
+          <div class="mrow"><span class="m">GPT-5.4</span><span class="tok">1.8M tok</span><div class="mbar"><i style="width:12%;background:#bf5af2"></i></div><span class="cost">$2.50</span></div>
+          <div class="mrow"><span class="m">Haiku 4.5</span><span class="tok">2.1M tok</span><div class="mbar"><i style="width:5%"></i></div><span class="cost">$1.10</span></div>
+          <div class="kv" style="margin-top:4px;padding-top:8px;border-top:1px solid var(--sep);"><span class="k">This week</span><span class="v">$148.20 est.</span></div>
+          <div class="estnote">est. from transcripts at API list prices - plan is flat-rate</div>
+        </div>
+
+        <div class="actions"><div class="btn">Setup&hellip;</div><div class="btn">Forget / re-pair</div><div class="btn quit">Quit</div></div>
+      </div>
+    </div>
+    <div class="proscons">
+      <b>No period control. Chart = 24h of 5h-window pct. Cost = today per model, plus a single "this week" total line.</b><br>
+      + Zero extra chrome; tab is instantly readable<br>
+      + The one-line weekly total covers the main "this week" question without a 7d chart<br>
+      + Fully useful on day one (no sparse-history state to design for)<br>
+      - No weekly per-model split, no 7d chart - if you want those later, this layout grows into Variant 1 by adding the mini selector
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
