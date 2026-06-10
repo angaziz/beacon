@@ -1,9 +1,11 @@
 import AppKit
+import SwiftUI
 import BeaconHubKit
 
-// NSStatusItem + NSMenu. Mirrors link status + last-sync age, the four usage values, any provider
-// error strings, a pairing hint, and Quit. Pure display; AppDelegate pushes state in. Main-thread only.
-// NSObject so the `fixLine` remediation item can use Obj-C target-action (#selector(openLink)).
+// NSStatusItem + NSPopover hosting the SwiftUI HubPanel (design 4A). Mirrors link status + last-sync age,
+// the four usage values, any provider error strings, a pairing hint, and Quit. Pure display; AppDelegate
+// pushes state in via the same setters and `on*` closures as before. The status-bar icon and the prompt
+// sound stay here (container-independent). Main-thread only. NSObject for Obj-C target-action (togglePopover).
 @MainActor
 final class MenubarController: NSObject {
     enum Link {
@@ -18,16 +20,14 @@ final class MenubarController: NSObject {
     enum LoginItemStatus { case enabled, disabled, requiresApproval }
 
     private let statusItem: NSStatusItem
-    private let menu = NSMenu()
+    private let popover = NSPopover()
+    private let model = HubViewModel()
 
     private var link: Link = .searching
-    private var lastSync: Date?
-    private var usage: Usage = Usage(claude: .unavailable, codex: .unavailable)
-    private var errors: [String] = []
     private var alert: String?         // persistent loud surface for an undeliverable prompt; nil => none.
     private var bridgeAlert: String?   // bridge bind failure; nil => none. Independent of `alert`.
 
-    // URL the fixLine remediation item opens; set per-state in render, read by openLink.
+    // URL the fix link opens; set per-state in setLink, read by openLink.
     private var fixURL: URL?
 
     // Re-opens the first-run status window; AppDelegate wires it to FirstRunWindowController.show().
@@ -37,35 +37,8 @@ final class MenubarController: NSObject {
     var onToggleLoginItem: ((Bool) -> Void)?   // desired on/off; AppDelegate re-reads truth + calls setLoginItemState.
     var onForgetDevice: (() -> Void)?
     var onRetryPairing: (() -> Void)?          // in-app "try again" after a .pairingFailed escalation (issue #17).
-    var onMenuWillOpen: (() -> Void)?          // accessory app: menuWillOpen is the reliable login-item refresh hook.
+    var onMenuWillOpen: (() -> Void)?          // accessory app: popoverWillShow is the reliable login-item refresh hook.
 
-    // Absolute HH:MM avoids a stale relative age with no refresh timer.
-    private let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.timeStyle = .short
-        f.dateStyle = .none
-        return f
-    }()
-
-    private let alertLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    private let fixLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    // In-app "try again" after a pairing-failed escalation (issue #17); shown ONLY for .pairingFailed.
-    private let retryLine = NSMenuItem(title: "Try pairing again", action: nil, keyEquivalent: "")
-    private let syncLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    private let claudeLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    private let codexLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    private let claudeRow = UsageRowView(provider: "Claude")
-    private let codexRow = UsageRowView(provider: "Codex")
-    private let pairLine = NSMenuItem(title: "Pair: enter the code shown on the device", action: nil, keyEquivalent: "")
-    private var errorItems: [NSMenuItem] = []
-
-    // Auto-start at login (issue #16); checkmark reflects the RE-READ SMAppService status, never the
-    // requested value. Title widens to "(approve in Login Items)" when registration needs user approval.
-    private let loginItemLine = NSMenuItem(title: "Start at login", action: nil, keyEquivalent: "")
-
-    // Audible cue when a prompt lands on the device, plus an opt-out (the device screen is easy to miss).
-    private let muteLine = NSMenuItem(title: "Mute prompt sound", action: nil, keyEquivalent: "")
     // Bundled custom chime; falls back to a system sound when run without the .app bundle (bare dev build).
     private let promptSound: NSSound? = {
         if let url = Bundle.main.url(forResource: "beacon-prompt", withExtension: "wav") {
@@ -81,156 +54,91 @@ final class MenubarController: NSObject {
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
-        buildMenu()
-        render()
-    }
-
-    private func buildMenu() {
-        // The alert sits at the very top and is hidden until set, so an undeliverable prompt is the
-        // first thing the user sees on opening the menu.
-        alertLine.isEnabled = false; alertLine.isHidden = true; menu.addItem(alertLine)
-        statusLine.isEnabled = false; menu.addItem(statusLine)
-        // Remediation link, hidden unless a fault state (bluetoothOff/unauthorized) sets a fixURL.
-        fixLine.target = self; fixLine.action = #selector(openLink); fixLine.isHidden = true
-        menu.addItem(fixLine)
-        retryLine.target = self; retryLine.action = #selector(retryPairing); retryLine.isHidden = true
-        menu.addItem(retryLine)
-        syncLine.isEnabled = false; menu.addItem(syncLine)
-        menu.addItem(.separator())
-        claudeLine.view = claudeRow
-        codexLine.view = codexRow
-        for item in [claudeLine, codexLine] { item.isEnabled = false; menu.addItem(item) }
-        menu.addItem(.separator())
-        pairLine.isEnabled = false
-        menu.addItem(pairLine)
-        menu.addItem(.separator())
-        muteLine.target = self; muteLine.action = #selector(toggleMute)
-        muteLine.state = promptSoundMuted ? .on : .off
-        menu.addItem(muteLine)
-        loginItemLine.target = self; loginItemLine.action = #selector(toggleLoginItem)
-        menu.addItem(loginItemLine)
-        menu.addItem(.separator())
-        // Put SF Symbols in the menu's reserved state-image column (showsStateColumn defaults on, and the
-        // checkmark toggles above need it) so the leading gutter reads as deliberate icons, not dead space.
-        // `image` lands in the separate icon column AFTER the gutter, leaving it blank; `offStateImage` is
-        // what AppKit draws in the state column while state is .off (the default for these action rows).
-        // Template images tint to the menu text color and invert white-on-blue when highlighted.
-        func symbol(_ name: String) -> NSImage? {
-            let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)
-            img?.isTemplate = true
-            return img
-        }
-        let setupLine = NSMenuItem(title: "Setup…", action: #selector(openSetup), keyEquivalent: "")
-        setupLine.target = self
-        setupLine.offStateImage = symbol("gearshape")
-        menu.addItem(setupLine)
-        let forgetLine = NSMenuItem(title: "Forget device / re-pair", action: #selector(forgetDevice), keyEquivalent: "")
-        forgetLine.target = self
-        forgetLine.offStateImage = symbol("arrow.triangle.2.circlepath")
-        menu.addItem(forgetLine)
-        let quitLine = NSMenuItem(title: "Quit Beacon", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        quitLine.offStateImage = symbol("power")
-        menu.addItem(quitLine)
-        menu.delegate = self   // accessory app: refresh login-item status on menu open (menuWillOpen).
-        statusItem.menu = menu
-    }
-
-    // Render the RE-READ login-item truth (issue #16). requiresApproval keeps the checkmark off but
-    // labels the row so the user knows the toggle is pending their approval in System Settings.
-    func setLoginItemState(_ status: LoginItemStatus) {
-        switch status {
-        case .enabled:          loginItemLine.state = .on;  loginItemLine.title = "Start at login"
-        case .disabled:         loginItemLine.state = .off; loginItemLine.title = "Start at login"
-        case .requiresApproval: loginItemLine.state = .off; loginItemLine.title = "Start at login (approve in Login Items)"
-        }
-    }
-
-    func setLink(_ link: Link) { self.link = link; render() }
-    func setAlert(_ message: String?) { self.alert = message; render() }
-    func setBridgeAlert(_ message: String?) { self.bridgeAlert = message; render() }
-    func setUsage(_ usage: Usage, errors: [String]) {
-        self.usage = usage
-        self.errors = errors
-        self.lastSync = Date()
-        render()
-    }
-
-    private func render() {
-        // Bridge alert takes priority (safety-critical). One reused alertLine, so each branch sets its
-        // title state explicitly -- clearing attributedTitle on the others so stale red can't leak.
-        if let bridgeAlert = bridgeAlert {
-            alertLine.attributedTitle = NSAttributedString(
-                string: "! \(bridgeAlert)",
-                attributes: [.foregroundColor: NSColor.systemRed])
-            alertLine.isHidden = false
-        } else if let alert = alert {
-            alertLine.attributedTitle = nil
-            alertLine.title = "! \(alert) -- couldn't show prompt"
-            alertLine.isHidden = false
-        } else {
-            alertLine.attributedTitle = nil
-            alertLine.isHidden = true
-        }
-
-        switch link {
-        case .bluetoothOff:        statusLine.title = "Bluetooth is off"
-        case .unauthorized:        statusLine.title = "Bluetooth permission needed"
-        case .unavailable:         statusLine.title = "Bluetooth unavailable"
-        case .searching:           statusLine.title = "Searching for device…"
-        case .connecting(let n):   statusLine.title = "Connecting to \(n)…"
-        case .connected(let n):    statusLine.title = "Connected \(n)"
-        case .reconnecting:        statusLine.title = "Disconnected — reconnecting"
-        case .pairingFailed:       statusLine.title = "Pairing failed"
-        }
-
-        // In-app retry affordance, shown only when pairing has escalated to a failure.
-        if case .pairingFailed = link { retryLine.isHidden = false } else { retryLine.isHidden = true }
-
-        // Two distinct remediations; the URL is stored so a single openLink selector serves both.
-        switch link {
-        case .bluetoothOff:
-            fixLine.title = "Open Bluetooth settings…"
-            fixURL = SettingsLinks.bluetooth
-            fixLine.isEnabled = true; fixLine.isHidden = false
-        case .unauthorized:
-            fixLine.title = "Open Privacy settings…"
-            fixURL = SettingsLinks.privacyBluetooth
-            fixLine.isEnabled = true; fixLine.isHidden = false
-        default:
-            fixURL = nil
-            fixLine.isEnabled = false; fixLine.isHidden = true
-        }
-
+        wireModel()
+        buildPopover()
+        installQuitShortcut()
         applyBarIcon()
+    }
 
-        if let last = lastSync {
-            syncLine.title = "Last sync: \(timeFormatter.string(from: last))"
+    // Forward the panel's intents to the public closures / internal methods. Weak captures: the controller
+    // owns the model, so a strong capture here would be a retain cycle.
+    private func wireModel() {
+        model.onToggleMute = { [weak self] in self?.promptSoundMuted = self?.model.muted ?? false }
+        model.onRequestLoginItem = { [weak self] on in self?.onToggleLoginItem?(on) }
+        model.onSetup = { [weak self] in self?.onOpenSetup?() }
+        model.onForget = { [weak self] in self?.onForgetDevice?() }
+        model.onRetryPairing = { [weak self] in self?.onRetryPairing?() }
+        model.onOpenFixURL = { [weak self] in self?.openLink() }
+        model.onQuit = { NSApp.terminate(nil) }
+    }
+
+    private func buildPopover() {
+        popover.behavior = .transient
+        popover.delegate = self
+        // closeAndRun: dismiss the popover, then run the action. performClose animates asynchronously, so
+        // an action that opens a modal/first-run window proceeds while the popover slides away behind it.
+        let panel = HubPanel(model: model) { [weak self] action in
+            self?.popover.performClose(nil)
+            action()
+        }
+        let host = NSHostingController(rootView: panel)
+        // Keep preferredContentSize tracking the SwiftUI intrinsic size; without this the popover gets a
+        // stale/short height and positions itself too high, clipping the header off the top of the screen.
+        host.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = host
+        if let button = statusItem.button {
+            button.target = self
+            button.action = #selector(togglePopover)
+            button.sendAction(on: [.leftMouseUp])
+        }
+    }
+
+    // Accessory apps have no main menu, so ⌘Q has nowhere to bind. Install a minimal application menu with
+    // a Quit item; its key equivalent fires while the app is active (it is, after activate-on-show).
+    private func installQuitShortcut() {
+        let main = NSMenu()
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Quit Beacon", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+        NSApp.mainMenu = main
+    }
+
+    @objc private func togglePopover() {
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(nil)
         } else {
-            syncLine.title = "Last sync: never"
+            NSApp.activate(ignoringOtherApps: true)   // status-bar popover: SwiftUI controls need a key window
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
+    }
 
-        refreshUsageRows()
+    // Render the RE-READ login-item truth (issue #16). requiresApproval keeps the toggle off but labels
+    // the row so the user knows the toggle is pending their approval in System Settings.
+    func setLoginItemState(_ status: LoginItemStatus) { model.loginItem = status }
 
-        // Pairing hint is only actionable while looking for / connecting to a device.
+    func setLink(_ link: Link) {
+        self.link = link
+        model.link = link
+        // Two distinct fix remediations; the URL is stored so a single openLink serves both.
         switch link {
-        case .searching, .connecting, .pairingFailed: pairLine.isHidden = false
-        default: pairLine.isHidden = true
+        case .bluetoothOff: fixURL = SettingsLinks.bluetooth
+        case .unauthorized: fixURL = SettingsLinks.privacyBluetooth
+        default:            fixURL = nil
         }
+        applyBarIcon()
+    }
 
-        // Rebuild the error block in place (above the pairing hint).
-        for item in errorItems { menu.removeItem(item) }
-        errorItems.removeAll()
-        guard !errors.isEmpty else { return }
-        var at = menu.index(of: pairLine)
-        let sep = NSMenuItem.separator()
-        menu.insertItem(sep, at: at); at += 1
-        errorItems.append(sep)
-        for e in errors {
-            let item = NSMenuItem(title: "! \(e)", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.insertItem(item, at: at); at += 1
-            errorItems.append(item)
-        }
+    func setAlert(_ message: String?) { alert = message; model.alert = message; applyBarIcon() }
+    func setBridgeAlert(_ message: String?) { bridgeAlert = message; model.bridgeAlert = message; applyBarIcon() }
+
+    func setUsage(_ usage: Usage, errors: [String]) {
+        model.usage = usage
+        model.errors = errors
+        model.lastSync = Date()
+        model.now = Date()   // restamp so reset hints stay fresh even while the popover is open
     }
 
     // contentTintColor must be assigned (color OR nil) on EVERY call: AppKit only tints template images,
@@ -238,7 +146,7 @@ final class MenubarController: NSObject {
     private func applyBarIcon() {
         guard let button = statusItem.button else { return }
 
-        // An active alert overrides the link state so it's visible without opening the menu.
+        // An active alert overrides the link state so it's visible without opening the panel.
         let symbol: String
         let tint: NSColor?
         let description: String
@@ -256,12 +164,15 @@ final class MenubarController: NSObject {
                 // Orange (recoverable via "try again"), matching the bluetoothOff/unauthorized convention;
                 // red is reserved for the bridge/alert safety surface.
                 symbol = "exclamationmark.triangle.fill"; tint = .systemOrange; description = "Beacon: pairing failed"
+            // Connectivity states share the connected color (nil => adaptive label color, fully visible in
+            // dark mode); status is read off the glyph instead. Stripped beacon (slash) = not linked,
+            // probing dot = handshaking, full beacon = linked.
             case .searching:
-                symbol = "antenna.radiowaves.left.and.right"; tint = .secondaryLabelColor; description = "Beacon: searching"
+                symbol = "antenna.radiowaves.left.and.right.slash"; tint = nil; description = "Beacon: searching"
             case .connecting:
-                symbol = "antenna.radiowaves.left.and.right"; tint = .secondaryLabelColor; description = "Beacon: connecting"
+                symbol = "dot.radiowaves.left.and.right"; tint = nil; description = "Beacon: connecting"
             case .reconnecting:
-                symbol = "antenna.radiowaves.left.and.right"; tint = .secondaryLabelColor; description = "Beacon: reconnecting"
+                symbol = "dot.radiowaves.left.and.right"; tint = nil; description = "Beacon: reconnecting"
             case .connected:
                 symbol = "antenna.radiowaves.left.and.right"; tint = nil; description = "Beacon: connected"
             }
@@ -281,37 +192,15 @@ final class MenubarController: NSObject {
         promptSound?.play()
     }
 
-    @objc private func openSetup() { onOpenSetup?() }
-
-    @objc private func toggleMute() {
-        promptSoundMuted.toggle()
-        muteLine.state = promptSoundMuted ? .on : .off
-    }
-
-    // Request the opposite of the current checkmark; AppDelegate re-reads truth and calls back
-    // setLoginItemState (no optimistic flip, since ad-hoc signing can land on .requiresApproval).
-    @objc private func toggleLoginItem() { onToggleLoginItem?(loginItemLine.state != .on) }
-
-    @objc private func forgetDevice() { onForgetDevice?() }
-
-    @objc private func retryPairing() { onRetryPairing?() }
-
-    @objc private func openLink() {
+    private func openLink() {
         SettingsLinks.open(fixURL ?? SettingsLinks.fallback)
-    }
-
-    // Re-stamp the usage rows with the current time so the reset hint ("resets 2:40pm" vs "Fri") is
-    // fresh; called from render (every 45s poll / state change) and on menu open (between polls).
-    private func refreshUsageRows() {
-        let now = Date()
-        claudeRow.update(usage.claude, now: now)
-        codexRow.update(usage.codex, now: now)
     }
 }
 
-extension MenubarController: NSMenuDelegate {
-    func menuWillOpen(_ menu: NSMenu) {
+extension MenubarController: NSPopoverDelegate {
+    // accessory app: popoverWillShow is the reliable login-item refresh hook (mirrors the old menuWillOpen).
+    func popoverWillShow(_ notification: Notification) {
         onMenuWillOpen?()
-        refreshUsageRows()
+        model.now = Date()   // refresh reset hints between polls
     }
 }
