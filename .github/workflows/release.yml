@@ -96,14 +96,14 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: firmware
-          path: web/flasher/firmware
-      - name: Write manifest
-        working-directory: web/flasher
+          path: site/firmware
+      - name: Assemble Pages site
         run: |
           set -euo pipefail
-          rm -f firmware/*-app.bin   # the flasher only serves the full image
-          FULL=$(basename firmware/beacon-*-full.bin)
-          cat > manifest.json <<EOF
+          cp firmware/flasher.html site/index.html
+          rm -f site/firmware/*-app.bin   # the flasher only serves the full image
+          FULL=$(basename site/firmware/beacon-*-full.bin)
+          cat > site/manifest.json <<EOF
           {
             "name": "Beacon",
             "version": "${GITHUB_REF_NAME}",
@@ -118,6 +118,6 @@ jobs:
           EOF
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: web/flasher
+          path: site
       - id: deploy
         uses: actions/deploy-pages@v4

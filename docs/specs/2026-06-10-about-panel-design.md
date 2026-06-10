@@ -39,10 +39,7 @@ Six components. The panel is **one shared, themed file** — not 7 bespoke layou
   ```python
   Import("env")
   import os
-  v = os.environ.get("FIRMWARE_VERSION", "")
-  if v.startswith("firmware-"):
-      v = v[len("firmware-"):]          # firmware-v0.1.0 => v0.1.0
-  v = v or "dev"
+  v = os.environ.get("FIRMWARE_VERSION", "") or "dev"
   env.Append(CPPDEFINES=[("FIRMWARE_VERSION", env.StringifyMacro(v))])
   ```
 - `firmware/platformio.ini` `[env:beacon]`: add `extra_scripts = pre:version.py`.
@@ -53,9 +50,8 @@ Six components. The panel is **one shared, themed file** — not 7 bespoke layou
   env:
     FIRMWARE_VERSION: ${{ github.ref_name }}
   ```
-  On `main` the release workflow is `release.yml`, triggered on `v*` tags, so `github.ref_name`
-  is already `v0.1.0` (no prefix). The `firmware-` strip in version.py is a harmless no-op here
-  and keeps it compatible with the unmerged `release-firmware.yml`/`firmware-v*` scheme.
+  Release is a single `release.yml`, triggered on `v*` tags, so `github.ref_name` is already
+  `v0.1.0` and is used verbatim (hub + firmware + flasher ship as one matched version).
 - Safety guard: `firmware/src/config/version.h` provides the `#ifndef FIRMWARE_VERSION
   #define ... "dev" #endif` fallback, included by every consumer (`about_panel.cpp`,
   `settings_led.cpp`) — single source rather than per-TU inline guards.
@@ -164,5 +160,5 @@ The "Tickers" row stays display-only (no `>`) — untouched.
 
 New: `firmware/version.py`, `firmware/src/core/about_format.{h,cpp}`,
 `firmware/src/ui/about_panel.{h,cpp}`, `firmware/test/test_about_format/test_main.cpp`.
-Edit: `firmware/platformio.ini`, `.github/workflows/release-firmware.yml`,
+Edit: `firmware/platformio.ini`, `.github/workflows/release.yml`,
 `firmware/src/ui/overlays.cpp`, 7 `settings_*.cpp` views.

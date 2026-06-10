@@ -76,12 +76,12 @@ beacon/
 ├── DESIGN.md               # visual design system + theme tokens (the 7 themes)
 ├── firmware/               # product firmware (PlatformIO): contracts, theme engine, carousel
 │   ├── src/                #   core/ (DataStore, HubLink, records) · hal/ · ui/ (screens, themes)
-│   └── test/               #   native unit tests (contracts, theme, datastore, carousel…)
+│   ├── test/               #   native unit tests (contracts, theme, datastore, carousel…)
+│   └── flasher.html        #   browser installer (ESP Web Tools), published to GitHub Pages on release
 ├── hub/                    # macOS menubar hub (SwiftPM): BLE central, usage pollers, buddy bridge
 │   ├── Sources/            #   BeaconHubKit (pure logic) + beacon-hub (the menubar agent)
 │   ├── Tests/              #   host unit tests
 │   └── CONTRACT.md         #   BLE protocol + hub-side policies
-├── web/flasher/            # browser-based firmware installer (ESP Web Tools, GitHub Pages)
 └── docs/
     ├── research/           # device + integrations research (hardware, APIs, prior art)
     ├── plans/ · design/specs/ # implementation plans + design specs
