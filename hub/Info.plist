@@ -16,6 +16,10 @@
        prompting. Embedded into the executable via a linker __info_plist section (see Package.swift). -->
   <key>NSBluetoothAlwaysUsageDescription</key>
   <string>Beacon Hub connects to your Beacon desk device over Bluetooth to show AI usage and relay coding-buddy prompts.</string>
+  <!-- CoreLocation (issue #54): macOS 11+ uses the when-in-use authorization model; this key is required
+       for requestWhenInUseAuthorization() or TCC silently denies. Denied => the device keeps IP geolocation. -->
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>Beacon Hub reads your Mac's location once to show an accurate place name and time zone on your Beacon device.</string>
   <!-- Menubar agent: no Dock icon. (Runtime also sets .accessory.) -->
   <key>LSUIElement</key>
   <true/>

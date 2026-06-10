@@ -2,6 +2,7 @@
 #include "core/hublink_ble.h"
 #include "core/hub_proto.h"
 #include "core/datastore.h"
+#include "core/location.h"
 #include "core/timekeep.h"
 #include "util/log.h"
 #include <Arduino.h>
@@ -35,6 +36,14 @@ static void apply_ack(const hub_ack_t& ack) {
 static void on_frame(const char* json, size_t len) {
   hub_ack_t ack;
   if (hub_parse_ack(json, len, &ack)) { apply_ack(ack); return; }
+
+  // A "loc" block (issue #54) may ride the (re)connect full frame or arrive alone. Parsed independently
+  // of usage/buddy; persist via core/location (hub source wins) + apply tz OUTSIDE any location lock.
+  hub_loc_t loc;
+  if (hub_parse_loc(json, len, &loc)) {
+    location_set_from_hub(loc.lat, loc.lon, loc.tz, loc.name);
+    if (loc.tz[0] && timekeep_tz_supported(loc.tz)) timekeep_set_tz(loc.tz);
+  }
 
   usage_rec_t u = ds_get_usage();
   buddy_rec_t b = ds_get_buddy();

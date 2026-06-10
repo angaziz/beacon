@@ -101,3 +101,13 @@ void nvs_set_location(float lat, float lon, const char* tz) {
   s_prefs.putFloat("lon", lon);
   s_prefs.putString("tz", tz ? tz : "");
 }
+
+bool nvs_get_place(char* out, size_t cap) {
+  if (!s_open || !out || !cap || !s_prefs.isKey("place")) return false;
+  String p = s_prefs.getString("place", "");
+  strncpy(out, p.c_str(), cap - 1); out[cap - 1] = 0;
+  return true;
+}
+void nvs_set_place(const char* name)   { if (s_open) s_prefs.putString("place", name ? name : ""); }
+uint8_t nvs_get_loc_src(uint8_t def)   { return s_open ? s_prefs.getUChar("loc_src", def) : def; }
+void    nvs_set_loc_src(uint8_t v)     { if (s_open) s_prefs.putUChar("loc_src", v); }

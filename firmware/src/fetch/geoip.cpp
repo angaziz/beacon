@@ -2,18 +2,25 @@
 #include "fetch/parse_geoip.h"
 #include "core/net.h"
 #include "core/nvs.h"
+#include "core/location.h"
 #include "core/timekeep.h"
 #include "util/log.h"
-#include <math.h>
 #include <string.h>
 #include <strings.h>   // strcasecmp
 
 static char s_buf[4096];   // holds ipwho.is (~1.2 KB) then the BigDataCloud reverse-geocode (~2.5 KB)
-static char s_city[48] = "--";
 
-const char* geoip_city(void) { return s_city; }
+// The place name now lives in core/location (issue #54); this stays the Settings/Home accessor and
+// returns whichever source won (hub > cached > ip). A function-local static backs the const char*.
+const char* geoip_city(void) {
+  static char s_city[48];
+  location_place(s_city, sizeof(s_city));
+  return s_city;
+}
 
 data_err_t fetch_geoip(void) {
+  if (location_source() == LOC_SRC_HUB) return ERR_NONE;   // hub CoreLocation wins; skip the IP path entirely
+
   const char* hk[] = { "User-Agent" };
   const char* hv[] = { "Mozilla/5.0 (compatible; Beacon/1.0)" };   // some IP APIs reject an empty UA
   int status = 0;
@@ -34,17 +41,13 @@ data_err_t fetch_geoip(void) {
     parse_bdc_city(s_buf, strlen(s_buf), city, sizeof(city));
 
   // "Area, City" => e.g. "Suka Asih, Bandung". Never the province; collapse "X, X" duplicates.
-  if (area[0] && city[0] && strcasecmp(area, city) != 0) snprintf(s_city, sizeof(s_city), "%s, %s", area, city);
-  else if (city[0]) snprintf(s_city, sizeof(s_city), "%s", city);
-  else if (area[0]) snprintf(s_city, sizeof(s_city), "%s", area);
+  char name[48] = "";
+  if (area[0] && city[0] && strcasecmp(area, city) != 0) snprintf(name, sizeof(name), "%s, %s", area, city);
+  else if (city[0]) snprintf(name, sizeof(name), "%s", city);
+  else if (area[0]) snprintf(name, sizeof(name), "%s", area);
 
-  // Persist only on a meaningful move (avoid NVS wear). The weather fetcher reads nvs_get_location().
-  float olat = 0, olon = 0; char otz[40] = "";
-  bool have = nvs_get_location(&olat, &olon, otz, sizeof(otz));
-  if (!have || fabsf(olat - lat) > 0.01f || fabsf(olon - lon) > 0.01f) {
-    nvs_set_location(lat, lon, tz);
-    LOGI("geoip lat=%.3f lon=%.3f tz=%s", lat, lon, tz);
-  }
+  // Persist via core/location (threshold-gated NVS write; the weather fetcher reads nvs_get_location()).
+  location_set_from_ip(lat, lon, tz, name);
   if (tz[0] && timekeep_tz_supported(tz)) timekeep_set_tz(tz);   // keep current tz if provider's is unmapped
   return ERR_NONE;
 }

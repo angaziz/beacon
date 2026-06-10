@@ -24,6 +24,17 @@ the device keeps an absent block's last values). A null/omitted window `pct` => 
 - Absent `buddy.prompt` => idle. `pct` is an integer 0..100 or JSON null (device reads null/absent as -1).
 - The device codec (`hub_parse_status`) + `test_hub_proto` assert exactly this shape.
 
+Optional `loc` block (additive `v:1` extension, issue #54). The hub sources lat/lon + `name` from
+macOS CoreLocation/CLGeocoder and `tz` from `TimeZone.current`. Independently optional, like
+`usage`/`buddy`; parsed by `hub_parse_loc`. Sent ONLY in the (re)connect full frame and in a
+loc-only frame on meaningful (> ~0.01 deg) change — **never** on the 30s heartbeat.
+
+```json
+{"v":1,"loc":{"lat":-6.91,"lon":107.61,"tz":"Asia/Jakarta","name":"Sukajadi, Bandung"}}
+```
+- Device precedence: hub `loc` > cached NVS > IP geolocation; a hub fix is never overwritten by IP.
+- Permission denied / no fix => the hub omits `loc` and the device keeps its IP-based place name.
+
 ## B. Device -> hub commands + hub acks (FROZEN, `tech.md` §7.1)
 
 ```json

@@ -91,6 +91,19 @@ bool hub_parse_status(const char* json, size_t len,
   return true;
 }
 
+bool hub_parse_loc(const char* json, size_t len, hub_loc_t* out) {
+  JsonDocument doc;
+  if (deserializeJson(doc, json, len)) return false;   // not valid JSON
+  if ((doc["v"] | 0) != 1) return false;               // unknown major version => ignore
+  JsonVariantConst l = doc["loc"];
+  if (l.isNull()) return false;                         // no loc block in this frame
+  out->lat = l["lat"] | 0.0f;
+  out->lon = l["lon"] | 0.0f;
+  copy_trunc(out->tz,   sizeof(out->tz),   l["tz"].as<const char*>());
+  copy_trunc(out->name, sizeof(out->name), l["name"].as<const char*>());
+  return true;
+}
+
 // Serialize `doc` into buf as a newline-terminated frame. Returns bytes (incl. '\n', excl. NUL) or 0.
 static size_t finish_frame(JsonDocument& doc, char* buf, size_t cap) {
   size_t need = measureJson(doc);

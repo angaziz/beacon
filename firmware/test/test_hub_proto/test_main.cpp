@@ -178,6 +178,52 @@ static void test_parse_rejects_bad_version_and_garbage(void) {
   TEST_ASSERT_FALSE(hub_parse_status(junk, strlen(junk), &u, &hu, &b, &hb));
 }
 
+// ===== loc parse (issue #54) =====
+
+static void test_parse_loc_present(void) {
+  const char* j = "{\"v\":1,\"usage\":{},\"loc\":{\"lat\":-6.91,\"lon\":107.61,"
+                  "\"tz\":\"Asia/Jakarta\",\"name\":\"Sukajadi, Bandung\"}}";
+  hub_loc_t l; memset(&l, 0, sizeof(l));
+  TEST_ASSERT_TRUE(hub_parse_loc(j, strlen(j), &l));
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, -6.91f, l.lat);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 107.61f, l.lon);
+  TEST_ASSERT_EQUAL_STRING("Asia/Jakarta", l.tz);
+  TEST_ASSERT_EQUAL_STRING("Sukajadi, Bandung", l.name);
+}
+
+static void test_parse_loc_only_frame(void) {
+  // A loc-only frame: hub_parse_loc fills it, and hub_parse_status still accepts it (valid v:1) so
+  // hub_task does not log "bad/ignored frame".
+  const char* j = "{\"v\":1,\"loc\":{\"lat\":1.0,\"lon\":2.0,\"tz\":\"UTC\",\"name\":\"Nowhere\"}}";
+  hub_loc_t l; memset(&l, 0, sizeof(l));
+  TEST_ASSERT_TRUE(hub_parse_loc(j, strlen(j), &l));
+  TEST_ASSERT_EQUAL_STRING("Nowhere", l.name);
+  usage_rec_t u; buddy_rec_t b; bool hu, hb;
+  memset(&u, 0, sizeof(u)); memset(&b, 0, sizeof(b));
+  TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
+  TEST_ASSERT_FALSE(hu); TEST_ASSERT_FALSE(hb);
+}
+
+static void test_parse_loc_absent(void) {
+  hub_loc_t l; memset(&l, 0, sizeof(l));
+  TEST_ASSERT_FALSE(hub_parse_loc(FRAME_FULL, strlen(FRAME_FULL), &l));   // no "loc" block
+  const char* v2 = "{\"v\":2,\"loc\":{\"name\":\"X\"}}";
+  TEST_ASSERT_FALSE(hub_parse_loc(v2, strlen(v2), &l));                   // wrong major version
+  const char* junk = "not json";
+  TEST_ASSERT_FALSE(hub_parse_loc(junk, strlen(junk), &l));
+}
+
+static void test_parse_loc_truncates(void) {
+  // name > 47 chars and tz > 39 chars must truncate to capacity-1, not overflow.
+  const char* j = "{\"v\":1,\"loc\":{\"lat\":0,\"lon\":0,"
+                  "\"tz\":\"0123456789012345678901234567890123456789ABCDEF\","
+                  "\"name\":\"0123456789012345678901234567890123456789012345678901234567\"}}";
+  hub_loc_t l; memset(&l, 0, sizeof(l));
+  TEST_ASSERT_TRUE(hub_parse_loc(j, strlen(j), &l));
+  TEST_ASSERT_EQUAL_size_t(sizeof(l.tz) - 1, strlen(l.tz));
+  TEST_ASSERT_EQUAL_size_t(sizeof(l.name) - 1, strlen(l.name));
+}
+
 // ===== command build =====
 
 static void test_build_permission_roundtrips(void) {
@@ -305,6 +351,10 @@ int main(int, char**) {
   RUN_TEST(test_parse_truncates_long_strings);
   RUN_TEST(test_parse_entries_capped);
   RUN_TEST(test_parse_rejects_bad_version_and_garbage);
+  RUN_TEST(test_parse_loc_present);
+  RUN_TEST(test_parse_loc_only_frame);
+  RUN_TEST(test_parse_loc_absent);
+  RUN_TEST(test_parse_loc_truncates);
   RUN_TEST(test_build_permission_roundtrips);
   RUN_TEST(test_build_permission_deny);
   RUN_TEST(test_build_overflow_returns_zero);

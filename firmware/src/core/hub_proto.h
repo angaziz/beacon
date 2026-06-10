@@ -40,6 +40,17 @@ bool hub_parse_status(const char* json, size_t len,
                       usage_rec_t* usage, bool* had_usage,
                       buddy_rec_t* buddy, bool* had_buddy);
 
+// --- Inbound: hub -> device location block (issue #54) ---
+// Parsed from a status frame's optional "loc" block. Coordinates persist for the weather fetcher; the
+// name is the CLGeocoder place shown on the time screen; tz is the IANA zone for the clock.
+typedef struct { float lat, lon; char tz[40]; char name[48]; } hub_loc_t;
+
+// Parse the optional "loc" block out of a (v:1) status frame, independently of usage/buddy (loc may
+// ride the (re)connect full frame or arrive alone in a loc-only frame). Returns true and fills *out
+// only when a "loc" object is present; false on invalid JSON, v != 1, or no "loc". Strings truncate
+// to their capacities. Kept separate from hub_parse_status so existing callers/tests stay unchanged.
+bool hub_parse_loc(const char* json, size_t len, hub_loc_t* out);
+
 // --- Outbound: device -> hub command builders ---
 // Write a newline-terminated command frame into buf. Returns bytes written (incl. the '\n', excl. the
 // NUL), or 0 on overflow / invalid args. `id` echoes the originating (short) prompt id.

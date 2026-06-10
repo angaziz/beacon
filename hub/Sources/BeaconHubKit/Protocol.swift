@@ -51,13 +51,29 @@ public struct BuddyState: Codable, Equatable {
     }
 }
 
-// One hub->device status frame. usage/buddy are independently optional (send what changed; the device
-// keeps an absent block's last values). encoded() emits the §7.1 wire form with "v":1 + a trailing \n.
+// Device location block (issue #54). The hub sources lat/lon + place name from CoreLocation/CLGeocoder
+// and tz from TimeZone.current; the device persists it (precedence hub > cached > IP). Sent ONLY in the
+// (re)connect full frame and in a loc-only frame on meaningful change -- never on the 30s heartbeat.
+public struct Loc: Codable, Equatable {
+    public var lat: Double
+    public var lon: Double
+    public var tz: String
+    public var name: String
+    public init(lat: Double, lon: Double, tz: String, name: String) {
+        self.lat = lat; self.lon = lon; self.tz = tz; self.name = name
+    }
+}
+
+// One hub->device status frame. usage/buddy/loc are independently optional (send what changed; the
+// device keeps an absent block's last values). encoded() emits the §7.1 wire form with "v":1 + a \n.
 public struct StatusFrame: Codable {
     public var usage: Usage?
     public var buddy: BuddyState?
+    public var loc: Loc?
     public let v: Int
-    public init(usage: Usage? = nil, buddy: BuddyState? = nil) { self.usage = usage; self.buddy = buddy; self.v = 1 }
+    public init(usage: Usage? = nil, buddy: BuddyState? = nil, loc: Loc? = nil) {
+        self.usage = usage; self.buddy = buddy; self.loc = loc; self.v = 1
+    }
 
     public func encoded() throws -> Data {
         let enc = JSONEncoder()

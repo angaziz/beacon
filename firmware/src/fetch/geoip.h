@@ -8,8 +8,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-data_err_t fetch_geoip(void);
-const char* geoip_city(void);   // last resolved city ("--" until known); for the Settings/Home display
+data_err_t fetch_geoip(void);   // no-op when a hub-sourced location exists (core/location precedence)
+const char* geoip_city(void);   // resolved place name ("--" until known) from core/location; Settings/Home display
 #ifdef __cplusplus
 }
 #endif
