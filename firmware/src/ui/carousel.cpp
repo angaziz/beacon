@@ -94,6 +94,7 @@ void carousel_init(void) {
   lv_obj_set_scrollbar_mode(s_pager, LV_SCROLLBAR_MODE_OFF);
   lv_obj_set_style_pad_all(s_pager, 0, 0);
   lv_obj_set_style_pad_column(s_pager, 0, 0);
+  lv_obj_add_flag(s_pager, LV_OBJ_FLAG_EVENT_BUBBLE);   // long-press climbs page->pager->screen (input.cpp)
   lv_obj_add_event_cb(s_pager, scrollend_cb, LV_EVENT_SCROLL_END, NULL);
 
   for (int i = 0; i < COUNT; i++) {
@@ -102,6 +103,7 @@ void carousel_init(void) {
     lv_obj_set_size(page, SCREEN_W, SCREEN_H);
     lv_obj_add_flag(page, LV_OBJ_FLAG_SNAPPABLE);
     lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(page, LV_OBJ_FLAG_EVENT_BUBBLE);   // bubble long-press up to the screen (input.cpp)
     lv_obj_set_style_pad_all(page, 0, 0);
     s_pages[i] = page;   // content built by on_theme() below
   }
@@ -146,4 +148,8 @@ lv_obj_t* carousel_root(void) { return s_pager; }
 void carousel_set_swipe_enabled(bool en) {
   if (en) { lv_obj_set_scroll_dir(s_pager, LV_DIR_HOR); lv_obj_add_flag(s_pager, LV_OBJ_FLAG_SCROLLABLE); }
   else    { lv_obj_clear_flag(s_pager, LV_OBJ_FLAG_SCROLLABLE); }
+}
+
+void carousel_invoke_context_action(void) {
+  if (MODULES[s_current]->context_action) MODULES[s_current]->context_action();
 }

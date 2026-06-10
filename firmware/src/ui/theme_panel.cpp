@@ -91,4 +91,5 @@ void theme_panel_open(void) {
   }
 }
 
+void theme_panel_close(void) { close_panel(); }
 bool theme_panel_is_open(void) { return s_root != nullptr; }

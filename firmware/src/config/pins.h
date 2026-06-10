@@ -17,3 +17,6 @@
 // Touch
 #define PIN_TOUCH_INT 11
 #define ADDR_TOUCH    0x5A
+
+// IMU (QMI8658, 6-axis, shared I2C). 0x6B = address pad to GND (board default); 0x6A if tied to VDD.
+#define ADDR_IMU 0x6B

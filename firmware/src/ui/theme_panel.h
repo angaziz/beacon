@@ -10,6 +10,7 @@
 extern "C" {
 #endif
 void theme_panel_open(void);
+void theme_panel_close(void);   // shake-dismiss / programmatic close (FR-PLAT-6); no-op if closed
 bool theme_panel_is_open(void);
 #ifdef __cplusplus
 }

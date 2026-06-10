@@ -10,6 +10,7 @@
 extern "C" {
 #endif
 void wifi_panel_open(void);
+void wifi_panel_close(void);   // shake-dismiss / programmatic close (FR-PLAT-6); no-op if closed
 bool wifi_panel_is_open(void);
 #ifdef __cplusplus
 }

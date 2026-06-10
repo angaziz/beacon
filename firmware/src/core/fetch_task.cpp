@@ -16,6 +16,9 @@
 // Source slots: index 0 = weather, 1..N = ticker[idx-1]. next_due holds the epoch each is due.
 #define SRC_WEATHER 0
 static uint32_t s_next_due[1 + MAX_TICKERS];
+static volatile bool s_refresh_req = false;   // set by fetch_task_refresh_now() (Core-1), cleared in the loop
+
+void fetch_task_refresh_now(void) { s_refresh_req = true; }
 
 static uint32_t cadence_of(int slot) {
   return (slot == SRC_WEATHER) ? WEATHER_CADENCE_S : DEFAULT_TICKERS[slot - 1].cadence_s;
@@ -43,6 +46,11 @@ static void fetch_task(void*) {
     net_service();   // WiFiMulti: apply saved-list changes + gated reconnect (blocks only while down)
     uint32_t now = (uint32_t)timekeep_now();
     ds_tick_staleness(now);
+
+    if (s_refresh_req) {   // long-press refresh: mark every source due now (FR-PLAT-5)
+      s_refresh_req = false;
+      for (int i = 0; i < slots; i++) s_next_due[i] = 0;
+    }
 
     bool up = net_is_up();
     if (!up) {

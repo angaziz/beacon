@@ -259,4 +259,5 @@ void wifi_panel_open(void) {
   s_timer = lv_timer_create(tick_cb, 1000, NULL);
 }
 
+void wifi_panel_close(void) { close_panel(); }
 bool wifi_panel_is_open(void) { return s_root != nullptr; }

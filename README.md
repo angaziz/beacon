@@ -33,7 +33,7 @@ Six screens, navigated by swipe + motion gestures:
 - **Coding Buddy round-trip is validated on hardware**: approve or deny a Claude Code tool-permission prompt from the device, and the Mac honors it.
 - Settings, theme picker, brightness, and preferences persist across reboots.
 
-Not built yet: motion gestures (P3) and the Spotify Now-Playing screen (P4) — see the [Roadmap](#roadmap).
+Not built yet: the Spotify Now-Playing screen (P4) — see the [Roadmap](#roadmap).
 
 ## Two-plane architecture
 
@@ -105,7 +105,7 @@ Short version — the full phased plan (requirements, acceptance, dependencies) 
 - [x] **P1 — Ambient screens**: Home + Finance on live data, with truthful loading/stale/offline states
 - [x] **P2 — Hub + AI**: macOS hub, AI Usage and Coding Buddy over BLE, running on hardware; hub onboarding/lifecycle hardening (epic [#20](https://github.com/angaziz/beacon/issues/20))
   - [ ] last item: capture real upstream payload fixtures into [`hub/CONTRACT.md`](hub/CONTRACT.md) §C
-- [ ] **P3 — Input polish**: IMU motion + richer touch gestures
+- [x] **P3 — Input polish**: IMU motion + richer touch gestures (idle dim/sleep, flick/shake, long-press, swipe-down brightness) — on-device gesture/sleep tuning pending
 - [ ] **P4 — Now-Playing**: Spotify control
 - [ ] **Explore**: Hermes agent, voice
 

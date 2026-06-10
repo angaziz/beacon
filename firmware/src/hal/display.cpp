@@ -26,6 +26,10 @@ bool display_begin() {
 
 void display_brightness(uint8_t level) { s_bus->writeC8D8(0x51, level); }
 
+// Idle sleep (FR-PLAT-7): DCS 0x28 blanks the panel (pixels off => real AMOLED power saving), 0x29
+// turns it back on. GRAM is retained, so wake needs no redraw. The caller restores brightness on wake.
+void display_set_on(bool on) { s_bus->writeCommand(on ? 0x29 : 0x28); }
+
 void display_draw_bitmap(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t* px) {
   s_gfx->draw16bitRGBBitmap(x, y, px, w, h);
 }

@@ -3,6 +3,7 @@
 #include <esp_heap_caps.h>
 #include "hal/display.h"
 #include "hal/touch.h"
+#include "ui/input.h"
 #include "config/layout.h"
 #include "util/log.h"
 
@@ -33,7 +34,15 @@ static void rounder_cb(lv_disp_drv_t* drv, lv_area_t* a) {
 
 static void indev_read_cb(lv_indev_drv_t* drv, lv_indev_data_t* data) {
   int16_t x, y;
-  if (touch_read(&x, &y)) {
+  bool down = touch_read(&x, &y);
+  // While the panel is asleep, a touch only WAKES it (handled in input_service); report RELEASED so the
+  // waking tap actuates no widget, and leave LVGL inactivity untouched so the controller drives the wake.
+  if (input_is_asleep()) {
+    if (down) input_note_wake_touch();
+    data->state = LV_INDEV_STATE_RELEASED;
+    return;
+  }
+  if (down) {
     data->state = LV_INDEV_STATE_PRESSED;
     data->point.x = x; data->point.y = y;
   } else {

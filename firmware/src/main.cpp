@@ -17,6 +17,7 @@
 #include "ui/theme.h"
 #include "ui/carousel.h"
 #include "ui/pair_overlay.h"
+#include "ui/input.h"
 #include "ui/dev_seed.h"
 
 static lv_obj_t* setup_step(lv_obj_t* card, const beacon_theme_t* t, const char* txt) {
@@ -102,6 +103,7 @@ void setup() {
   datastore_init();   // seeds finance_count + ids (screens read these at build time)
   styles_init();
   carousel_init();
+  input_init();       // P3 input layer: IMU + idle dim/sleep + touch/motion gestures (after carousel)
   if (provision_needed() || force_provision) {   // first boot OR touch-hold recovery: host the setup AP
     provision_begin();
     show_provision_overlay();
@@ -122,5 +124,6 @@ void loop() {
   pair_overlay_service();  // show/hide the BLE passkey card while a hub is bonding (Core-1)
   timekeep_service();  // perform any staged RTC write here (Core-1, serialized with touch on I2C)
   lvgl_port_tick();
+  input_service();     // P3: idle dim/sleep + IMU gestures + overlay autoclose (Core-1, after LVGL tick)
   delay(5);
 }
