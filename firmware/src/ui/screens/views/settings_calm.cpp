@@ -1,5 +1,5 @@
 // Calm Futurism SETTINGS view. Sparse list: big Doto row label on the left, dim value on the
-// right, hairline rules between rows. Rows: Wi-Fi, Brightness, Theme, Tickers, Sleep, About.
+// right, hairline rules between rows. Rows: Wi-Fi, Brightness, Theme, Sleep, About.
 // Interactive: Theme tap opens the theme picker (theme_panel); Brightness tap cycles
 // 40/60/80/100% (display_brightness inline).
 // Background + chrome drawn by the carousel.
@@ -9,7 +9,6 @@
 #include "ui/theme.h"
 #include "ui/theme_panel.h"
 #include "config/layout.h"
-#include "core/datastore.h"
 #include "hal/display.h"
 #include "hal/power.h"
 #include "core/net.h"
@@ -20,7 +19,7 @@
 #include <Arduino.h>
 static void update(void);
 
-static lv_obj_t *s_theme_val, *s_bright_val, *s_tickers_val, *s_batt_val, *s_wifi_val;
+static lv_obj_t *s_theme_val, *s_bright_val, *s_batt_val, *s_wifi_val;
 static lv_obj_t *s_dim_val, *s_sleep_val;
 
 static const uint8_t BRIGHT_PCT[] = { 40, 60, 80, 100 };
@@ -114,10 +113,6 @@ static void build(lv_obj_t* page) {
   char thv[20]; snprintf(thv, sizeof(thv), "%s >", t->id ? t->id : "--");
   s_theme_val = mk_row(page, t, y, "Theme", thv, t->accent, on_theme_tap); y += dy;
 
-  char tk[20];
-  snprintf(tk, sizeof(tk), "%u assets >", (unsigned)ds_get_finance_count());
-  s_tickers_val = mk_row(page, t, y, "Tickers", tk, t->ink_dim, NULL); y += dy;
-
   s_dim_val = mk_row(page, t, y, "Dim", "", t->ink_dim, dim_cb); y += dy;
 
   s_sleep_val = mk_row(page, t, y, "Sleep", "", t->ink_dim, sleep_cb); y += dy;
@@ -131,10 +126,6 @@ static void update(void) {
   const beacon_theme_t* t = theme_active();
   char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text_fmt(s_wifi_val, "%s >", wbuf);
   lv_label_set_text_fmt(s_theme_val, "%s >", t->id ? t->id : "--");
-
-  char tk[20];
-  snprintf(tk, sizeof(tk), "%u assets >", (unsigned)ds_get_finance_count());
-  lv_label_set_text(s_tickers_val, tk);
 
   char db[12], sb[12];
   settings_power_dim_label(db, sizeof(db));   lv_label_set_text(s_dim_val, db);

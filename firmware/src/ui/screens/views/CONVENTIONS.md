@@ -95,8 +95,8 @@ lv_obj_get_coords. For gauges you may instead reuse `gauge_render(parent, t, pct
   buddy.prompt.present: true => prompt layout (prompt.tool, prompt.hint in a box, DENY|APPROVE);
   false => idle (entries[0..entry_count-1], or "idle"). Approve/Deny tap is a LOCAL STUB: read rec,
   set prompt.present=false, ds_set_buddy(&rec), LOGI. Disable actions when hdr.state is HUB_OFFLINE.
-- settings (SETTINGS): rows Wi-Fi(status text "not set"), Brightness, Theme, Tickers(ds_get_finance_count
-  +" assets"), Sleep("5 min"), About(">"). INTERACTIVE: Theme row tap cycles theme, Brightness row tap
+- settings (SETTINGS): rows Wi-Fi(status text "not set"), Brightness, Theme, Sleep("5 min"),
+  About(">"). INTERACTIVE: Theme row tap cycles theme, Brightness row tap
   cycles 40/60/80/100%. NEVER call theme_set directly in the event (it deletes this very object mid-event)
   => defer with lv_async_call:
   ```cpp

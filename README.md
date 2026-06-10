@@ -21,7 +21,7 @@ Five screens, navigated by swipe + motion gestures:
 | Finance | configurable FX->IDR, crypto, indices, ETFs | WiFi (direct) |
 | AI Usage | Claude + Codex, **both** 5h and 7-day windows + reset | Mac hub (BLE) |
 | Coding Buddy | session state + approve/deny Claude tool-permission prompts | Mac hub (BLE) |
-| Settings | WiFi, brightness, theme picker, tickers, etc. | local (NVS) |
+| Settings | WiFi, brightness, theme picker, sleep, etc. | local (NVS) |
 
 ## What works today
 
