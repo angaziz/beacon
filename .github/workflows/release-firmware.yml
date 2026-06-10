@@ -1,34 +1,14 @@
-# Tag-driven releases: push a tag like v0.1.0 and this ships
-#   - Beacon-Hub-<tag>.zip          (ad-hoc-signed macOS .app; users need the Gatekeeper
-#                                    "Open Anyway" step documented in hub/README.md)
-#   - beacon-<tag>-full.bin         (full-flash image @0x0 for the web flasher / esptool)
-#   - beacon-<tag>-app.bin          (app-only image @0x10000 for OTA-style updates)
+# Firmware releases: push a tag like firmware-v0.1.0 and this ships
+#   - beacon-v<ver>-full.bin   (full-flash image @0x0 for the web flasher / esptool)
+#   - beacon-v<ver>-app.bin    (app-only image @0x10000 for OTA-style updates)
 # and redeploys the GitHub Pages web flasher with the new image.
-name: Release
+name: Release firmware
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["firmware-v*"]
 
 jobs:
-  hub:
-    name: Build hub app
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v5
-      - name: Stamp version from tag
-        run: /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${GITHUB_REF_NAME#v}" hub/Info.plist
-      - name: Build + bundle
-        working-directory: hub
-        run: ./build-app.sh release
-      - name: Zip (ditto preserves the signature and exec bits)
-        working-directory: hub
-        run: ditto -c -k --keepParent "Beacon Hub.app" "Beacon-Hub-${GITHUB_REF_NAME}.zip"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: hub-app
-          path: hub/Beacon-Hub-*.zip
-
   firmware:
     name: Build firmware
     runs-on: ubuntu-latest
@@ -48,18 +28,19 @@ jobs:
         working-directory: firmware
         run: |
           set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#firmware-}"   # firmware-v0.1.0 => v0.1.0
           BUILD=.pio/build/beacon
           # boot_app0 selects ota_0 on first boot; shipped with the arduino-esp32 framework
           BOOT_APP0=$(ls "$HOME"/.platformio/packages/framework-arduinoespressif32*/tools/partitions/boot_app0.bin | head -1)
           mkdir -p out
           # Offsets are the standard ESP32-S3 Arduino layout (bootloader@0x0) + partitions.csv
-          esptool.py --chip esp32s3 merge_bin -o "out/beacon-${GITHUB_REF_NAME}-full.bin" \
+          esptool.py --chip esp32s3 merge_bin -o "out/beacon-${VERSION}-full.bin" \
             --flash_mode qio --flash_freq 80m --flash_size 16MB \
             0x0     "$BUILD/bootloader.bin" \
             0x8000  "$BUILD/partitions.bin" \
             0xe000  "$BOOT_APP0" \
             0x10000 "$BUILD/firmware.bin"
-          cp "$BUILD/firmware.bin" "out/beacon-${GITHUB_REF_NAME}-app.bin"
+          cp "$BUILD/firmware.bin" "out/beacon-${VERSION}-app.bin"
       - uses: actions/upload-artifact@v7
         with:
           name: firmware
@@ -67,15 +48,15 @@ jobs:
 
   release:
     name: Publish GitHub release
-    needs: [hub, firmware]
+    needs: [firmware]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v8
         with:
+          name: firmware
           path: dist
-          merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
@@ -100,13 +81,14 @@ jobs:
       - name: Assemble Pages site
         run: |
           set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#firmware-}"
           cp firmware/flasher.html site/index.html
           rm -f site/firmware/*-app.bin   # the flasher only serves the full image
           FULL=$(basename site/firmware/beacon-*-full.bin)
           cat > site/manifest.json <<EOF
           {
             "name": "Beacon",
-            "version": "${GITHUB_REF_NAME}",
+            "version": "${VERSION}",
             "new_install_prompt_erase": true,
             "builds": [
               {

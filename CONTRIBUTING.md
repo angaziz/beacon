@@ -38,6 +38,37 @@ shows it works beats a long argument.
 - **Honesty over polish in data.** Screens must show stale/offline/error states truthfully;
   never render a guessed value as live (see `DESIGN.md` → Screen states).
 
+## Conventions
+
+**Commits & PR titles.** Conventional Commits: `type(scope): subject`.
+- Types: `feat` `fix` `docs` `refactor` `perf` `test` `chore` `ci` `build` `revert`.
+- Scope (optional): `firmware` `hub` `docs` `ci` — omit when the change spans several.
+- Subject: lowercase, imperative ("add", not "added"), no trailing period. Abbreviations and
+  proper nouns keep their case: WiFi, BLE, CC, IMU, ESP32, AMOLED, SwiftUI.
+- Breaking change: `type(scope)!: subject` or a `BREAKING CHANGE:` footer.
+- A PR title becomes the squash-merge commit, so it follows the same rules. Link issues in the
+  PR body (`Closes #N`), not in the title.
+
+Examples: `feat(hub): add WiFi network at runtime`, `fix(firmware): smooth carousel wrap-around
+swipe` — not `[FIRMWARE] fix swipe (#22)`, not `feat: Add WiFi Network.`
+
+**Branches.** `<type>/<issue#>-<kebab-summary>`, e.g. `feat/36-usage-rows`, `fix/16-lifecycle`.
+Drop the number when there's no issue.
+
+**Issues & labels.** Title is an imperative phrase in sentence case — no `[Firmware]`/`[Hub]`
+prefixes; the area label carries that. Label every issue with at least one area + one type,
+plus a priority when known:
+- area: `firmware`, `hub` (docs work uses `documentation`; CI/dependency bumps use the
+  dependabot-managed `github_actions`/`dependencies` labels).
+- type: `bug`, `enhancement`, `documentation`, `question`.
+- priority: `P0` (breaks trust / no recovery), `P1` (significant friction), `P2` (polish).
+- `epic` marks a tracking issue that spans several tasks.
+
+**Versioning.** Semantic versioning, tagged per component (firmware and hub ship separately):
+`firmware-vX.Y.Z` and `hub-vX.Y.Z`. `fix` => patch, `feat` => minor, breaking => major.
+Pre-1.0, breaking changes may land in a minor bump. `docs/` ships no artifact and isn't tagged.
+Pushing a `firmware-v*` or `hub-v*` tag triggers that component's release workflow.
+
 ## Workflow
 
 1. Open an issue describing the change (especially for hardware-facing or architectural work).

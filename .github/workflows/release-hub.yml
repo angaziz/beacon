@@ -1,0 +1,43 @@
+# Hub releases: push a tag like hub-v0.3.1 and this ships
+#   - Beacon-Hub-<ver>.zip   (ad-hoc-signed macOS .app; users need the Gatekeeper
+#                             "Open Anyway" step documented in hub/README.md)
+name: Release hub
+
+on:
+  push:
+    tags: ["hub-v*"]
+
+jobs:
+  hub:
+    name: Build hub app
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Stamp version from tag
+        run: /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${GITHUB_REF_NAME#hub-v}" hub/Info.plist
+      - name: Build + bundle
+        working-directory: hub
+        run: ./build-app.sh release
+      - name: Zip (ditto preserves the signature and exec bits)
+        working-directory: hub
+        run: ditto -c -k --keepParent "Beacon Hub.app" "Beacon-Hub-${GITHUB_REF_NAME#hub-}.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hub-app
+          path: hub/Beacon-Hub-*.zip
+
+  release:
+    name: Publish GitHub release
+    needs: [hub]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: hub-app
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*
