@@ -137,26 +137,39 @@ final class ProtocolTests: XCTestCase {
 
 final class UsageNormalizerTests: XCTestCase {
 
+    // Real redacted capture from GET api.anthropic.com/api/oauth/usage (CONTRACT.md §C.1 fallback,
+    // 2026-06-11). resets_at is microsecond-precision ISO with a +00:00 offset (not a clean Z), and
+    // the body carries extra windows (seven_day_sonnet, extra_usage, ...) the normalizer must ignore.
     func testClaudeNormalization() {
         let raw = Data(#"""
-        {"five_hour":{"utilization":24.0,"resets_at":"2026-06-05T14:20:00Z"},
-         "seven_day":{"utilization":51.0,"resets_at":"2026-06-07T23:59:00Z"}}
+        {"five_hour":{"utilization":8.0,"resets_at":"2026-06-11T03:30:00.110763+00:00"},
+         "seven_day":{"utilization":32.0,"resets_at":"2026-06-15T00:00:01.110782+00:00"},
+         "seven_day_sonnet":{"utilization":2.0,"resets_at":"2026-06-15T00:00:01.110788+00:00"},
+         "extra_usage":{"is_enabled":false,"utilization":null}}
         """#.utf8)
         let p = UsageNormalizer.claude(raw)
-        XCTAssertEqual(p?.h5.pct, 24)
-        XCTAssertEqual(p?.d7.pct, 51)
-        XCTAssertGreaterThan(p?.h5.reset ?? 0, 0)   // ISO -> epoch
+        XCTAssertEqual(p?.h5.pct, 8)
+        XCTAssertEqual(p?.d7.pct, 32)
+        XCTAssertEqual(p?.h5.reset, 1781148600)     // microsecond ISO + offset -> epoch
+        XCTAssertEqual(p?.d7.reset, 1781481601)
     }
 
+    // Real redacted capture from GET chatgpt.com/backend-api/wham/usage (CONTRACT.md §C.2, 2026-06-11).
+    // used_percent arrives as an Int here; extra fields (allowed, limit_window_seconds, credits, ...)
+    // must be ignored. The draft P2-0 guess matched the live shape on every field read here.
     func testCodexNormalization() {
         let raw = Data(#"""
-        {"rate_limit":{"primary_window":{"used_percent":1.4,"reset_at":1717590000},
-                       "secondary_window":{"used_percent":29.0,"reset_at":1717800000}}}
+        {"plan_type":"plus",
+         "rate_limit":{"allowed":false,"limit_reached":true,
+           "primary_window":{"used_percent":1,"limit_window_seconds":18000,"reset_after_seconds":18000,"reset_at":1781151661},
+           "secondary_window":{"used_percent":100,"limit_window_seconds":604800,"reset_after_seconds":15234,"reset_at":1781148895}},
+         "credits":{"has_credits":false,"balance":"0"}}
         """#.utf8)
         let p = UsageNormalizer.codex(raw)
-        XCTAssertEqual(p?.h5.pct, 1)               // 1.4 rounds to 1
-        XCTAssertEqual(p?.h5.reset, 1717590000)
-        XCTAssertEqual(p?.d7.pct, 29)
+        XCTAssertEqual(p?.h5.pct, 1)
+        XCTAssertEqual(p?.h5.reset, 1781151661)
+        XCTAssertEqual(p?.d7.pct, 100)
+        XCTAssertEqual(p?.d7.reset, 1781148895)
     }
 
     func testMalformedReturnsNil() {

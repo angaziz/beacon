@@ -131,8 +131,14 @@ final class ClaudeUsageProvider: UsageProvider {
                 completion(ProviderResult(usage: .unavailable, reason: "Claude token expired - re-login"))
                 return
             }
-            guard code == 200, let data = data, let usage = UsageNormalizer.claude(data) else {
+            guard code == 200, let data = data else {
                 completion(ProviderResult(usage: .unavailable, reason: "Claude usage unavailable (HTTP \(code))"))
+                return
+            }
+            guard let usage = UsageNormalizer.claude(data) else {
+                // HTTP 200 but the body did not normalize => the unofficial endpoint's shape likely
+                // drifted. Surface it distinctly so a schema change is visible, not a silent "--".
+                completion(ProviderResult(usage: .unavailable, reason: "Claude usage: unexpected response shape"))
                 return
             }
             completion(ProviderResult(usage: usage, reason: nil))
@@ -200,8 +206,14 @@ final class CodexUsageProvider: UsageProvider {
                 completion(ProviderResult(usage: .unavailable, reason: "Codex token expired - re-login"))
                 return
             }
-            guard code == 200, let data = data, let usage = UsageNormalizer.codex(data) else {
+            guard code == 200, let data = data else {
                 completion(ProviderResult(usage: .unavailable, reason: "Codex usage unavailable (HTTP \(code))"))
+                return
+            }
+            guard let usage = UsageNormalizer.codex(data) else {
+                // HTTP 200 but the body did not normalize => the unofficial endpoint's shape likely
+                // drifted. Surface it distinctly so a schema change is visible, not a silent "--".
+                completion(ProviderResult(usage: .unavailable, reason: "Codex usage: unexpected response shape"))
                 return
             }
             completion(ProviderResult(usage: usage, reason: nil))

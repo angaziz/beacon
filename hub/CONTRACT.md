@@ -4,10 +4,10 @@
 > and the hub (`BeaconHubKit` + its tests) are tested against the **same** payloads (`tech.md` §7.3).
 >
 > **Status:** the **device-facing frame + commands (§A/§B) are FROZEN** in `tech.md` §7.1 and final.
-> The **upstream shapes (§C) are DRAFTS from `docs/research` §2.1/§2.2** — they MUST be replaced with
-> **real, token-redacted captures from the owner's Mac** during P2-0 before the usage/bridge chunks
-> (P2-D/P2-E) are trusted; the exact field names of the unofficial endpoints + Claude Code hooks are
-> only known once recorded. Nothing here may contain a real token.
+> The **upstream shapes (§C) are RECORDED** — §C.1/§C.2 are real, token-redacted captures from the
+> owner's Mac (2026-06-11) and §C.3/§C.4 are confirmed against the Claude Code v2.1.x docs. The P2-0
+> draft guesses matched the live shapes on every field the normalizer reads. Nothing here may contain
+> a real token.
 
 ## A. Hub -> device status frame (FROZEN, `tech.md` §7.1)
 
@@ -36,26 +36,42 @@ the device keeps an absent block's last values). A null/omitted window `pct` => 
 - `ok:false` = the device decided but the hub had already resolved the prompt (e.g. the 25s fail-closed
   cap fired first, or it was superseded). The device must surface this, not treat it as success.
 
-## C. Upstream shapes (DRAFT from research — REPLACE with real captures in P2-0)
+## C. Upstream shapes (RECORDED — real token-redacted captures, 2026-06-11)
 
-### C.1 Claude usage — statusline `rate_limits` (PRIMARY); `oauth/usage` (FALLBACK, 429s)
-**Hardware finding:** `GET api.anthropic.com/api/oauth/usage` now **returns 429** (Anthropic's
-subscription-limits change), so it is only a best-effort fallback. **Live Claude usage comes from the
-statusline `rate_limits` (§C.4)** — first-party, no token. Fallback endpoint headers:
+### C.1 Claude usage — statusline `rate_limits` (PRIMARY); `oauth/usage` (FALLBACK)
+**Live Claude usage comes from the statusline `rate_limits` (§C.4)** — first-party, no token. The
+`oauth/usage` fallback is **intermittent**: it has returned 429 (Anthropic's subscription-limits
+change) but answered 200 at this capture, so keep it best-effort. Fallback endpoint headers:
 `Authorization: Bearer <tok>`, `anthropic-beta: oauth-2025-04-20`, `User-Agent`. Token: Keychain
 `Claude Code-credentials` (access token at `claudeAiOauth.accessToken`; refresh/expiry also present).
-Fallback body (when it answers): `{"five_hour":{"utilization":24.0,"resets_at":"...ISO"},"seven_day":{...}}`
-=> `usage.claude` (`utilization`->`pct`, ISO `resets_at`->epoch).
+Normalizes to `usage.claude` (`utilization`->`pct`, ISO `resets_at`->epoch). `resets_at` carries
+microsecond precision + a `+00:00` offset; extra windows (`seven_day_sonnet`, `extra_usage`, ...) are
+ignored. Real redacted capture:
+```json
+{"five_hour":{"utilization":8.0,"resets_at":"2026-06-11T03:30:00.110763+00:00"},
+ "seven_day":{"utilization":32.0,"resets_at":"2026-06-15T00:00:01.110782+00:00"},
+ "seven_day_sonnet":{"utilization":2.0,"resets_at":"2026-06-15T00:00:01.110788+00:00"},
+ "extra_usage":{"is_enabled":false,"utilization":null,"disabled_reason":"org_level_disabled_until"}}
+```
 
 ### C.2 Codex usage — `GET chatgpt.com/backend-api/wham/usage`
 Headers: `Authorization: Bearer <tok>`, `chatgpt-account-id: <id>`. Token: `~/.codex/auth.json`
-(`tokens.access_token`, `tokens.account_id`). Local fallback (D1): `~/.codex/sessions/**/rollout-*.jsonl`
-`rate_limits` — **capture the exact field path in P2-0**. Draft body:
+(`tokens.access_token`, `tokens.account_id`). The draft P2-0 guess matched the live shape: the path is
+`rate_limit.{primary_window,secondary_window}.{used_percent,reset_at}` with `reset_at` in epoch
+seconds. `used_percent` arrives as an Int here (the normalizer also accepts Double/String); extra
+fields (`allowed`, `limit_reached`, `limit_window_seconds`, `reset_after_seconds`, and the top-level
+`credits`/`plan_type`/...) are ignored. Normalizes to `usage.codex`. Real redacted capture:
 ```json
-{"rate_limit":{"primary_window":{"used_percent":1.4,"reset_at":1717590000},
-               "secondary_window":{"used_percent":29.0,"reset_at":1717800000}}}
+{"plan_type":"plus",
+ "rate_limit":{"allowed":false,"limit_reached":true,
+   "primary_window":{"used_percent":1,"limit_window_seconds":18000,"reset_after_seconds":18000,"reset_at":1781151661},
+   "secondary_window":{"used_percent":100,"limit_window_seconds":604800,"reset_after_seconds":15234,"reset_at":1781148895}},
+ "credits":{"has_credits":false,"unlimited":false,"balance":"0"}}
 ```
-Normalizes to `usage.codex`.
+Local fallback (D1, **unimplemented**): the `codex` CLI also records usage token-free in
+`~/.codex/sessions/**/rollout-*.jsonl` under `rate_limits.{primary,secondary}` — note the keys differ
+from the endpoint's `*_window` (they are null until a window is hit), so a future wiring needs its own
+normalizer, not `UsageNormalizer.codex`.
 
 ### C.3 Claude Code permission hook (`PermissionRequest`, primary; `PreToolUse`, back-compat) — CONFIRMED (CC v2.1.x docs)
 Claude Code supports native **`"type":"http"`** hooks (no curl forwarder needed). `PreToolUse` and
