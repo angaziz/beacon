@@ -33,7 +33,7 @@ Target: **Waveshare ESP32-S3-Touch-AMOLED-2.16**. Full detail in `docs/research/
 | Touch | CST9220/CST9217 (CST92xx), I2C @0x5A |
 | IMU | QMI8658 6-axis, I2C |
 | RTC | PCF85063, I2C |
-| Audio | ES8311 out + ES7210 mic (separate chips) — Explore only |
+| Audio | ES8311 out + ES7210 mic (separate chips) — unused (out of scope) |
 | PMU | **AXP2101**, I2C — init rails before display |
 | Pins | QSPI CS12 SCLK38 SDIO 4/5/6/7 RST2 · I2C SDA15 SCL14 · Touch INT11 |
 | Buttons | PWR (~1s on / ~5-6s off, via AXP), BOOT, user-IO18. **No RST.** |
@@ -55,7 +55,7 @@ Target: **Waveshare ESP32-S3-Touch-AMOLED-2.16**. Full detail in `docs/research/
 
 - **Device firmware** (`firmware/`): all on-device UI, the device-direct plane (WiFi+TLS to public APIs), the device side of the hub plane (BLE), persistence, theming, input.
 - **Hub** (`hub/`, Swift, P2): macOS menubar app; reads Claude/Codex tokens locally, normalizes usage, ingests Claude Code hook/session events, bridges to device over BLE. Holds all provider secrets.
-- **External services**: public APIs (finance/weather/Spotify) hit directly by the device; Hermes VPS (Explore).
+- **External services**: public APIs (finance/weather/Spotify) hit directly by the device.
 
 **Transport abstraction (required):** the device's hub-data interface sits behind a `HubLink` interface so BLE can be swapped for a LAN WebSocket without touching screens. The frame schema (§7) is transport-independent.
 
@@ -108,7 +108,7 @@ typedef struct { uint32_t last_updated; screen_state_t state; data_err_t err; } 
 Each domain has its own typed record (`weather_rec_t`, `finance_rec_t` (array), `usage_rec_t`, `buddy_rec_t`, `nowplaying_rec_t`) embedding `record_hdr_t` as its first member; all string fields are fixed-capacity NUL-terminated buffers (named `*_LEN`), and writers truncate. Fetchers run on timers with backoff and write `{value, last_updated, state}`. Mark `ST_STALE` at the source's `stale_s`; show age once stale. The staleness sweep may only promote `ST_LIVE => ST_STALE` — it never overwrites `ST_OFFLINE`/`ST_ERROR`/`ST_HUB_OFFLINE`. The full record schema + `screen_state_t` are frozen in P0 (`src/core/records.h`, `screen_state.h`) so P1/P2/P4 build against a stable contract.
 
 **Config schemas (NVS + compiled defaults).**
-- **Tickers** (`config/tickers.h` defaults; editable in Settings): array of
+- **Tickers** (`config/tickers.h` defaults): array of
   ```
   { id, source: "frankfurter"|"binance"|"yahoo", symbol, display_name,
     kind: "fx_idr"|"crypto"|"index"|"etf", cadence_s, stale_s, change_basis: "prev_close"|"24h" }
@@ -216,7 +216,6 @@ Exact hook event field names + statusline fields: capture into a `hub/CONTRACT.m
 | Codex usage | `~/.codex` token | **Hub (Mac) only** | No — only computed `pct`/`reset` over BLE |
 | WiFi | SSID/pass | Device NVS | n/a (it's the device's own) |
 | Spotify | refresh token | **Decide at P4:** device NVS *or* a proxy (Cloudflare Worker) holding the client secret | Only if NVS path chosen; proxy path keeps it off-device (preferred) |
-| Hermes | endpoint token (if any) | Device NVS or Mac relay (Explore) | TBD at Explore |
 
 Rules: Claude/Codex secrets **never** reach the device. Device-plane tokens are **scoped** and prefer a proxy. TLS validates certs (no `setInsecure()` in product). BLE: bonding + allowlist + encrypted chars; per-prompt `id` matching. LAN-WS fallback binds local-only + shared token. Repo: secrets via `secrets.h`/NVS, gitignored (`secrets*.h`, `.env`); spikes use editable placeholders. Hub logs approve/deny (timestamp + id).
 

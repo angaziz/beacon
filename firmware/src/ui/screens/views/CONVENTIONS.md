@@ -7,7 +7,7 @@ directions.html. Match your theme's lane closely; extend that visual language to
 
 ## File contract
 File: `src/ui/screens/views/<screen>_<theme>.cpp`, where screen in
-{home,finance,usage,buddy,nowplaying,settings}, theme in
+{home,finance,usage,buddy,settings}, theme in
 {editorial,hud,calm,blueprint,led,oscilloscope,analog}.
 
 Each file is self-contained with file-static widget pointers and MUST end with exactly:
@@ -47,7 +47,7 @@ const screen_view_t home_hud_view = { build, update };
   `lv_obj_add_style(o,&S.x,0)` and direct `lv_obj_set_style_*` with theme tokens is fine here (each
   view is per-theme). Set styles in build(); in update() only change text/values/show-hide.
 - update() is idempotent and read-only w.r.t. layout. Read snapshots: ds_get_weather(), 
-  ds_get_finance_count()/ds_get_finance(i), ds_get_usage(), ds_get_buddy(), ds_get_nowplaying().
+  ds_get_finance_count()/ds_get_finance(i), ds_get_usage(), ds_get_buddy().
 - now: call the global `now_s()` (declared in ui/screen.h, defined in core/timekeep.cpp).
 - STATE handling (every data screen): use state_view.h helpers to reflect loading/live/stale/offline/
   error/hub-offline. Minimum: a small status chip (theme f_mono) in a corner showing
@@ -95,10 +95,8 @@ lv_obj_get_coords. For gauges you may instead reuse `gauge_render(parent, t, pct
   buddy.prompt.present: true => prompt layout (prompt.tool, prompt.hint in a box, DENY|APPROVE);
   false => idle (entries[0..entry_count-1], or "idle"). Approve/Deny tap is a LOCAL STUB: read rec,
   set prompt.present=false, ds_set_buddy(&rec), LOGI. Disable actions when hdr.state is HUB_OFFLINE.
-- nowplaying (NOW): title/artist/device, progress bar = progress_ms/duration_ms, playing => "PLAYING"/
-  "PAUSED". has_device==false => "no active device" state. Controls are non-functional placeholders (P4).
-- settings (SETTINGS): rows Wi-Fi(status text "not set"), Brightness, Theme, Tickers(ds_get_finance_count
-  +" assets"), Sleep("5 min"), About(">"). INTERACTIVE: Theme row tap cycles theme, Brightness row tap
+- settings (SETTINGS): rows Wi-Fi(status text "not set"), Brightness, Theme, Sleep("5 min"),
+  About(">"). INTERACTIVE: Theme row tap cycles theme, Brightness row tap
   cycles 40/60/80/100%. NEVER call theme_set directly in the event (it deletes this very object mid-event)
   => defer with lv_async_call:
   ```cpp

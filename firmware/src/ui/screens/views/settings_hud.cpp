@@ -4,7 +4,6 @@
 #include "ui/theme.h"
 #include "ui/theme_catalog.h"
 #include "config/layout.h"
-#include "core/datastore.h"
 #include "hal/display.h"
 #include "hal/power.h"
 #include "core/net.h"
@@ -16,13 +15,12 @@
 #include <Arduino.h>
 
 // Aerospace HUD / Settings. "// SETTINGS" eyebrow + version (right) + a list of rows:
-// Wi-Fi, Brightness, Theme, Tickers, Sleep, About. INTERACTIVE: Theme tap opens the theme
+// Wi-Fi, Brightness, Theme, Sleep, About. INTERACTIVE: Theme tap opens the theme
 // picker (theme_panel), Brightness tap cycles 40/60/80/100% (display_brightness inline).
 // Other rows are static.
 
 static lv_obj_t *s_theme_val;
 static lv_obj_t *s_bright_val;
-static lv_obj_t *s_tickers_val;
 static lv_obj_t *s_batt_val;
 static lv_obj_t *s_wifi_val;
 static lv_obj_t *s_dim_val;
@@ -111,9 +109,6 @@ static void build(lv_obj_t* page) {
   s_bright_val   = make_row(list, t, "Brightness", bb, bright_tap);
   char thv[20]; snprintf(thv, sizeof(thv), "%s >", THEME_CATALOG[theme_index()].id);
   s_theme_val    = make_row(list, t, "Theme", thv, theme_tap);
-  char tk[16];
-  snprintf(tk, sizeof(tk), "%u assets", (unsigned)ds_get_finance_count());
-  s_tickers_val  = make_row(list, t, "Tickers", tk, NULL);
   s_dim_val      = make_row(list, t, "Dim", "", dim_cb);
   s_sleep_val    = make_row(list, t, "Sleep", "", sleep_cb);
   make_row(list, t, "About", ">", NULL);
@@ -122,9 +117,6 @@ static void build(lv_obj_t* page) {
 static void update(void) {
   char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text_fmt(s_wifi_val, "%s >", wbuf);
   lv_label_set_text_fmt(s_theme_val, "%s >", THEME_CATALOG[theme_index()].id);
-  char tk[16];
-  snprintf(tk, sizeof(tk), "%u assets", (unsigned)ds_get_finance_count());
-  lv_label_set_text(s_tickers_val, tk);
 
   char db[12], sb[12];
   settings_power_dim_label(db, sizeof(db));   lv_label_set_text(s_dim_val, db);

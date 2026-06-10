@@ -19,14 +19,13 @@ static void test_record_age(void) {
   }
 }
 
-// The five domain records compile + embed the header; frozen constants + usage null sentinel hold.
+// The four domain records compile + embed the header; frozen constants + usage null sentinel hold.
 static void test_records_contract(void) {
-  weather_rec_t w; finance_rec_t f; usage_rec_t u; buddy_rec_t b; nowplaying_rec_t n;
-  (void)w; (void)u; (void)b; (void)n;
+  weather_rec_t w; finance_rec_t f; usage_rec_t u; buddy_rec_t b;
+  (void)w; (void)u; (void)b;
 
   TEST_ASSERT_EQUAL_INT(16,  FIN_ID_LEN);
   TEST_ASSERT_EQUAL_INT(80,  BUDDY_HINT_LEN);
-  TEST_ASSERT_EQUAL_INT(160, NP_ART_REF_LEN);
 
   usage_window_t win = { -1, 0 };          // -1 = unavailable
   TEST_ASSERT_EQUAL_INT16(-1, win.pct);

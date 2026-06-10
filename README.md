@@ -4,16 +4,16 @@
 [![Release](https://img.shields.io/github/v/release/angaziz/beacon?include_prereleases)](https://github.com/angaziz/beacon/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A dark, futuristic desk command-center on a 2.16" AMOLED touch device — built on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**. It sits next to your keyboard and, at a glance, shows your Claude Code / Codex usage, live markets, weather, music, and a Claude coding "buddy" you can approve tool-prompts on — without breaking focus on your Mac.
+A dark, futuristic desk command-center on a 2.16" AMOLED touch device — built on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**. It sits next to your keyboard and, at a glance, shows your Claude Code / Codex usage, live markets, weather, and a Claude coding "buddy" you can approve tool-prompts on — without breaking focus on your Mac.
 
 ![Beacon on a desk](docs/assets/hero.svg)
 <!-- TODO(photo): replace docs/assets/hero.svg with a real desk photo (jpg/png), update this link -->
 
-> **Status: early prototype — but it runs on real hardware today.** The device side (all six screens, seven themes, on-device WiFi setup, live weather + markets) and the macOS hub (AI usage + coding buddy over Bluetooth) are both working end-to-end. Expect rough edges and moving parts. See [What works today](#what-works-today).
+> **Status: early prototype — but it runs on real hardware today.** The device side (all five screens, seven themes, on-device WiFi setup, live weather + markets) and the macOS hub (AI usage + coding buddy over Bluetooth) are both working end-to-end. Expect rough edges and moving parts. See [What works today](#what-works-today).
 
 ## What it does
 
-Six screens, navigated by swipe + motion gestures:
+Five screens, navigated by swipe + motion gestures:
 
 | Screen | Shows | Source |
 |---|---|---|
@@ -21,27 +21,24 @@ Six screens, navigated by swipe + motion gestures:
 | Finance | configurable FX->IDR, crypto, indices, ETFs | WiFi (direct) |
 | AI Usage | Claude + Codex, **both** 5h and 7-day windows + reset | Mac hub (BLE) |
 | Coding Buddy | session state + approve/deny Claude tool-permission prompts | Mac hub (BLE) |
-| Now-Playing | Spotify control (remote for an active Connect device) | WiFi (direct) |
-| Settings | WiFi, brightness, theme picker, tickers, etc. | local (NVS) |
+| Settings | WiFi, brightness, theme picker, sleep, etc. | local (NVS) |
 
 ## What works today
 
-- **All six screens render on-device** in 7 bespoke per-theme layouts (42 views), with an honest screen-state model: a value is shown as loading / live / stale / offline — never a guess dressed up as live data.
+- **All five screens render on-device** in 7 bespoke per-theme layouts (35 views), with an honest screen-state model: a value is shown as loading / live / stale / offline — never a guess dressed up as live data.
 - **Home + Finance run on live data** over WiFi: NTP/RTC time, Open-Meteo weather (auto-located by IP), FX->IDR / BTC / indices.
 - **WiFi setup happens on-device** — the device opens a hotspot with a captive portal; no credentials are ever compiled into the firmware. Multiple networks are remembered.
 - **AI Usage is live over Bluetooth**: the macOS hub reads Claude Code + Codex usage and streams it to the device over a bonded BLE link, alongside the device's own WiFi plane.
 - **Coding Buddy round-trip is validated on hardware**: approve or deny a Claude Code tool-permission prompt from the device, and the Mac honors it.
 - Settings, theme picker, brightness, and preferences persist across reboots.
 
-Not built yet: motion gestures (P3) and the Spotify Now-Playing screen (P4) — see the [Roadmap](#roadmap).
-
 ## Two-plane architecture
 
 ```
    Public internet (direct, WiFi+TLS)          Mac companion hub (BLE)
    - finance / weather / time                   - Claude + Codex usage
-   - Spotify control                            - coding buddy (approve/deny)
-   - Hermes agent (device -> VPS)               - holds Claude/Codex secrets; none reach the device
+                                                - coding buddy (approve/deny)
+                                                - holds Claude/Codex secrets; none reach the device
                        \                        /
                         \                      /
                       [ Beacon device: ESP32-S3 + AMOLED ]
@@ -96,18 +93,7 @@ beacon/
 
 ## Roadmap
 
-Short version — the full phased plan (requirements, acceptance, dependencies) is in [`docs/prd.md`](docs/prd.md) §7.
-
-- [x] Research: device capability map, integrations, prior art
-- [x] Design system: 7 themes from shared tokens ([`DESIGN.md`](DESIGN.md))
-- [x] Hardware spikes: display/power bring-up; WiFi + BLE coexistence
-- [x] **P0 — Foundation**: swipe carousel, theme engine, persistence, on-device WiFi setup, time
-- [x] **P1 — Ambient screens**: Home + Finance on live data, with truthful loading/stale/offline states
-- [x] **P2 — Hub + AI**: macOS hub, AI Usage and Coding Buddy over BLE, running on hardware; hub onboarding/lifecycle hardening (epic [#20](https://github.com/angaziz/beacon/issues/20))
-  - [ ] last item: capture real upstream payload fixtures into [`hub/CONTRACT.md`](hub/CONTRACT.md) §C
-- [ ] **P3 — Input polish**: IMU motion + richer touch gestures
-- [ ] **P4 — Now-Playing**: Spotify control
-- [ ] **Explore**: Hermes agent, voice
+The full phased plan — requirements, acceptance, dependencies — lives in [`docs/prd.md`](docs/prd.md) §7.
 
 ## Security
 

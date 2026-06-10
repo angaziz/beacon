@@ -4,7 +4,6 @@
 #include "ui/theme.h"
 #include "ui/theme_panel.h"
 #include "config/layout.h"
-#include "core/datastore.h"
 #include "hal/display.h"
 #include "hal/power.h"
 #include "core/net.h"
@@ -18,7 +17,7 @@
 // LED Matrix / SETTINGS: lit-label rows. Theme tap opens the theme picker (theme_panel).
 // Brightness tap cycles 40/60/80/100% inline.
 
-static lv_obj_t *s_theme_val, *s_bright_val, *s_tickers_val, *s_batt_val, *s_wifi_val;
+static lv_obj_t *s_theme_val, *s_bright_val, *s_batt_val, *s_wifi_val;
 static lv_obj_t *s_dim_val, *s_sleep_val;
 static const uint8_t BRIGHT_STEPS[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;  // default 80%
@@ -105,11 +104,6 @@ static void build(lv_obj_t* page) {
   lv_obj_add_flag(th, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(th, theme_cb, LV_EVENT_CLICKED, NULL);
 
-  char tk[20];
-  snprintf(tk, sizeof(tk), "%u ASSETS >", (unsigned)ds_get_finance_count());
-  lv_obj_t* tr = make_row(list, t, "TICKERS", tk, t->ink_dim);
-  s_tickers_val = (lv_obj_t*)lv_obj_get_user_data(tr);
-
   lv_obj_t* dr = make_row(list, t, "DIM", "", t->ink);
   s_dim_val = (lv_obj_t*)lv_obj_get_user_data(dr);
   lv_obj_add_flag(dr, LV_OBJ_FLAG_CLICKABLE);
@@ -134,11 +128,6 @@ static void update(void) {
     snprintf(id, sizeof(id), "%s", t->id);
     for (char* p = id; *p; p++) *p = (char)toupper((unsigned char)*p);
     lv_label_set_text_fmt(s_theme_val, "%s >", id);
-  }
-  if (s_tickers_val) {
-    char tk[20];
-    snprintf(tk, sizeof(tk), "%u ASSETS >", (unsigned)ds_get_finance_count());
-    lv_label_set_text(s_tickers_val, tk);
   }
   if (s_dim_val) {
     char db[12]; settings_power_dim_label(db, sizeof(db));

@@ -31,10 +31,6 @@ static void seed(void) {
   b.prompt.present = true; strncpy(b.prompt.id, "A1B2", BUDDY_ID_LEN-1); strncpy(b.prompt.tool, "Bash", BUDDY_TOOL_LEN-1);
   strncpy(b.prompt.hint, "rm -rf /tmp/build-cache", BUDDY_HINT_LEN-1); b.prompt.shown_at = uptime_s();
   b.hdr.last_updated = now; ds_set_buddy(&b);
-  nowplaying_rec_t np; memset(&np, 0, sizeof(np)); np.has_device = true; np.playing = true;
-  strncpy(np.title, "Midnight City", NP_TITLE_LEN-1); strncpy(np.artist, "M83", NP_ARTIST_LEN-1);
-  strncpy(np.device, "Studio", NP_DEVICE_LEN-1); np.progress_ms = 60000; np.duration_ms = 240000; np.hdr.last_updated = now;
-  ds_set_nowplaying(&np);
 }
 
 // Core-0 staleness ticker (DataStore sweeps are Core-0; P1's fetch task replaces this) + heap gate log.
@@ -61,7 +57,6 @@ static void longpress_cb(lv_event_t*) {
   switch (scr) {
     case 0: if (s_phase == 0) seed(); else ds_set_state_weather(dev[s_phase], ERR_RATE_LIMITED); break;
     case 1: if (s_phase == 0) seed(); else ds_set_state_finance(0, dev[s_phase], ERR_TIMEOUT); break;
-    case 4: if (s_phase == 0) seed(); else ds_set_state_nowplaying(dev[s_phase], ERR_NO_ROUTE); break;
     case 2: case 3: if (s_phase % 2) ds_set_hub_offline(); else seed(); break;  // hub-plane: LIVE<->HUB_OFFLINE
     default: break;
   }

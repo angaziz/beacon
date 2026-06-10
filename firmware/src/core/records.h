@@ -11,10 +11,6 @@
 #define BUDDY_HINT_LEN  80
 #define BUDDY_ENTRY_LEN 40
 #define BUDDY_ENTRIES    3
-#define NP_TITLE_LEN    64
-#define NP_ARTIST_LEN   64
-#define NP_DEVICE_LEN   32
-#define NP_ART_REF_LEN 160
 
 typedef struct {
   uint32_t       last_updated;  // epoch seconds of last successful update; 0 = never
@@ -90,20 +86,3 @@ typedef struct {
   uint8_t       entry_count;
   buddy_prompt_t prompt;
 } buddy_rec_t;
-
-// --- Now-playing (FR-NOW, device-plane) — frozen now so P4 builds against it ---
-typedef struct {
-  record_hdr_t hdr;
-  bool     has_device;         // an active Spotify Connect device exists
-  bool     playing;
-  char     title[NP_TITLE_LEN];
-  char     artist[NP_ARTIST_LEN];
-  char     device[NP_DEVICE_LEN];
-  uint32_t progress_ms;
-  uint32_t duration_ms;
-  // Album art is carried as a REFERENCE, not pixels. has_art=false => none. art_ref is a stable
-  // key (Spotify art URL or its hash) the UI uses to look up a decoded image from a P4-owned art
-  // cache; the fetch/decode/cache mechanism is P4's, but the record surface is fixed here.
-  bool     has_art;
-  char     art_ref[NP_ART_REF_LEN];
-} nowplaying_rec_t;
