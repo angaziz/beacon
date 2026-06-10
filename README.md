@@ -84,7 +84,7 @@ beacon/
 │   └── CONTRACT.md         #   BLE protocol + hub-side policies
 └── docs/
     ├── research/           # device + integrations research (hardware, APIs, prior art)
-    ├── plans/ · design/specs/ # implementation plans + design specs
+    ├── plans/ · specs/     # implementation plans + design specs
     ├── design/
     │   ├── mockups/        # HTML theme mockups (directions.html)
     │   └── tooling/        # Playwright screenshot helper (shoot.mjs)
