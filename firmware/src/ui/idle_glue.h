@@ -11,7 +11,7 @@ extern "C" {
 void idle_init(void);                  // call once after lvgl_port_begin()
 void idle_service(void);               // call every loop() iteration
 void idle_apply_config_from_nvs(void); // re-read timeouts after a settings change
-bool idle_is_asleep(void);             // true while the panel is blanked (for wake-touch swallow)
+bool idle_is_inactive(void);           // true while dimmed or asleep (first touch wakes only, no pass-through)
 
 #ifdef __cplusplus
 }

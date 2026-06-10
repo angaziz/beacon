@@ -23,7 +23,7 @@ void idle_init(void) {
   s_phase = IDLE_ACTIVE;
 }
 
-bool idle_is_asleep(void) { return s_phase == IDLE_SLEEP; }
+bool idle_is_inactive(void) { return s_phase != IDLE_ACTIVE; }
 
 void idle_service(void) {
   uint32_t inact = lv_disp_get_inactive_time(NULL);
