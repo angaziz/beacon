@@ -81,7 +81,7 @@ jobs:
             exit 1
           fi
       - name: Upload firmware artifact (flash a PR without a local build)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: firmware-bin
           path: firmware/.pio/build/beacon/firmware.bin
@@ -103,7 +103,7 @@ jobs:
           ./build-app.sh release
           ditto -c -k --keepParent "Beacon Hub.app" "Beacon-Hub-dev.zip"
       - name: Upload hub artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hub-app-dev
           path: hub/Beacon-Hub-dev.zip

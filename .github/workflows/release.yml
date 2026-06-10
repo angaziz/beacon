@@ -24,7 +24,7 @@ jobs:
       - name: Zip (ditto preserves the signature and exec bits)
         working-directory: hub
         run: ditto -c -k --keepParent "Beacon Hub.app" "Beacon-Hub-${GITHUB_REF_NAME}.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: hub-app
           path: hub/Beacon-Hub-*.zip
@@ -58,7 +58,7 @@ jobs:
             0xe000  "$BOOT_APP0" \
             0x10000 "$BUILD/firmware.bin"
           cp "$BUILD/firmware.bin" "out/beacon-${GITHUB_REF_NAME}-app.bin"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: firmware
           path: firmware/out/*
