@@ -8,6 +8,7 @@
 #include "ui/state_view.h"
 #include "ui/theme.h"
 #include "ui/theme_panel.h"
+#include "ui/about_panel.h"
 #include "config/layout.h"
 #include "hal/display.h"
 #include "hal/power.h"
@@ -26,6 +27,7 @@ static const uint8_t BRIGHT_PCT[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;  // default 80%
 
 static void on_theme_tap(lv_event_t* e) { (void)e; theme_panel_open(); }
+static void about_cb(lv_event_t*) { about_panel_open(); }
 
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
 static void dim_cb(lv_event_t*)   { settings_power_open_dim(); }
@@ -117,7 +119,7 @@ static void build(lv_obj_t* page) {
 
   s_sleep_val = mk_row(page, t, y, "Sleep", "", t->ink_dim, sleep_cb); y += dy;
 
-  mk_row(page, t, y, "About", ">", t->ink_dim, NULL);
+  mk_row(page, t, y, "About", ">", t->ink_dim, about_cb);
 
   update();
 }

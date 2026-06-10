@@ -2,6 +2,7 @@
 #include "ui/screens/screen_common.h"
 #include "ui/theme.h"
 #include "ui/theme_panel.h"
+#include "ui/about_panel.h"
 #include "hal/display.h"
 #include "hal/power.h"
 #include "core/net.h"
@@ -15,6 +16,7 @@ static const uint8_t BRIGHT[] = {102, 153, 204, 255};   // 40/60/80/100%
 static int s_bright_i = 2;
 
 static void theme_cb(lv_event_t*) { theme_panel_open(); }
+static void about_cb(lv_event_t*) { about_panel_open(); }
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
 static void dim_cb(lv_event_t*)   { settings_power_open_dim(); }
 static void sleep_cb(lv_event_t*) { settings_power_open_sleep(); }
@@ -54,7 +56,7 @@ static void build(lv_obj_t* page) {
   s_theme_val    = row(page, "Theme", 126, theme_cb);       lv_obj_add_style(s_theme_val, &S.accent, 0);
   s_dim_val      = row(page, "Dim", 168, dim_cb);
   s_sleep_val    = row(page, "Sleep", 210, sleep_cb);
-  lv_obj_t* abt  = row(page, "About", 252, NULL);           lv_label_set_text(abt, ">");
+  lv_obj_t* abt  = row(page, "About", 252, about_cb);       lv_label_set_text(abt, ">");
 }
 
 static void update(void) {

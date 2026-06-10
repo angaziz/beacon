@@ -10,6 +10,7 @@
 #include "ui/screens/screen_common.h"
 #include "ui/wifi_panel.h"
 #include "ui/theme_panel.h"
+#include "ui/about_panel.h"
 #include "ui/settings_power_rows.h"
 #include <Arduino.h>
 
@@ -24,6 +25,7 @@ static const uint8_t BRIGHT_PCT[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;   // 80%
 
 static void theme_tap_cb(lv_event_t*) { theme_panel_open(); }
+static void about_cb(lv_event_t*) { about_panel_open(); }
 
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
 static void dim_cb(lv_event_t*)   { settings_power_open_dim(); }
@@ -102,7 +104,7 @@ static void build(lv_obj_t* page) {
   s_theme_val   = make_row(page, t, top + 3 * pitch, "Theme", thv, true, theme_tap_cb);
   s_dim_val     = make_row(page, t, top + 4 * pitch, "Dim", "", false, dim_cb);
   s_sleep_val   = make_row(page, t, top + 5 * pitch, "Sleep", "", false, sleep_cb);
-  make_row(page, t, top + 6 * pitch, "About", ">", false, NULL);
+  make_row(page, t, top + 6 * pitch, "About", ">", false, about_cb);
 }
 
 static void update(void) {

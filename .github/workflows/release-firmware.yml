@@ -21,6 +21,8 @@ jobs:
       - run: pip install platformio pyyaml "esptool~=4.8"
       - name: Build
         working-directory: firmware
+        env:
+          FIRMWARE_VERSION: ${{ github.ref_name }}   # e.g. v0.1.0; baked into the About panel
         run: pio run -e beacon
       - name: Assemble flashable images
         working-directory: firmware
@@ -75,15 +77,15 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: firmware
-          path: web/flasher/firmware
-      - name: Write manifest
-        working-directory: web/flasher
+          path: site/firmware
+      - name: Assemble Pages site
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#firmware-}"
-          rm -f firmware/*-app.bin   # the flasher only serves the full image
-          FULL=$(basename firmware/beacon-*-full.bin)
-          cat > manifest.json <<EOF
+          cp firmware/flasher.html site/index.html
+          rm -f site/firmware/*-app.bin   # the flasher only serves the full image
+          FULL=$(basename site/firmware/beacon-*-full.bin)
+          cat > site/manifest.json <<EOF
           {
             "name": "Beacon",
             "version": "${VERSION}",
@@ -98,6 +100,6 @@ jobs:
           EOF
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: web/flasher
+          path: site
       - id: deploy
         uses: actions/deploy-pages@v4

@@ -18,7 +18,7 @@ shows it works beats a long argument.
 
 ## Repo areas
 
-- `firmware/` — the product firmware (PlatformIO; build/flash guide in `firmware/README.md`).
+- `firmware/` — the product firmware (PlatformIO; build/flash guide in `firmware/README.md`). End users flash a released build with the [web flasher](https://angaziz.github.io/beacon/) (`firmware/flasher.html`, deployed to GitHub Pages on release); contributors build and flash from source with `pio run -e beacon -t upload`.
 - `hub/` — the macOS menubar hub (SwiftPM; install/dev guide in `hub/README.md`).
 - `docs/spikes/` — throwaway Arduino (C++) hardware spikes + setup/flashing guide (`docs/spikes/SETUP.md`), kept separate from the product firmware.
 - `docs/design/mockups/` — HTML theme mockups. Iterate here, render with the Playwright helper
