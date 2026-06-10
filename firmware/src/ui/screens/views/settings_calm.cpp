@@ -16,10 +16,12 @@
 #include "core/nvs.h"
 #include "ui/screens/screen_common.h"
 #include "ui/wifi_panel.h"
+#include "ui/settings_power_rows.h"
 #include <Arduino.h>
 static void update(void);
 
 static lv_obj_t *s_theme_val, *s_bright_val, *s_tickers_val, *s_batt_val, *s_wifi_val;
+static lv_obj_t *s_dim_val, *s_sleep_val;
 
 static const uint8_t BRIGHT_PCT[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;  // default 80%
@@ -27,6 +29,8 @@ static uint8_t s_bright_idx = 2;  // default 80%
 static void on_theme_tap(lv_event_t* e) { (void)e; theme_panel_open(); }
 
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
+static void dim_cb(lv_event_t*)   { settings_power_open_dim(); }
+static void sleep_cb(lv_event_t*) { settings_power_open_sleep(); }
 
 static void on_bright_tap(lv_event_t* e) {
   (void)e;
@@ -114,7 +118,9 @@ static void build(lv_obj_t* page) {
   snprintf(tk, sizeof(tk), "%u assets >", (unsigned)ds_get_finance_count());
   s_tickers_val = mk_row(page, t, y, "Tickers", tk, t->ink_dim, NULL); y += dy;
 
-  mk_row(page, t, y, "Sleep", "5 min", t->ink_dim, NULL); y += dy;
+  s_dim_val = mk_row(page, t, y, "Dim", "", t->ink_dim, dim_cb); y += dy;
+
+  s_sleep_val = mk_row(page, t, y, "Sleep", "", t->ink_dim, sleep_cb); y += dy;
 
   mk_row(page, t, y, "About", ">", t->ink_dim, NULL);
 
@@ -129,6 +135,10 @@ static void update(void) {
   char tk[20];
   snprintf(tk, sizeof(tk), "%u assets >", (unsigned)ds_get_finance_count());
   lv_label_set_text(s_tickers_val, tk);
+
+  char db[12], sb[12];
+  settings_power_dim_label(db, sizeof(db));   lv_label_set_text(s_dim_val, db);
+  settings_power_sleep_label(sb, sizeof(sb)); lv_label_set_text(s_sleep_val, sb);
 
   int pct = power_battery_pct();
   char bt[8];

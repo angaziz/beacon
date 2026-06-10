@@ -19,6 +19,8 @@ uint8_t nvs_get_byte(const char* key, uint8_t def);  void nvs_set_byte(const cha
 uint8_t nvs_get_screen(uint8_t def);     void nvs_set_screen(uint8_t v);
 uint8_t nvs_get_brightness(uint8_t def); void nvs_set_brightness(uint8_t v);
 uint8_t nvs_get_theme(uint8_t def);      void nvs_set_theme(uint8_t v);
+uint8_t nvs_get_dim_idx(uint8_t def);    void nvs_set_dim_idx(uint8_t v);
+uint8_t nvs_get_sleep_idx(uint8_t def);  void nvs_set_sleep_idx(uint8_t v);
 
 // Saved WiFi networks (canonical store; guarded by an internal mutex; net.cpp consumes it on Core-0).
 // Mutations persist immediately and set a dirty flag the Core-0 net service polls. SSID getters never

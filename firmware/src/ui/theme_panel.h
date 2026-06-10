@@ -11,6 +11,7 @@ extern "C" {
 #endif
 void theme_panel_open(void);
 bool theme_panel_is_open(void);
+void theme_panel_close(void);
 #ifdef __cplusplus
 }
 #endif

@@ -5,6 +5,7 @@
 #include "hal/touch.h"
 #include "config/layout.h"
 #include "util/log.h"
+#include "ui/idle_glue.h"
 
 static const uint32_t BUF_LINES  = 47;                       // ~1/10 of 466 (tech.md §6)
 static const size_t   BUF_PX     = (size_t)SCREEN_W * BUF_LINES;
@@ -34,6 +35,11 @@ static void rounder_cb(lv_disp_drv_t* drv, lv_area_t* a) {
 static void indev_read_cb(lv_indev_drv_t* drv, lv_indev_data_t* data) {
   int16_t x, y;
   if (touch_read(&x, &y)) {
+    if (idle_is_inactive()) {                // dimmed or asleep => wake only; don't activate what's under the finger
+      lv_disp_trig_activity(NULL);           // LVGL counts only PRESSED as activity; force the reset
+      data->state = LV_INDEV_STATE_RELEASED;
+      return;
+    }
     data->state = LV_INDEV_STATE_PRESSED;
     data->point.x = x; data->point.y = y;
   } else {

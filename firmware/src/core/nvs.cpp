@@ -82,6 +82,10 @@ uint8_t nvs_get_brightness(uint8_t def) { return s_open ? s_prefs.getUChar("brig
 void    nvs_set_brightness(uint8_t v)   { if (s_open) s_prefs.putUChar("bright", v); }
 uint8_t nvs_get_theme(uint8_t def)      { return s_open ? s_prefs.getUChar("theme", def) : def; }
 void    nvs_set_theme(uint8_t v)        { if (s_open) s_prefs.putUChar("theme", v); }
+uint8_t nvs_get_dim_idx(uint8_t def)    { return s_open ? s_prefs.getUChar("dim_idx", def) : def; }
+void    nvs_set_dim_idx(uint8_t v)      { if (s_open) s_prefs.putUChar("dim_idx", v); }
+uint8_t nvs_get_sleep_idx(uint8_t def)  { return s_open ? s_prefs.getUChar("slp_idx", def) : def; }
+void    nvs_set_sleep_idx(uint8_t v)    { if (s_open) s_prefs.putUChar("slp_idx", v); }
 
 bool nvs_get_location(float* lat, float* lon, char* tz, size_t tz_cap) {
   if (!s_open || !s_prefs.isKey("lat")) return false;

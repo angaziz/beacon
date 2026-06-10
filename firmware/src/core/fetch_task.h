@@ -7,6 +7,7 @@
 extern "C" {
 #endif
 void fetch_task_start(void);
+void fetch_task_refresh_all(void);   // mark every source due now (user pull-to-refresh)
 #ifdef __cplusplus
 }
 #endif

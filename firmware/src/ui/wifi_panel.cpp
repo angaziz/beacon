@@ -260,3 +260,8 @@ void wifi_panel_open(void) {
 }
 
 bool wifi_panel_is_open(void) { return s_root != nullptr; }
+
+// Public wrapper: allows external callers (e.g. IMU shake dispatcher) to close.
+// lv_obj_del(s_root) in close_panel() also destroys s_add and s_confirm children,
+// so all sub-cards are fully torn down by this call.
+void wifi_panel_close(void) { close_panel(); }
