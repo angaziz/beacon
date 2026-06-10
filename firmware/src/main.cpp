@@ -19,6 +19,9 @@
 #include "ui/pair_overlay.h"
 #include "ui/dev_seed.h"
 #include "ui/idle_glue.h"
+#include "hal/imu.h"
+#include "core/imu_detect.h"
+#include "ui/overlays.h"
 
 static lv_obj_t* setup_step(lv_obj_t* card, const beacon_theme_t* t, const char* txt) {
   lv_obj_t* l = lv_label_create(card);   // default font: reliable full-ASCII (theme fonts are subset)
@@ -87,6 +90,7 @@ void setup() {
   if (!display_begin()) { LOGE("halt: display"); return; }
   display_brightness(nvs_get_brightness(204));   // restore persisted brightness (FR-SET-2); 204 = 80% default
   touch_begin();
+  if (!imu_begin()) LOGE("imu: not detected (gestures disabled)");
   // Escape hatch: holding a finger on the screen during boot forces the setup portal even with stored
   // creds (recovery when you're on a new network and can't reach the saved one). ~0.6s sample window.
   bool force_provision = false;
@@ -125,5 +129,8 @@ void loop() {
   timekeep_service();  // perform any staged RTC write here (Core-1, serialized with touch on I2C)
   lvgl_port_tick();
   idle_service();
+  uint8_t g = imu_poll();
+  if (g & IMU_RAISE) lv_disp_trig_activity(NULL);   // wake from dim/sleep
+  if (g & IMU_SHAKE) ui_dismiss_top_overlay();
   delay(5);
 }
