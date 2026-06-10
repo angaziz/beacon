@@ -24,7 +24,7 @@ Requirements: macOS 13+, Bluetooth, [Claude Code](https://claude.com/claude-code
 
 ### From source
 
-Xcode 15+ (or the command-line tools) is the only dependency:
+Xcode 16+ (or the command-line tools) is the only dependency (`swift build` may work on Xcode 15, but `swift test` trips a swift-driver crash on Swift 5.10 — CI uses the Swift 6 toolchain):
 
 ```bash
 cd hub
