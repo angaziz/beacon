@@ -42,16 +42,26 @@ struct TrendsView: View {
         Module {
             VStack(alignment: .leading, spacing: 8) {
                 Text(costScopeLabel).font(.system(size: 11, weight: .bold)).foregroundStyle(.secondary).tracking(0.5)
-                HStack {
-                    Text("Total").font(.system(size: 12)).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(String(format: "$%.2f est.", model.cost.totalUSD)).font(.system(size: 12, weight: .semibold))
+                if !model.costLoaded {
+                    Text("Calculating from transcripts…")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
+                } else if model.cost.rows.isEmpty {
+                    Text("No usage in this period")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
+                } else {
+                    HStack {
+                        Text("Total").font(.system(size: 12)).foregroundStyle(.secondary)
+                        Spacer()
+                        Text(String(format: "$%.2f est.", model.cost.totalUSD)).font(.system(size: 12, weight: .semibold))
+                    }
+                    ForEach(model.cost.rows, id: \.model) { row in
+                        CostRow(row: row, maxCost: maxRowCost)
+                    }
+                    Text("est. from transcripts at API list prices - plan is flat-rate")
+                        .font(.system(size: 9)).foregroundStyle(.tertiary)
                 }
-                ForEach(model.cost.rows, id: \.model) { row in
-                    CostRow(row: row, maxCost: maxRowCost)
-                }
-                Text("est. from transcripts at API list prices - plan is flat-rate")
-                    .font(.system(size: 9)).foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -64,11 +74,17 @@ struct TrendsView: View {
         let span: Int = { switch model.period { case .h6: return 6*3600; case .h24: return 24*3600; case .d7: return 7*86_400 } }()
         return (now - span)...now
     }
+    // Break threshold scales with zoom. Live samples are ~1/min, but Codex backfill is one point per turn
+    // (irregular, minutes-to-hours apart) — a short threshold would fragment a legitimately-active session
+    // into dots. Only a gap larger than this (real Hub-down time) should break the line.
+    private var breakSeconds: Int {
+        switch model.period { case .h6: return 900; case .h24: return 1800; case .d7: return 3*3600 }
+    }
     private var claudeSeries: ChartSeries {
-        ChartSeries.build(samples: model.historySamples, provider: .claude, metric: chartMetric, range: chartRange, breakSeconds: 600)
+        ChartSeries.build(samples: model.historySamples, provider: .claude, metric: chartMetric, range: chartRange, breakSeconds: breakSeconds)
     }
     private var codexSeries: ChartSeries {
-        ChartSeries.build(samples: model.historySamples, provider: .codex, metric: chartMetric, range: chartRange, breakSeconds: 600)
+        ChartSeries.build(samples: model.historySamples, provider: .codex, metric: chartMetric, range: chartRange, breakSeconds: breakSeconds)
     }
     private var axisLabels: [String] {
         let f = DateFormatter()

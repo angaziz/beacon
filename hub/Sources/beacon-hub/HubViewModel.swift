@@ -36,6 +36,7 @@ final class HubViewModel: ObservableObject {
     }
     @Published var historySamples: [UsageSample] = []      // raw ring-buffer samples for the chart
     @Published var cost: CostBreakdown = CostBreakdown(rows: [], totalUSD: 0)
+    @Published var costLoaded = false   // false until the first background transcript scan publishes
     @Published var claudePace: BurnPaceResult = BurnPaceResult(pace: nil, capEpoch: nil, style: nil)
     @Published var codexPace: BurnPaceResult = BurnPaceResult(pace: nil, capEpoch: nil, style: nil)
 

@@ -16,6 +16,10 @@ struct UsageChart: View {
             Chart {
                 segmentMarks(claude, color: .blue, name: "Claude")
                 segmentMarks(codex, color: .purple, name: "Codex")
+                // Always mark each provider's latest point, so a provider with only a few recent samples
+                // (e.g. forward-only Claude on a fresh install) is visible even when a LineMark can't draw.
+                latestPoint(claude, color: .blue, name: "Claude")
+                latestPoint(codex, color: .purple, name: "Codex")
                 RuleMark(y: .value("Cap", 100))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
                     .foregroundStyle(.red.opacity(0.4))
@@ -46,6 +50,15 @@ struct UsageChart: View {
                 .foregroundStyle(color)
                 .lineStyle(StrokeStyle(lineWidth: 1.5))
             }
+        }
+    }
+
+    @ChartContentBuilder
+    private func latestPoint(_ series: ChartSeries, color: Color, name: String) -> some ChartContent {
+        if let last = series.segments.last?.last {
+            PointMark(x: .value("t", last.ts), y: .value("pct", last.pct))
+                .symbolSize(18)
+                .foregroundStyle(color)
         }
     }
 }

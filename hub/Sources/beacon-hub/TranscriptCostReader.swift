@@ -23,7 +23,7 @@ final class TranscriptCostReader {
 
     func start() {
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + 2, repeating: 120)   // first scan shortly after launch, then every 2 min
+        t.schedule(deadline: .now() + 0.5, repeating: 120)   // first scan right after launch, then every 2 min
         t.setEventHandler { [weak self] in self?.scan() }
         timer = t
         t.resume()
@@ -50,10 +50,14 @@ final class TranscriptCostReader {
     private func scanTree(_ root: URL, kind: Kind) {
         guard let en = FileManager.default.enumerator(at: root,
                 includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]) else { return }
+        // Cost periods top out at "this week", so a file untouched for >8 days can't contribute. Skipping
+        // it at the stat (no read/parse) keeps the first scan fast on a large corpus (thousands of files).
+        let cutoff = Date(timeIntervalSinceNow: -8 * 86_400)
         for case let f as URL in en where f.pathExtension == "jsonl" {
             let attrs = try? f.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
             let mtime = attrs?.contentModificationDate ?? .distantPast
             let size = attrs?.fileSize ?? 0
+            if mtime < cutoff { continue }   // outside any cost period; never read it
             if let prev = scans[f.path], prev.mtime == mtime, prev.size == size { continue }   // unchanged
             guard let text = try? String(contentsOf: f, encoding: .utf8) else { continue }
             switch kind {

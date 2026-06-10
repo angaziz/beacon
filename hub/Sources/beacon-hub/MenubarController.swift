@@ -144,7 +144,7 @@ final class MenubarController: NSObject {
 
     // --- Trends payloads (issue #57). AppDelegate pushes cached values computed off the UI path. ---
     func setHistory(_ samples: [UsageSample]) { model.historySamples = samples }
-    func setCost(_ cost: CostBreakdown) { model.cost = cost }
+    func setCost(_ cost: CostBreakdown) { model.cost = cost; model.costLoaded = true }
     func setPace(claude: BurnPaceResult, codex: BurnPaceResult) {
         model.claudePace = claude
         model.codexPace = codex
@@ -215,5 +215,6 @@ extension MenubarController: NSPopoverDelegate {
     func popoverWillShow(_ notification: Notification) {
         onMenuWillOpen?()
         model.now = Date()   // refresh reset hints between polls
+        onPeriodChanged?()   // re-read the warm cost aggregator so the card is current on open (cheap)
     }
 }
