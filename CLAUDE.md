@@ -84,6 +84,17 @@ Permissions: Claude Code `PermissionRequest` hook → hub (HTTP) → BLE frame w
 - Firmware has **no compiled-in secrets**: WiFi via on-device `Beacon-setup` captive portal; user settings (tickers, theme, brightness, location) in NVS; defaults in `config/tickers.h`.
 - Hub reads the Claude token from Keychain (`Claude Code-credentials`) and Codex from `~/.codex/auth.json`.
 
+## Where Documents Go
+
+Always reuse the existing `docs/` structure — never create new top-level doc directories (no `docs/superpowers/`, `docs/<agent-name>/`, etc.):
+
+- `docs/specs/` — design documents (`YYYY-MM-DD-<topic>-design.md`)
+- `docs/plans/` — implementation plans (`<issue#>-<topic>.md` or `YYYY-MM-DD-<phase>-plan.md`)
+- `docs/research/` — research notes
+- `docs/spikes/` — throwaway hardware/coexistence proofs
+
+This applies to skills and subagents too: if a workflow (e.g., superpowers writing-plans) defaults to its own output location, redirect it to the directories above.
+
 ## Authoritative Docs
 
 - `DESIGN.md` — visual system: theme tokens, 7-theme catalog, screen states, safe-area. Read before any UI work.
