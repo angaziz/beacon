@@ -14,10 +14,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let poller = UsagePoller()
     private let firstRun = FirstRunWindowController()
     private let forgetWindow = ForgetWindowController()
+    private let location = LocationProvider()
 
     // Latest known state -- the source of truth we (re)send on heartbeat/reconnect.
     private var usage = Usage(claude: .unavailable, codex: .unavailable)   // merged; resent on heartbeat
     private var buddy = BuddyState()
+    private var lastFix: Loc?   // most recent CoreLocation fix (issue #54); rides the (re)connect full frame
     private var heartbeat: Timer?
 
     // Claude usage has two sources: the oauth poller (works without a CC session, but the endpoint can
@@ -34,9 +36,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startPoller()
         startFirstRun()
         startLoginItem()
+        startLocation()
 
+        // Heartbeat resends the full frame WITHOUT loc (issue #54): location rides the (re)connect frame
+        // and on-change frames only, never the 30s heartbeat.
         heartbeat = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.sendFullFrame() }
+            Task { @MainActor in self?.sendFullFrame(includeLocation: false) }
         }
     }
 
@@ -166,8 +171,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         central.onReady = { [weak self] in
             // Link state is refreshed by the isConnected didSet's onPhaseChange (fires just before
-            // this); onReady only resends the full frame to a freshly-(re)subscribed device.
-            Task { @MainActor in self?.sendFullFrame() }
+            // this); onReady only resends the full frame to a freshly-(re)subscribed device. The
+            // (re)connect frame carries the cached location fix (issue #54).
+            Task { @MainActor in self?.sendFullFrame(includeLocation: true) }
         }
         central.onCommand = { [weak self] cmd in
             Task { @MainActor in self?.handle(cmd) }
@@ -258,10 +264,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sendFrame(StatusFrame(buddy: state))
     }
 
+    // --- location ---
+
+    private func startLocation() {
+        location.onFix = { [weak self] fix in
+            guard let self else { return }
+            self.lastFix = fix
+            // On-change push: a loc-only frame (the device keeps its usage/buddy). The provider only
+            // fires on a meaningful change, so this is naturally throttled.
+            self.sendFrame(StatusFrame(loc: fix))
+        }
+        location.start()
+    }
+
     // --- frame send ---
 
-    private func sendFullFrame() {
-        sendFrame(StatusFrame(usage: usage, buddy: buddy))
+    // `includeLocation` rides the cached fix on the (re)connect frame but is dropped on the heartbeat.
+    private func sendFullFrame(includeLocation: Bool) {
+        sendFrame(StatusFrame(usage: usage, buddy: buddy, loc: includeLocation ? lastFix : nil))
     }
 
     private func sendFrame(_ frame: StatusFrame) {

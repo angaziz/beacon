@@ -9,6 +9,7 @@
 #include "core/datastore.h"
 #include "core/timekeep.h"
 #include "core/nvs.h"
+#include "core/location.h"
 #include "core/net.h"
 #include "core/provision.h"
 #include "core/fetch_task.h"
@@ -83,7 +84,8 @@ void setup() {
   LOGI("boot - core=%s", ESP_ARDUINO_VERSION_STR);
   enableLoopWDT();
 
-  nvs_begin();   // open persisted settings before anything reads them
+  nvs_begin();        // open persisted settings before anything reads them
+  location_begin();   // load the cached place/coords/source (issue #54) before fetch/UI read them
 
   if (!power_begin())   { LOGE("halt: power");   return; }
   delay(120);

@@ -40,6 +40,33 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil((obj["buddy"] as! [String: Any])["prompt"])  // absence of prompt => idle
     }
 
+    func testLocFrameEncodesAndOmitsOtherBlocks() throws {
+        // A loc-only on-change frame: loc present, usage/buddy absent (the device keeps their values).
+        let fix = Loc(lat: -6.91, lon: 107.61, tz: "Asia/Jakarta", name: "Sukajadi, Bandung")
+        let obj = try JSONSerialization.jsonObject(with: StatusFrame(loc: fix).encoded()) as! [String: Any]
+        XCTAssertEqual(obj["v"] as? Int, 1)
+        XCTAssertNil(obj["usage"]); XCTAssertNil(obj["buddy"])
+        let loc = obj["loc"] as! [String: Any]
+        XCTAssertEqual(loc["lat"] as? Double, -6.91)
+        XCTAssertEqual(loc["lon"] as? Double, 107.61)
+        XCTAssertEqual(loc["tz"] as? String, "Asia/Jakarta")
+        XCTAssertEqual(loc["name"] as? String, "Sukajadi, Bandung")
+    }
+
+    func testHeartbeatFrameOmitsLoc() throws {
+        // The heartbeat full frame must NOT carry loc (issue #54): loc rides connect/on-change only.
+        let obj = try JSONSerialization.jsonObject(
+            with: StatusFrame(usage: .init(claude: .unavailable, codex: .unavailable),
+                              buddy: BuddyState()).encoded()) as! [String: Any]
+        XCTAssertNil(obj["loc"])
+    }
+
+    func testLocRoundTrips() throws {
+        let fix = Loc(lat: 1.5, lon: 2.5, tz: "UTC", name: "Nowhere")
+        let back = try JSONDecoder().decode(Loc.self, from: JSONEncoder().encode(fix))
+        XCTAssertEqual(back, fix)
+    }
+
     func testParsePermission() {
         let approve = DeviceCommand.parse(Data(#"{"v":1,"cmd":"permission","id":"req_abc","decision":"approve"}"#.utf8))
         XCTAssertEqual(approve, .permission(id: "req_abc", approve: true))

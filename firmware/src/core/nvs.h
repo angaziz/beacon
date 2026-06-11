@@ -39,6 +39,13 @@ void    nvs_wifi_clear_dirty(void);
 bool    nvs_get_location(float* lat, float* lon, char* tz, size_t tz_cap);
 void    nvs_set_location(float lat, float lon, const char* tz);
 
+// Resolved place name + its source (issue #54); owned by core/location. Place getter returns false
+// when unset (caller keeps "--"). Source is a loc_source_t byte (0 none / 1 ip / 2 hub).
+bool    nvs_get_place(char* out, size_t cap);
+void    nvs_set_place(const char* name);
+uint8_t nvs_get_loc_src(uint8_t def);
+void    nvs_set_loc_src(uint8_t v);
+
 #ifdef __cplusplus
 }
 #endif

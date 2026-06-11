@@ -118,7 +118,7 @@ static void build(lv_obj_t* page) {
 
 static void update(void) {
   render_clock(s_clock, s_date);
-  { char c[40]; strncpy(c, geoip_city(), sizeof(c) - 1); c[sizeof(c) - 1] = 0;
+  { char c[48]; strncpy(c, geoip_city(), sizeof(c) - 1); c[sizeof(c) - 1] = 0;   // matches place[48] (issue #54)
     for (char* p = c; *p; ++p) *p = (char)tolower((unsigned char)*p);   // calm lane is lowercase
     lv_label_set_text(s_city, c); }
   const beacon_theme_t* t = theme_active();
