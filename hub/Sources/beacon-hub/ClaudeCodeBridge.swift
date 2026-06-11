@@ -38,6 +38,10 @@ final class ClaudeCodeBridge {
 
     // Buddy idle fields accumulated from session/statusline hooks; the active prompt is overlaid.
     private var buddy = BuddyState()
+    // Equality gates: CC re-invokes the statusline ~3x/s with byte-identical data (#59). Drop no-op
+    // deltas -- the 30s heartbeat still resends the full frame, so a stalled consumer catches up.
+    private var lastPublishedBuddy: BuddyState?
+    private var lastClaudeUsage: ProviderUsage?
 
     // Pending permission holds, keyed by the short BLE-safe id we mint. Resolving fulfills the held
     // HTTP response. Only ONE may be active (device holds a single prompt, records.h); a second hook
@@ -454,8 +458,11 @@ final class ClaudeCodeBridge {
         if let rl = body["rate_limits"] as? [String: Any] {
             let claude = ProviderUsage(h5: Self.rlWindow(rl["five_hour"]),
                                        d7: Self.rlWindow(rl["seven_day"]))
-            let cb = onClaudeUsage
-            DispatchQueue.main.async { cb?(claude) }
+            if claude != lastClaudeUsage {   // #59: skip the per-tick byte-identical resend.
+                lastClaudeUsage = claude
+                let cb = onClaudeUsage
+                DispatchQueue.main.async { cb?(claude) }
+            }
         }
         publishBuddy()
     }
@@ -495,6 +502,8 @@ final class ClaudeCodeBridge {
     }
 
     private func publishBuddy() {
+        guard buddy != lastPublishedBuddy else { return }   // #59: central gate for all callers.
+        lastPublishedBuddy = buddy
         let snapshot = buddy
         let cb = onBuddyUpdate
         DispatchQueue.main.async { cb?(snapshot) }
