@@ -44,17 +44,24 @@ public enum UsageNormalizer {
         return nil
     }
 
+    // Hoisted formatters (#66 L7): one instance each instead of constructing a formatter per parse.
+    // formatOptions are set once and never mutated, so concurrent date(from:) from the poller's parallel
+    // Claude/Codex fetch completions is safe (ISO8601DateFormatter reads are thread-safe).
+    private static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f
+    }()
+    private static let isoPlain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f
+    }()
+
     // Accept epoch seconds (Int/Double) or an ISO-8601 string; 0 if absent/unparseable.
     private static func epoch(_ any: Any?) -> Int {
         if let i = any as? Int { return i }
         if let d = any as? Double { return Int(d) }
         if let s = any as? String {
             if let i = Int(s) { return i }
-            let f = ISO8601DateFormatter()
-            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = f.date(from: s) { return Int(date.timeIntervalSince1970) }
-            f.formatOptions = [.withInternetDateTime]
-            if let date = f.date(from: s) { return Int(date.timeIntervalSince1970) }
+            if let date = isoFractional.date(from: s) { return Int(date.timeIntervalSince1970) }
+            if let date = isoPlain.date(from: s) { return Int(date.timeIntervalSince1970) }
         }
         return 0
     }

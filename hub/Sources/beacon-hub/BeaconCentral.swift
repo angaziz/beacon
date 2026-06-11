@@ -292,6 +292,9 @@ extension BeaconCentral: CBPeripheralDelegate {
         guard characteristic.uuid == Self.txChar, error == nil,
               let value = characteristic.value else { return }
         inbound.append(value)
+        // #66 L9: device frames are small + newline-framed; a peer that never sends '\n' must not grow
+        // inbound without bound. Drop the partial past a generous cap (well above any real frame).
+        if inbound.count > 8 * 1024 { inbound.removeAll(keepingCapacity: true) }
         drainInbound()
     }
 }

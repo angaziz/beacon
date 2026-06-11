@@ -44,11 +44,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         heartbeat = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.sendFullFrame(includeLocation: false) }
         }
+        heartbeat?.tolerance = 3   // #66 L6: let the OS coalesce the 30s heartbeat wakeup.
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        // Hooks can change out-of-band (manual edit) between launches; re-check cheaply on re-focus.
-        firstRun.setHooks(HooksInstaller.isInstalled() ? .ok : .bad)
+        // Hooks can change out-of-band (manual edit) between launches; re-check on re-focus. The check
+        // does sync file IO + JSON parse of ~/.claude/settings.json, so run it off the main thread (#66 L8).
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let ok = HooksInstaller.isInstalled()
+            Task { @MainActor in self?.firstRun.setHooks(ok ? .ok : .bad) }
+        }
         refreshLoginItem()   // cheap re-sync; the menu-open refresh is the reliable path for this accessory app.
     }
 
