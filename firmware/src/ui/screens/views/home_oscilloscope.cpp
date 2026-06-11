@@ -1,4 +1,5 @@
 #include "ui/screen.h"
+#include "ui/screens/screen_common.h"
 #include "ui/styles.h"
 #include "ui/state_view.h"
 #include "ui/theme.h"
@@ -25,12 +26,12 @@ static void update(void);
 
 // Clock + date from the time service. RTC time is always "live" (FR-HOME-3); show "--" until known.
 static void render_clock(lv_obj_t* clock, lv_obj_t* date) {
-  if (!timekeep_has_time()) { lv_label_set_text(clock, "--:--"); lv_label_set_text(date, "--"); return; }
+  if (!timekeep_has_time()) { txt_set(clock, "--:--"); txt_set(date, "--"); return; }
   struct tm lt; timekeep_localtime(&lt);
-  char hm[8];  strftime(hm, sizeof(hm), "%H:%M", &lt);            lv_label_set_text(clock, hm);
+  char hm[8];  strftime(hm, sizeof(hm), "%H:%M", &lt);            txt_set(clock, hm);
   char dt[24]; strftime(dt, sizeof(dt), "%a %d %b", &lt);
   for (char* p = dt; *p; ++p) *p = (char)toupper((unsigned char)*p);
-  lv_label_set_text(date, dt);
+  txt_set(date, dt);
 }
 
 static void wave_cb(lv_event_t* e) {
@@ -138,13 +139,13 @@ static void update(void) {
 
   char chip[24];
   if (sv_status(chip, sizeof(chip), &w.hdr, now)) {
-    lv_label_set_text(s_trig, chip);
-    lv_obj_set_style_text_color(s_trig, sv_severe(w.hdr.state) ? t->down : t->ink_dim, 0);
+    txt_set(s_trig, chip);
+    txt_color(s_trig, sv_severe(w.hdr.state) ? t->down : t->ink_dim);
   } else {
     char bv[12]; lv_color_t bc = batt_chip(bv, sizeof(bv), true, t);
     char out[20]; snprintf(out, sizeof(out), "BAT . %s", bv);
-    lv_label_set_text(s_trig, out);
-    lv_obj_set_style_text_color(s_trig, bc, 0);
+    txt_set(s_trig, out);
+    txt_color(s_trig, bc);
   }
 
   bool ph = sv_placeholder(w.hdr.state);
@@ -152,20 +153,20 @@ static void update(void) {
 
   char buf[16];
   if (ph) {
-    lv_label_set_text(s_temp, "--");
-    lv_label_set_text(s_humid, "--");
+    txt_set(s_temp, "--");
+    txt_set(s_humid, "--");
   } else {
     snprintf(buf, sizeof(buf), "%.1f\xC2\xB0", w.temp_c);
-    lv_label_set_text(s_temp, buf);
+    txt_set(s_temp, buf);
     snprintf(buf, sizeof(buf), "%.0f%%", w.humidity_pct);
-    lv_label_set_text(s_humid, buf);
+    txt_set(s_humid, buf);
   }
   // Condition has no decoded label source in this chunk => placeholder.
-  lv_label_set_text(s_sky, "--");
+  txt_set(s_sky, "--");
 
-  lv_obj_set_style_text_color(s_temp, vc, 0);
-  lv_obj_set_style_text_color(s_humid, vc, 0);
-  lv_obj_set_style_text_color(s_sky, t->ink_dim, 0);
+  txt_color(s_temp, vc);
+  txt_color(s_humid, vc);
+  txt_color(s_sky, t->ink_dim);
 }
 
 extern const screen_view_t home_oscilloscope_view = { build, update };

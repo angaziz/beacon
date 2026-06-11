@@ -1,4 +1,5 @@
 #include "ui/wifi_panel.h"
+#include "ui/screens/screen_common.h"
 #include "ui/theme.h"
 #include "ui/carousel.h"
 #include "config/layout.h"
@@ -115,11 +116,11 @@ static void build_list(void) {
 static void refresh(void) {
   const beacon_theme_t* t = theme_active();
   char st[48]; net_status_str(st, sizeof(st));
-  lv_label_set_text(s_status, st);
-  lv_label_set_text(s_toggle, net_is_enabled() ? "DISCONNECT" : "CONNECT");
+  txt_set(s_status, st);
+  txt_set(s_toggle, net_is_enabled() ? "DISCONNECT" : "CONNECT");
   char active[WIFI_SSID_CAP]; net_active_ssid(active, sizeof(active));
   for (uint8_t i = 0; i < s_row_n; i++)
-    lv_obj_set_style_bg_color(s_row_dot[i], (active[0] && strcmp(active, s_row_ssid[i]) == 0) ? t->accent : t->line, 0);
+    bg_color_if(s_row_dot[i], (active[0] && strcmp(active, s_row_ssid[i]) == 0) ? t->accent : t->line, 0);
 }
 
 // --- add network (on-demand setup portal, no reboot) ------------------------
@@ -137,16 +138,16 @@ static void add_tick(void) {
   if (!s_add || s_add_done) return;
   const beacon_theme_t* t = theme_active();
   if (provision_runtime_saved()) {
-    lv_label_set_text(s_add_status, "added - you can leave Beacon-setup");
-    lv_obj_set_style_text_color(s_add_status, t->accent, 0);
+    txt_set(s_add_status, "added - you can leave Beacon-setup");
+    txt_color(s_add_status, t->accent);
     net_request_provision(false);      // done: tear the portal down (creds already in NVS)
     provision_runtime_clear_saved();
     s_add_done = true;
     build_list();                      // reflect the new network in the list behind the overlay
     return;
   }
-  lv_label_set_text(s_add_status, provision_active() ? "join \"Beacon-setup\", then enter your Wi-Fi"
-                                                     : "starting setup...");
+  txt_set(s_add_status, provision_active() ? "join \"Beacon-setup\", then enter your Wi-Fi"
+                                           : "starting setup...");
 }
 
 static void open_add(void) {

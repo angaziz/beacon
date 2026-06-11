@@ -60,18 +60,18 @@ static void build(lv_obj_t* page) {
 }
 
 static void update(void) {
-  char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text_fmt(s_wifi_val, "%s >", wbuf);
-  if (theme_active()) lv_label_set_text_fmt(s_theme_val, "%s >", theme_active()->id);
+  char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); txt_fmt(s_wifi_val, "%s >", wbuf);
+  if (theme_active()) txt_fmt(s_theme_val, "%s >", theme_active()->id);
 
   char db[12], sb[12];
-  settings_power_dim_label(db, sizeof(db));   lv_label_set_text(s_dim_val, db);
-  settings_power_sleep_label(sb, sizeof(sb)); lv_label_set_text(s_sleep_val, sb);
+  settings_power_dim_label(db, sizeof(db));   txt_set(s_dim_val, db);
+  settings_power_sleep_label(sb, sizeof(sb)); txt_set(s_sleep_val, sb);
 
   int pct = power_battery_pct();
-  if (pct >= 0) lv_label_set_text_fmt(s_batt_val, "%d%%%s", pct, power_charging() ? "+" : "");
-  else          lv_label_set_text(s_batt_val, power_charging() ? "USB" : "--");
-  lv_obj_set_style_text_color(s_batt_val, power_charging() ? theme_active()->accent
-    : (pct >= 0 && pct <= 20 ? theme_active()->down : theme_active()->ink), 0);
+  if (pct >= 0) txt_fmt(s_batt_val, "%d%%%s", pct, power_charging() ? "+" : "");
+  else          txt_set(s_batt_val, power_charging() ? "USB" : "--");
+  txt_color(s_batt_val, power_charging() ? theme_active()->accent
+    : (pct >= 0 && pct <= 20 ? theme_active()->down : theme_active()->ink));
 }
 
 extern const screen_view_t settings_editorial_view = { build, update };
