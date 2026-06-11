@@ -202,6 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menubar.setAlert(nil)   // device reachable again => clear any undeliverable-prompt alert.
         }
         bridge?.setDeviceConnected(connected)
+        poller.setDeviceConnected(connected)   // #64: back off the usage poll cadence while disconnected.
 
         // Drive the first-run window from the SAME phase stream (no second CBCentralManager): Bluetooth
         // is bad only when powered-off/unauthorized/unavailable; paired tracks live .connected.
@@ -246,6 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Claude usage from Claude Code's statusline rate_limits (overrides the poller; survives a 429).
     private func onStatuslineClaude(_ c: ProviderUsage) {
+        poller.noteStatusline()   // #64: a live statusline => skip the (often-429) Claude oauth poll.
         guard c != statuslineClaude else { return }   // #59: statusline re-fires ~3x/s, usually unchanged.
         statuslineClaude = c
         rebuildUsage()
