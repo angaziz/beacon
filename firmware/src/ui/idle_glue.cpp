@@ -2,6 +2,7 @@
 #include "core/idle.h"
 #include "core/nvs.h"
 #include "ui/durations.h"
+#include "ui/carousel.h"
 #include "hal/display.h"
 #include <lvgl.h>
 
@@ -34,5 +35,8 @@ void idle_service(void) {
     case IDLE_DIM:    display_brightness(IDLE_DIM_RAW);            break;
     case IDLE_SLEEP:  display_brightness(0);                       break;
   }
+  // #60: stop the carousel repaint tick while dim/asleep (no invalidations => no flushes => the panel
+  // can sleep); resume + immediately refresh on wake. The brightness write above still runs first.
+  carousel_set_tick_paused(p != IDLE_ACTIVE);
   s_phase = p;
 }

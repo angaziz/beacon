@@ -49,52 +49,52 @@ static void show_prompt(bool on) {
 static void update(void) {
   buddy_rec_t b = ds_get_buddy(); uint32_t now = now_s();
   slot_set(s_slot, "REQ --", &b.hdr, now);
-  lv_label_set_text_fmt(s_status, "%u RUNNING . %u WAITING . %uK TOK . CTX %u%%",
+  txt_fmt(s_status, "%u RUNNING . %u WAITING . %uK TOK . CTX %u%%",
     b.running, b.waiting, (unsigned)(b.tokens/1000), b.context_pct);
   bool disabled = (b.hdr.state == ST_HUB_OFFLINE);
   if (b.prompt.present && !disabled) {
     show_prompt(true);
-    lv_label_set_text(s_tool, b.prompt.tool);
-    lv_label_set_text(s_cmd, b.prompt.hint);
+    txt_set(s_tool, b.prompt.tool);
+    txt_set(s_cmd, b.prompt.hint);
     const beacon_theme_t* t = theme_active();
     switch (b.prompt.decision_state) {
     case PROMPT_PENDING:   // sent; both actions dim until the truthful ack (issue #8).
-      lv_label_set_text(s_kicker, "SENT -- AWAITING");
-      lv_obj_set_style_text_color(s_kicker, t->accent, 0);
-      lv_label_set_text(s_deny, "< DENY");
-      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
-      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
+      txt_set(s_kicker, "SENT -- AWAITING");
+      txt_color(s_kicker, t->accent);
+      txt_set(s_deny, "< DENY");
+      txt_color(s_deny, t->ink_dim);
+      txt_color(s_approve, t->ink_dim);
       break;
     case PROMPT_SENT_OK:   // applied; held briefly before the tick clears (issue #12).
-      lv_label_set_text(s_kicker, "SENT OK");
-      lv_obj_set_style_text_color(s_kicker, t->up, 0);
-      lv_label_set_text(s_deny, "< DENY");
-      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
-      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
+      txt_set(s_kicker, "SENT OK");
+      txt_color(s_kicker, t->up);
+      txt_set(s_deny, "< DENY");
+      txt_color(s_deny, t->ink_dim);
+      txt_color(s_approve, t->ink_dim);
       break;
     case PROMPT_TOO_LATE:   // did not apply; deny becomes the dismiss affordance.
-      lv_label_set_text(s_kicker, "TOO LATE -- DIDN'T APPLY");
-      lv_obj_set_style_text_color(s_kicker, t->down, 0);
-      lv_label_set_text(s_deny, "< DISMISS");
-      lv_obj_set_style_text_color(s_deny, t->ink, 0);
-      lv_obj_set_style_text_color(s_approve, t->ink_dim, 0);
+      txt_set(s_kicker, "TOO LATE -- DIDN'T APPLY");
+      txt_color(s_kicker, t->down);
+      txt_set(s_deny, "< DISMISS");
+      txt_color(s_deny, t->ink);
+      txt_color(s_approve, t->ink_dim);
       break;
     default: {
       char eb[32];
       snprintf(eb, sizeof(eb), "PERMISSION -- APPROVE? %us", (unsigned)buddy_prompt_secs_left(&b, uptime_s()));
-      lv_label_set_text(s_kicker, eb);
-      lv_obj_set_style_text_color(s_kicker, t->accent, 0);
-      lv_label_set_text(s_deny, "< DENY");
-      lv_obj_set_style_text_color(s_deny, t->ink_dim, 0);
-      lv_obj_set_style_text_color(s_approve, t->accent, 0);
+      txt_set(s_kicker, eb);
+      txt_color(s_kicker, t->accent);
+      txt_set(s_deny, "< DENY");
+      txt_color(s_deny, t->ink_dim);
+      txt_color(s_approve, t->accent);
       break;
     }
     }
   } else {
     show_prompt(false);
-    if (disabled) lv_label_set_text(s_idle, "hub offline");
-    else if (b.entry_count > 0) lv_label_set_text(s_idle, b.entries[0]);
-    else lv_label_set_text(s_idle, "idle");
+    if (disabled) txt_set(s_idle, "hub offline");
+    else if (b.entry_count > 0) txt_set(s_idle, b.entries[0]);
+    else txt_set(s_idle, "idle");
   }
 }
 

@@ -42,12 +42,13 @@ static void update(void) {
   record_hdr_t worst; worst.state = ST_LIVE; worst.err = ERR_NONE; worst.last_updated = now;
   for (int i = 0; i < s_rows; i++) {
     finance_rec_t f = ds_get_finance(i);
-    lv_label_set_text(s_row[i].id, fin_name(i, f));
-    if (sv_placeholder(f.hdr.state)) { lv_label_set_text(s_row[i].val, "--"); lv_label_set_text(s_row[i].chg, ""); }
+    txt_set(s_row[i].id, fin_name(i, f));
+    if (sv_placeholder(f.hdr.state)) { txt_set(s_row[i].val, "--"); txt_set(s_row[i].chg, ""); }
     else {
-      char v[40]; fmt_value(v, sizeof(v), f.value); lv_label_set_text(s_row[i].val, v);
-      char c[16]; int dir = fmt_change(c, sizeof(c), f.change_pct); lv_label_set_text(s_row[i].chg, c);
-      style_set(s_row[i].chg, &S.up, dir > 0); style_set(s_row[i].chg, &S.down, dir < 0);
+      char v[40]; fmt_value(v, sizeof(v), f.value); txt_set(s_row[i].val, v);
+      char c[16]; int dir = fmt_change(c, sizeof(c), f.change_pct); txt_set(s_row[i].chg, c);
+      const beacon_theme_t* t = theme_active();
+      if (t) txt_color(s_row[i].chg, dir > 0 ? t->up : dir < 0 ? t->down : t->ink_dim);
     }
     value_state(s_row[i].val, f.hdr.state);
     if (f.hdr.state != ST_LIVE) worst = f.hdr;

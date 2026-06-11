@@ -23,6 +23,7 @@ static lv_obj_t* s_pages[8];
 static lv_obj_t* s_dots[8];
 static int s_current = 0;
 static bool s_settling = false;   // guards reentrant SCROLL_END from our own recenter()
+static lv_timer_t* s_tick = nullptr;   // the 500ms visible-screen update timer; paused while idle (#60)
 
 static void set_dots(int active) {
   const beacon_theme_t* t = theme_active();
@@ -136,7 +137,17 @@ void carousel_init(void) {
   s_current = start;
   recenter();                                                      // pin start to the center slot
   show(start);
-  lv_timer_create(tick_cb, 500, NULL);
+  s_tick = lv_timer_create(tick_cb, 500, NULL);
+}
+
+// #60: pause the per-tick repaint while the panel is dim/asleep so the display can actually sleep
+// (no update() => no LVGL invalidations => no QSPI flushes). Resume runs one immediate update() so a
+// wake shows current data with no up-to-500ms lag.
+void carousel_set_tick_paused(bool paused) {
+  if (!s_tick) return;
+  if (paused) { lv_timer_pause(s_tick); return; }
+  lv_timer_resume(s_tick);
+  if (MODULES[s_current]->update) MODULES[s_current]->update();
 }
 
 int carousel_current(void) { return s_current; }
