@@ -25,40 +25,71 @@ final class UsagePoller {
     private let claude: UsageProvider
     private let codex: UsageProvider
     private let interval: TimeInterval = 45
+    private let backoff: TimeInterval = 300   // disconnected cadence (#64): no live device => no sub-min need.
     private let session: URLSession
     private var timer: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "beacon.usage")
 
-    init(claude: UsageProvider = ClaudeUsageProvider(),
-         codex: UsageProvider = CodexUsageProvider()) {
-        self.claude = claude
-        self.codex = codex
+    // Gating state, all confined to `queue`. Updated from other threads only via the async setters below.
+    private var connected = true
+    private var lastStatuslineAt: Date?
+    private var lastPollAt = Date.distantPast
+    private var lastClaudeResult = ProviderResult(usage: .unavailable, reason: nil)   // reused when Claude is skipped.
+
+    // Default the providers to the configured 15s-timeout session (#64): previously they fell back to
+    // URLSession.shared (60s), so a stalled network could hang a poll past the 45s tick and stack.
+    init(claude: UsageProvider? = nil, codex: UsageProvider? = nil) {
         let cfg = URLSessionConfiguration.ephemeral
         cfg.timeoutIntervalForRequest = 15
-        self.session = URLSession(configuration: cfg)
+        let session = URLSession(configuration: cfg)
+        self.session = session
+        self.claude = claude ?? ClaudeUsageProvider(session: session)
+        self.codex = codex ?? CodexUsageProvider(session: session)
     }
+
+    // AppDelegate -> poller, thread-safe. setDeviceConnected drives the disconnected backoff; noteStatusline
+    // stamps each statusline-Claude arrival so the Claude endpoint is skipped while the shim is fresh.
+    func setDeviceConnected(_ b: Bool) { queue.async { [weak self] in self?.connected = b } }
+    func noteStatusline() { queue.async { [weak self] in self?.lastStatuslineAt = Date() } }
 
     func start() {
         let t = DispatchSource.makeTimerSource(queue: queue)
         t.schedule(deadline: .now(), repeating: interval)
-        t.setEventHandler { [weak self] in self?.poll() }
+        t.setEventHandler { [weak self] in self?.tick() }
         timer = t
         t.resume()
     }
 
-    private func poll() {
+    // Runs every `interval`; decides whether to poll (backoff while disconnected) and whether to include
+    // the Claude endpoint (skipped while the statusline shim is fresh).
+    private func tick() {
+        let now = Date()
+        guard UsagePollDecision.shouldPoll(connected: connected,
+                                           secondsSinceLastPoll: now.timeIntervalSince(lastPollAt),
+                                           backoff: backoff) else { return }
+        lastPollAt = now
+        let age = lastStatuslineAt.map { now.timeIntervalSince($0) }
+        poll(includeClaude: UsagePollDecision.shouldPollClaude(statuslineAge: age, interval: interval))
+    }
+
+    private func poll(includeClaude: Bool) {
         let group = DispatchGroup()
-        var claudeRes: ProviderResult?
+        var claudeRes: ProviderResult? = includeClaude ? nil : lastClaudeResult   // reuse last when skipping.
         var codexRes: ProviderResult?
 
-        group.enter()
-        claude.fetch { claudeRes = $0; group.leave() }
+        if includeClaude {
+            group.enter()
+            claude.fetch { claudeRes = $0; group.leave() }
+        }
         group.enter()
         codex.fetch { codexRes = $0; group.leave() }
 
         group.notify(queue: queue) { [weak self] in
             guard let self else { return }
+            // When Claude is skipped, claudeRes is pre-seeded to lastClaudeResult, so this fallback only
+            // applies on a genuine fetch failure.
             let c = claudeRes ?? ProviderResult(usage: .unavailable, reason: "Claude unavailable")
+            if includeClaude { self.lastClaudeResult = c }
             let x = codexRes ?? ProviderResult(usage: .unavailable, reason: "Codex unavailable")
             let usage = Usage(claude: c.usage, codex: x.usage)
             let errors = [c.reason, x.reason].compactMap { $0 }
