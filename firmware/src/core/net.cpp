@@ -5,6 +5,7 @@
 #include "config/root_ca.h"
 #include "util/log.h"
 #include <Arduino.h>
+#include <string.h>
 #include <WiFi.h>
 #include <WiFiMulti.h>
 #include <WiFiClientSecure.h>
@@ -15,6 +16,47 @@
 static volatile bool      s_up = false;
 static SemaphoreHandle_t  s_tls_mtx = nullptr;
 static bool               s_ntp_started = false;
+
+// Persistent HTTPS connection reused across consecutive same-host fetches (#61). A fresh
+// WiFiClientSecure per fetch re-ran a ~40-50KB mbedtls handshake every ~25-30s -- the classic
+// internal-heap fragmentation pattern. The fetch task drains same-host due slots back-to-back
+// (see fetch_task.cpp), so one handshake serves a whole sweep; net_close_idle frees the socket (and
+// its mbedtls context) between sweeps. All access is from the single Core-0 fetch task.
+static WiFiClientSecure   s_cli;
+static HTTPClient         s_http;
+static char               s_host[80] = {0};
+static bool               s_open = false;
+static uint32_t           s_open_ms = 0;     // millis() of last use, for the idle close
+static uint32_t           s_handshakes = 0;  // cumulative; logged so a sweep's handshake count is verifiable
+#define NET_IDLE_CLOSE_MS 8000u
+
+// A Stream sink that copies the response body straight into the caller's fixed buffer -- no body-sized
+// String alloc (#61). Overflow is discarded but still "accepted" so HTTPClient::writeToStream drains
+// the whole body off the socket (keep-alive stays clean for reuse). chunked + Content-Length both work.
+struct BufWriter : public Stream {
+  char*  buf; size_t cap; size_t len = 0; bool over = false;
+  BufWriter(char* b, size_t c) : buf(b), cap(c) {}
+  size_t write(uint8_t c) override {
+    if (cap && len < cap - 1) buf[len++] = (char)c; else over = true; return 1;
+  }
+  size_t write(const uint8_t* d, size_t n) override {
+    size_t room = (cap && len < cap - 1) ? (cap - 1 - len) : 0;
+    size_t w = n < room ? n : room; if (w) memcpy(buf + len, d, w);
+    len += w; if (w < n) over = true; return n;   // claim n so writeToStream keeps draining
+  }
+  int available() override { return 0; }
+  int read() override { return -1; }
+  int peek() override { return -1; }
+};
+
+// caller holds s_tls_mtx (or is the sole fetch-task path before the lock is contended)
+static void net_conn_close(void) {
+  if (!s_open) return;
+  s_http.end();    // with reuse this only detaches; stop() actually closes the TLS/TCP socket
+  s_cli.stop();
+  s_open = false;
+  s_host[0] = 0;
+}
 // WiFiMulti is touched ONLY by net_service() (Core-0). The UI/portal mutate the saved list (nvs, under
 // its own mutex) + set the dirty flag; net_service rebuilds the AP set + runs the (blocking) reconnect.
 static WiFiMulti          s_multi;
@@ -161,32 +203,58 @@ data_err_t net_https_get(const char* host, const char* path,
   if (!s_tls_mtx || xSemaphoreTake(s_tls_mtx, pdMS_TO_TICKS(15000)) != pdTRUE) return ERR_TIMEOUT;
 
   data_err_t err;
-  {
-    WiFiClientSecure client;
-    client.setCACert(ROOT_CA_BUNDLE);        // cert-validated; never setInsecure() (tech.md §9)
-    client.setHandshakeTimeout(12);          // seconds
-    char url[256];
-    snprintf(url, sizeof(url), "https://%s%s", host, path);
-    HTTPClient https;
-    https.setConnectTimeout(8000);
-    https.setTimeout(8000);
-    if (!https.begin(client, url)) { err = ERR_NO_ROUTE; }
-    else {
-      for (int i = 0; i < hdr_n; i++) https.addHeader(hdr_keys[i], hdr_vals[i]);
-      int code = https.GET();
-      if (status) *status = code;
-      err = map_http(code);
-      if (err == ERR_NONE) {
-        String body = https.getString();
-        if (out && cap) { strncpy(out, body.c_str(), cap - 1); out[cap - 1] = 0; }
-        if (out && body.length() >= cap) LOGW("http body truncated host=%s len=%u cap=%u",
-                                              host, (unsigned)body.length(), (unsigned)cap);
-      } else {
-        LOGW("http get host=%s code=%d", host, code);
-      }
-      https.end();
+  char url[256];
+  snprintf(url, sizeof(url), "https://%s%s", host, path);
+
+  // Reuse the open socket only for the same host while it is still connected; otherwise tear it down
+  // and hand back a fresh one (the handshake then runs inside GET()).
+  bool reuse = s_open && s_cli.connected() && strcmp(s_host, host) == 0;
+  if (!reuse) {
+    net_conn_close();
+    s_cli.setCACert(ROOT_CA_BUNDLE);       // cert-validated; never setInsecure() (tech.md §9)
+    s_cli.setHandshakeTimeout(12);         // seconds
+    strncpy(s_host, host, sizeof(s_host) - 1); s_host[sizeof(s_host) - 1] = 0;
+  }
+  s_http.setReuse(true);
+  s_http.setConnectTimeout(8000);
+  s_http.setTimeout(8000);
+  if (!s_http.begin(s_cli, url)) {
+    net_conn_close();
+    err = ERR_NO_ROUTE;
+  } else {
+    for (int i = 0; i < hdr_n; i++) s_http.addHeader(hdr_keys[i], hdr_vals[i]);
+    if (!reuse) { s_handshakes++; LOGI("tls handshake host=%s total=%u", host, (unsigned)s_handshakes); }
+    int code = s_http.GET();
+    if (status) *status = code;
+    err = map_http(code);
+    if (err == ERR_NONE) {
+      // Stream the body straight into the caller's buffer -- no body-sized String (#61). writeToStream
+      // decodes chunked + Content-Length and drains the whole body, so the keep-alive socket stays clean.
+      BufWriter bw(out, cap);
+      int wrote = s_http.writeToStream(&bw);
+      if (out && cap) out[bw.len] = 0;
+      if (wrote < 0) { net_conn_close(); }   // read error mid-body: socket suspect, force a fresh one
+      else if (bw.over) LOGW("http body truncated host=%s cap=%u", host, (unsigned)cap);
+    } else {
+      LOGW("http get host=%s code=%d", host, code);
     }
+    s_http.end();    // reuse=true keeps the socket alive for the next same-host call
+    if (s_cli.connected()) { s_open = true; s_open_ms = millis(); }
+    else { s_open = false; s_host[0] = 0; }
   }
   xSemaphoreGive(s_tls_mtx);
   return err;
 }
+
+// Fetch task: drop the kept-alive socket once a sweep is done so its mbedtls context frees between
+// sweeps (a long-idle keep-alive would be closed server-side anyway). Non-blocking; skips if contended.
+void net_close_idle(void) {
+  if (!s_open) return;
+  if (!s_tls_mtx || xSemaphoreTake(s_tls_mtx, 0) != pdTRUE) return;
+  if (s_open && (uint32_t)(millis() - s_open_ms) > NET_IDLE_CLOSE_MS) net_conn_close();
+  xSemaphoreGive(s_tls_mtx);
+}
+
+// Fetch task: the host of the currently-open connection ("" if none), so the scheduler can drain
+// same-host due slots over the one open socket. Read only from the fetch task (no cross-core race).
+const char* net_open_host(void) { return (s_open && s_cli.connected()) ? s_host : ""; }

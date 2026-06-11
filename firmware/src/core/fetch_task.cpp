@@ -21,6 +21,19 @@ static uint32_t cadence_of(int slot) {
   return (slot == SRC_WEATHER) ? WEATHER_CADENCE_S : DEFAULT_TICKERS[slot - 1].cadence_s;
 }
 
+// Host each slot fetches from -- lets the scheduler drain same-host due slots back-to-back so one TLS
+// handshake serves the whole sweep (#61). Must match the host strings passed to net_https_get in the
+// fetch modules; a mismatch only loses the reuse (falls back to oldest-due), never correctness.
+static const char* slot_host(int slot) {
+  if (slot == SRC_WEATHER) return "api.open-meteo.com";
+  switch (DEFAULT_TICKERS[slot - 1].source) {
+    case SRC_YAHOO:       return "query1.finance.yahoo.com";
+    case SRC_BINANCE:     return "data-api.binance.vision";
+    case SRC_FRANKFURTER: return "api.frankfurter.dev";
+    default:              return "";
+  }
+}
+
 static data_err_t run_slot(int slot) {
   return (slot == SRC_WEATHER) ? fetch_weather() : fetch_finance((uint8_t)(slot - 1));
 }
@@ -60,9 +73,16 @@ static void fetch_task(void*) {
           fetch_geoip();                         // resolve lat/lon + tz before weather; best-effort
           geo_pending = false;                   // weather (next iterations) then uses the resolved coords
         } else {
+          // Drain a due slot on the already-open host first so a sweep reuses one kept-alive socket
+          // (#61); otherwise take the oldest-due slot.
           int pick = -1; uint32_t oldest = now + 1;
-          for (int i = 0; i < slots; i++)
-            if (s_next_due[i] <= now && s_next_due[i] < oldest) { oldest = s_next_due[i]; pick = i; }
+          const char* openh = net_open_host();
+          if (openh[0])
+            for (int i = 0; i < slots; i++)
+              if (s_next_due[i] <= now && strcmp(slot_host(i), openh) == 0) { pick = i; break; }
+          if (pick < 0)
+            for (int i = 0; i < slots; i++)
+              if (s_next_due[i] <= now && s_next_due[i] < oldest) { oldest = s_next_due[i]; pick = i; }
           if (pick >= 0) {
             data_err_t e = run_slot(pick);
             now = (uint32_t)timekeep_now();       // fetch blocks; re-read clock for scheduling
@@ -72,9 +92,12 @@ static void fetch_task(void*) {
       }
     }
 
+    net_close_idle();   // drop the kept-alive HTTPS socket once a sweep goes idle (#61)
+
     if (++hk % 10 == 0)
-      LOGI("heap: int_free=%u psram_free=%u up=%d time=%d",
+      LOGI("heap: int_free=%u int_min=%u psram_free=%u up=%d time=%d",
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+           (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), up, timekeep_has_time());
 
     vTaskDelay(pdMS_TO_TICKS(1000));
