@@ -70,6 +70,10 @@ final class BeaconCentral: NSObject {
     private var peripheral: CBPeripheral?
     private var rx: CBCharacteristic?
     private var tx: CBCharacteristic?
+    // Identity of the last successfully-connected device, retained across disconnects so the drop path
+    // issues a low-power pending connect() instead of scanning (#63). Cleared by forgetAndRescan.
+    private var knownId: UUID?
+    private var knownName: String?
 
     // Accumulates inbound TX bytes; a frame may span several notifies and a notify several frames.
     private var inbound = Data()
@@ -108,8 +112,9 @@ final class BeaconCentral: NSObject {
         queue.async { [weak self] in
             guard let self else { return }
             self.hadConnection = false   // honest "Searching" (not "reconnecting" to a device we just forgot).
+            self.knownId = nil; self.knownName = nil   // drop the pending-connect target => rescan from clean.
             self.escalation.reset()       // explicit re-pair => full fresh budget.
-            self.handleDisconnect()       // cancels connection, nils peripheral/rx/tx, clears inbound, beginScan().
+            self.handleDisconnect()       // cancels connection, nils peripheral/rx/tx, clears inbound, reconnect().
         }
     }
 
@@ -129,6 +134,32 @@ final class BeaconCentral: NSObject {
         escalation.recordAttemptStart(now: Self.monotonicNow())   // start the deadline clock at the first scan.
         central.scanForPeripherals(withServices: [Self.service], options: nil)
         setPhase(hadConnection ? .reconnecting : .searching)
+    }
+
+    // (Re)establish the link. For a previously-paired device a pending connect() is the canonical
+    // low-power reconnect (#63): no scan, no timeout -- the controller wakes only when THAT device
+    // advertises, so an off/out-of-range device costs nothing. Scanning (the highest-power CB mode) is
+    // reserved for first pair / forget-and-rescan, where there is no known peripheral to target.
+    private func reconnect() {
+        guard central.state == .poweredOn else { return }
+        if hadConnection, let id = knownId,
+           let p = central.retrievePeripherals(withIdentifiers: [id]).first {
+            inbound.removeAll(keepingCapacity: true)
+            peripheral = p
+            connectedName = knownName
+            p.delegate = self
+            setPhase(.reconnecting)
+            // Defer the connect one queue turn: the error path cancels this same peripheral just before
+            // calling reconnect(), and cancel-then-connect on one CBPeripheral in a single turn is racy.
+            // Re-validate (a Forget/new state may have intervened) before issuing the pending connect.
+            queue.async { [weak self] in
+                guard let self, self.central.state == .poweredOn,
+                      self.peripheral === p, self.knownId == id else { return }
+                self.central.connect(p, options: nil)   // pending: fires didConnect if/when the device returns.
+            }
+        } else {
+            beginScan()
+        }
     }
 
     private func handleDisconnect() {
@@ -154,7 +185,7 @@ final class BeaconCentral: NSObject {
             setPhase(.pairingFailed)
             return
         }
-        beginScan()   // auto-reconnect (FR-HUB-3): rescan immediately.
+        reconnect()   // auto-reconnect (FR-HUB-3): pending-connect a known device, else rescan.
     }
 
     private func drainInbound() {
@@ -175,7 +206,7 @@ final class BeaconCentral: NSObject {
 extension BeaconCentral: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
-        case .poweredOn: beginScan()
+        case .poweredOn: reconnect()   // pending-connect a known device (e.g. after a BT off/on), else scan.
         case .poweredOff: isConnected = false; setPhase(.bluetoothOff)
         case .unauthorized: isConnected = false; setPhase(.unauthorized)
         default: isConnected = false; setPhase(.unavailable)
@@ -206,7 +237,9 @@ extension BeaconCentral: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral,
                         error: Error?) {
         // Swallow the echo of our own cancelPeripheralConnection (already torn down + counted); only a
-        // spontaneous disconnect (device out of range, etc.) should re-run the teardown.
+        // spontaneous disconnect (device out of range, etc.) should re-run the teardown. The echo is
+        // queued ahead of any deferred reconnect() connect, so returning here never cancels that pending
+        // connect -- it just skips a redundant teardown.
         if expectingDisconnect { expectingDisconnect = false; return }
         handleDisconnect()
     }
@@ -245,6 +278,8 @@ extension BeaconCentral: CBPeripheralDelegate {
             return
         }
         if characteristic.isNotifying && rx != nil {
+            knownId = peripheral.identifier   // #63: a fully-paired device is now the pending-connect target.
+            knownName = connectedName
             isConnected = true
             let ready = onReady
             DispatchQueue.main.async { ready?() }   // caller resends a full status frame.
