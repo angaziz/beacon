@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pollerCodex: ProviderUsage = .unavailable
     private var statuslineClaude: ProviderUsage?
     private var usageErrors: [String] = []
+    private var lastUsageErrors: [String] = []   // #59: last value handed to setUsage/BLE, for the equality gate.
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         startBridge()
@@ -245,21 +246,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Claude usage from Claude Code's statusline rate_limits (overrides the poller; survives a 429).
     private func onStatuslineClaude(_ c: ProviderUsage) {
+        guard c != statuslineClaude else { return }   // #59: statusline re-fires ~3x/s, usually unchanged.
         statuslineClaude = c
         rebuildUsage()
     }
 
     private func rebuildUsage() {
         let claude = statuslineClaude ?? pollerClaude
-        usage = Usage(claude: claude, codex: pollerCodex)
+        let merged = Usage(claude: claude, codex: pollerCodex)
         // Drop the Claude poller error once the statusline is supplying usage.
         let errors = statuslineClaude == nil ? usageErrors
             : usageErrors.filter { !$0.lowercased().contains("claude") }
+        // #59: skip the BLE frame, the @Published writes, and the lastSync/now restamp on a no-op.
+        // The 30s heartbeat still resends the full frame, so a device that missed nothing loses nothing.
+        guard merged != usage || errors != lastUsageErrors else { return }
+        usage = merged
+        lastUsageErrors = errors
         menubar.setUsage(usage, errors: errors)
         sendFrame(StatusFrame(usage: usage))
     }
 
     private func onBuddy(_ state: BuddyState) {
+        guard state != buddy else { return }   // #59: the bridge already gates, but keep AppDelegate self-consistent.
         self.buddy = state
         sendFrame(StatusFrame(buddy: state))
     }
