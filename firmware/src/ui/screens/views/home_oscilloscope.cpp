@@ -1,4 +1,5 @@
 #include "ui/screen.h"
+#include "ui/screens/screen_common.h"
 #include "ui/styles.h"
 #include "ui/state_view.h"
 #include "ui/theme.h"
