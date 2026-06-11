@@ -4,11 +4,10 @@
 #include "core/nvs.h"
 #include "core/location.h"
 #include "core/timekeep.h"
+#include "core/fetch_task.h"
 #include "util/log.h"
 #include <string.h>
 #include <strings.h>   // strcasecmp
-
-static char s_buf[4096];   // holds ipwho.is (~1.2 KB) then the BigDataCloud reverse-geocode (~2.5 KB)
 
 // The place name now lives in core/location (issue #54); this stays the Settings/Home accessor and
 // returns whichever source won (hub > cached > ip). A function-local static backs the const char*.
@@ -24,12 +23,12 @@ data_err_t fetch_geoip(void) {
   const char* hk[] = { "User-Agent" };
   const char* hv[] = { "Mozilla/5.0 (compatible; Beacon/1.0)" };   // some IP APIs reject an empty UA
   int status = 0;
-  data_err_t e = net_https_get("ipwho.is", "/", hk, hv, 1, s_buf, sizeof(s_buf), &status);
+  data_err_t e = net_https_get("ipwho.is", "/", hk, hv, 1, fetch_scratch(), fetch_scratch_cap(), &status);
   if (e != ERR_NONE) return e;
 
   // area = ipwho.is granular locality (e.g. "Suka Asih"); region (province) is intentionally ignored.
   float lat = 0, lon = 0; char tz[40] = ""; char area[40] = "";
-  if (parse_geoip(s_buf, strlen(s_buf), &lat, &lon, tz, sizeof(tz),
+  if (parse_geoip(fetch_scratch(), strlen(fetch_scratch()), &lat, &lon, tz, sizeof(tz),
                   area, sizeof(area), nullptr, 0) != ERR_NONE) return ERR_PARSE;
 
   // Reverse-geocode the coords to the recognizable city/kota name. Best-effort: keep just the area on failure.
@@ -37,8 +36,8 @@ data_err_t fetch_geoip(void) {
   char path[112];
   snprintf(path, sizeof(path),
            "/data/reverse-geocode-client?latitude=%.4f&longitude=%.4f&localityLanguage=en", lat, lon);
-  if (net_https_get("api.bigdatacloud.net", path, hk, hv, 1, s_buf, sizeof(s_buf), &status) == ERR_NONE)
-    parse_bdc_city(s_buf, strlen(s_buf), city, sizeof(city));
+  if (net_https_get("api.bigdatacloud.net", path, hk, hv, 1, fetch_scratch(), fetch_scratch_cap(), &status) == ERR_NONE)
+    parse_bdc_city(fetch_scratch(), strlen(fetch_scratch()), city, sizeof(city));
 
   // "Area, City" => e.g. "Suka Asih, Bandung". Never the province; collapse "X, X" duplicates.
   char name[48] = "";

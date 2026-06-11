@@ -53,9 +53,11 @@ static void draw_cb(lv_event_t* e) {
 
     case CH_DOTS: {
       lv_draw_rect_dsc_t d; lv_draw_rect_dsc_init(&d); d.bg_color = t->accent; d.bg_opa = LV_OPA_30; d.radius = LV_RADIUS_CIRCLE;
+      const lv_area_t* clip = ctx->clip_area;
       for (int y = a.y1; y <= a.y2; y += 13)
         for (int x = a.x1; x <= a.x2; x += 13) {
           lv_area_t dot = {(lv_coord_t)x, (lv_coord_t)y, (lv_coord_t)(x+1), (lv_coord_t)(y+1)};
+          if (dot.x2 < clip->x1 || dot.x1 > clip->x2 || dot.y2 < clip->y1 || dot.y1 > clip->y2) continue;
           lv_draw_rect(ctx, &d, &dot);
         }
       break;

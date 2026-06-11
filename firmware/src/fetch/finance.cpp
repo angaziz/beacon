@@ -4,13 +4,12 @@
 #include "core/datastore.h"
 #include "core/timekeep.h"
 #include "core/change_basis.h"
+#include "core/fetch_task.h"
 #include "config/tickers.h"
 #include "util/log.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-
-static char s_buf[8192];   // sized for the (unfiltered) Yahoo chart body; parser filters to meta only
 
 static void publish(uint8_t idx, double value, double change, double change_pct) {
   finance_rec_t f; memset(&f, 0, sizeof(f));
@@ -35,10 +34,10 @@ static data_err_t fetch_frankfurter(uint8_t idx, const ticker_cfg_t* c) {
   gmtime_r(&now, &g); strftime(end,   sizeof(end),   "%Y-%m-%d", &g);
   char path[96]; int status = 0;
   snprintf(path, sizeof(path), "/v1/%s..%s?base=%s&symbols=IDR", start, end, c->symbol);
-  data_err_t e = net_https_get("api.frankfurter.dev", path, nullptr, nullptr, 0, s_buf, sizeof(s_buf), &status);
+  data_err_t e = net_https_get("api.frankfurter.dev", path, nullptr, nullptr, 0, fetch_scratch(), fetch_scratch_cap(), &status);
   if (e != ERR_NONE) return fail(idx, e);
   double rate = 0, prev = 0;
-  if (parse_frankfurter_series(s_buf, strlen(s_buf), &rate, &prev) != ERR_NONE) return fail(idx, ERR_PARSE);
+  if (parse_frankfurter_series(fetch_scratch(), strlen(fetch_scratch()), &rate, &prev) != ERR_NONE) return fail(idx, ERR_PARSE);
   double change = 0, pct = 0; change_compute(rate, prev, &change, &pct);
   publish(idx, rate, change, pct);
   return ERR_NONE;
@@ -49,10 +48,10 @@ static data_err_t fetch_binance(uint8_t idx, const ticker_cfg_t* c) {
   snprintf(path, sizeof(path), "/api/v3/ticker/24hr?symbol=%s", c->symbol);
   // Binance's public data mirror: same REST shape as api.binance.com, but reachable where the main
   // api host is geo-blocked (e.g. some ID ISPs). AWS-hosted (Starfield Services Root CA - G2).
-  data_err_t e = net_https_get("data-api.binance.vision", path, nullptr, nullptr, 0, s_buf, sizeof(s_buf), &status);
+  data_err_t e = net_https_get("data-api.binance.vision", path, nullptr, nullptr, 0, fetch_scratch(), fetch_scratch_cap(), &status);
   if (e != ERR_NONE) return fail(idx, e);
   double last = 0, pct = 0;
-  if (parse_binance(s_buf, strlen(s_buf), &last, &pct) != ERR_NONE) return fail(idx, ERR_PARSE);
+  if (parse_binance(fetch_scratch(), strlen(fetch_scratch()), &last, &pct) != ERR_NONE) return fail(idx, ERR_PARSE);
   double open = (1.0 + pct / 100.0) != 0.0 ? last / (1.0 + pct / 100.0) : last;   // 24h open from pct
   double change = 0; change_compute(last, open, &change, nullptr);
   publish(idx, last, change, pct);   // keep the source's exact 24h pct
@@ -64,10 +63,10 @@ static data_err_t fetch_yahoo(uint8_t idx, const ticker_cfg_t* c) {
   snprintf(path, sizeof(path), "/v8/finance/chart/%s?interval=1d&range=1d", c->symbol);
   const char* hk[] = { "User-Agent" };
   const char* hv[] = { "Mozilla/5.0 (compatible; Beacon/1.0)" };   // Yahoo rejects empty UA
-  data_err_t e = net_https_get("query1.finance.yahoo.com", path, hk, hv, 1, s_buf, sizeof(s_buf), &status);
+  data_err_t e = net_https_get("query1.finance.yahoo.com", path, hk, hv, 1, fetch_scratch(), fetch_scratch_cap(), &status);
   if (e != ERR_NONE) return fail(idx, e);
   double price = 0, prev = 0;
-  if (parse_yahoo(s_buf, strlen(s_buf), &price, &prev) != ERR_NONE) return fail(idx, ERR_PARSE);
+  if (parse_yahoo(fetch_scratch(), strlen(fetch_scratch()), &price, &prev) != ERR_NONE) return fail(idx, ERR_PARSE);
   double change = 0, pct = 0; change_compute(price, prev, &change, &pct);
   publish(idx, price, change, pct);
   return ERR_NONE;

@@ -17,6 +17,11 @@
 #define SRC_WEATHER 0
 static uint32_t s_next_due[1 + MAX_TICKERS];
 
+// One shared scratch for every fetch body (#65 M6); 8KB fits the largest (Yahoo chart ~unfiltered).
+static char s_scratch[8192];
+char*  fetch_scratch(void) { return s_scratch; }
+size_t fetch_scratch_cap(void) { return sizeof(s_scratch); }
+
 static uint32_t cadence_of(int slot) {
   return (slot == SRC_WEATHER) ? WEATHER_CADENCE_S : DEFAULT_TICKERS[slot - 1].cadence_s;
 }
