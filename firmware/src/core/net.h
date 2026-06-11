@@ -35,6 +35,12 @@ data_err_t net_https_get(const char* host, const char* path,
                          const char* const* hdr_keys, const char* const* hdr_vals, int hdr_n,
                          char* out, size_t cap, int* status);
 
+// Fetch task (Core-0) only. Reuse the kept-alive HTTPS socket across same-host fetches (#61):
+// net_open_host() reports the open connection's host ("" if none) so the scheduler can drain same-host
+// due slots over one handshake; net_close_idle() drops the socket once a sweep goes idle.
+const char* net_open_host(void);
+void        net_close_idle(void);
+
 #ifdef __cplusplus
 }
 #endif
