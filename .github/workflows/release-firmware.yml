@@ -35,7 +35,7 @@ jobs:
           mkdir -p out
           # Offsets are the standard ESP32-S3 Arduino layout (bootloader@0x0) + partitions.csv
           esptool.py --chip esp32s3 merge_bin -o "out/beacon-${VERSION}-full.bin" \
-            --flash_mode qio --flash_freq 80m --flash_size 16MB \
+            --flash_mode keep --flash_freq keep --flash_size 16MB \
             0x0     "$BUILD/bootloader.bin" \
             0x8000  "$BUILD/partitions.bin" \
             0xe000  "$BOOT_APP0" \
