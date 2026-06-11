@@ -1,8 +1,9 @@
 import Foundation
 
 // Normalize the two providers' unofficial usage responses into the §7.2 schema. Pure functions over
-// raw bytes so they are unit-tested against recorded fixtures (hub/CONTRACT.md). Endpoints/shapes are
-// unofficial (docs/research §2.1) -- isolate them here and expect breakage.
+// raw bytes so they are unit-tested against recorded fixtures (hub/CONTRACT.md §C, real captures
+// confirmed 2026-06-11). Endpoints/shapes are unofficial -- isolate them here and expect breakage; we
+// read only the fields below and ignore the rest, so extra/added keys are harmless.
 public enum UsageNormalizer {
 
     // Claude: GET api.anthropic.com/api/oauth/usage
