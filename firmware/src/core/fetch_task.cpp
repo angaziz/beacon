@@ -16,7 +16,6 @@
 // Source slots: index 0 = weather, 1..N = ticker[idx-1]. next_due holds the epoch each is due.
 #define SRC_WEATHER 0
 static uint32_t s_next_due[1 + MAX_TICKERS];
-static volatile bool s_refresh_req = false;
 
 static uint32_t cadence_of(int slot) {
   return (slot == SRC_WEATHER) ? WEATHER_CADENCE_S : DEFAULT_TICKERS[slot - 1].cadence_s;
@@ -44,11 +43,6 @@ static void fetch_task(void*) {
     net_service();   // WiFiMulti: apply saved-list changes + gated reconnect (blocks only while down)
     uint32_t now = (uint32_t)timekeep_now();
     ds_tick_staleness(now);
-
-    if (s_refresh_req) {
-      s_refresh_req = false;
-      for (int i = 0; i < slots; i++) s_next_due[i] = 0;   // arm every source; due on this sweep
-    }
 
     bool up = net_is_up();
     if (!up) {
@@ -86,8 +80,6 @@ static void fetch_task(void*) {
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
-
-void fetch_task_refresh_all(void) { s_refresh_req = true; }   // Core-1 UI -> Core-0 scheduler
 
 void fetch_task_start(void) {
   // 8 KB stack headroom for the TLS handshake + HTTPClient call chain (payload buffers + ArduinoJson

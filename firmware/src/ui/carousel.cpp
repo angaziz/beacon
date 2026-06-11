@@ -6,9 +6,7 @@
 #include "ui/theme_catalog.h"
 #include "ui/chrome.h"
 #include "core/nvs.h"
-#include "core/fetch_task.h"
 #include "config/layout.h"
-#include "util/log.h"
 #include "ui/screens/screen_home.h"
 #include "ui/screens/screen_finance.h"
 #include "ui/screens/screen_usage.h"
@@ -75,14 +73,6 @@ static void scrollend_cb(lv_event_t*) {
   recenter();                                        // re-pin so the next swipe has both neighbours
 }
 
-static void gesture_cb(lv_event_t* e) {
-  lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
-  LOGI("gesture dir=%d scr=%d", (int)dir, carousel_current());   // TEMP: swipe-down-refresh diagnosis
-  if (dir != LV_DIR_BOTTOM) return;
-  int scr = carousel_current();
-  if (scr == 0 || scr == 1) fetch_task_refresh_all();   // Home weather + Finance tickers
-}
-
 static void tick_cb(lv_timer_t*) {
   if (MODULES[s_current]->update) MODULES[s_current]->update();
   set_dots(s_current);
@@ -104,10 +94,6 @@ void carousel_init(void) {
   lv_obj_set_style_pad_all(s_pager, 0, 0);
   lv_obj_set_style_pad_column(s_pager, 0, 0);
   lv_obj_add_event_cb(s_pager, scrollend_cb, LV_EVENT_SCROLL_END, NULL);
-  // s_pager is parented to lv_scr_act(), and LVGL defaults GESTURE_BUBBLE on every child, which would
-  // route the gesture to the screen (no cb there) instead of firing ours. Clear it first.
-  lv_obj_clear_flag(s_pager, LV_OBJ_FLAG_GESTURE_BUBBLE);
-  lv_obj_add_event_cb(s_pager, gesture_cb, LV_EVENT_GESTURE, NULL);
 
   for (int i = 0; i < COUNT; i++) {
     lv_obj_t* page = lv_obj_create(s_pager);
