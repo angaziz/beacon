@@ -62,6 +62,12 @@ static void net_conn_close(void) {
 static WiFiMulti          s_multi;
 static bool               s_sta = false;      // net_begin ran (STA mode active)
 static volatile bool      s_enabled = true;   // Connect/Disconnect toggle (pause auto-join)
+// Reconnect backoff (#62): WiFiMulti::run() blocks ~2-6s (scan + join). While the saved net is
+// unreachable, gate it behind an exponential retry (5s/15s/60s cap) instead of scanning back-to-back
+// every ~1s fetch-task tick. Reset to "attempt now" on success, a creds change, or a Connect toggle.
+static uint32_t           s_next_join_ms = 0;   // do not run() before this millis(); 0 = attempt now
+static uint8_t            s_join_fails   = 0;    // consecutive failed joins => backoff step
+static void net_join_reset(void) { s_join_fails = 0; s_next_join_ms = 0; }
 // Runtime "add network" portal: UI sets s_prov_req (Core-1); net_service (Core-0) owns the AP radio and
 // reflects it in s_prov_radio. While provisioning, net issues no STA run()/disconnect (the portal owns
 // the radio); provision_loop (Core-1) runs the captive servers off these flags.
@@ -144,18 +150,30 @@ void net_service(void) {
     WiFi.softAPdisconnect(true);
     WiFi.mode(WIFI_STA);
     s_prov_radio = false;
-    nvs_wifi_clear_dirty(); rebuild_aps();   // a net may have been added: refresh WiFiMulti now
+    nvs_wifi_clear_dirty(); rebuild_aps(); net_join_reset();   // a net may have been added: try it now
     LOGI("provision(runtime) AP down; %u saved", (unsigned)nvs_wifi_count());
   }
   if (s_prov_radio) { update_snapshot(); return; }   // portal owns the radio: no STA run()/disconnect
 
   if (!s_enabled) {                                  // user Disconnect: drop + stay off (Core-0 disconnect)
     if (net_is_up()) { LOGI("wifi disconnect (user)"); WiFi.disconnect(); }
+    net_join_reset();                                // a later Connect should retry immediately
     update_snapshot();
     return;
   }
-  if (nvs_wifi_dirty()) { nvs_wifi_clear_dirty(); rebuild_aps(); }   // clear BEFORE rebuild => no lost update
-  if (!net_is_up() && nvs_wifi_count() > 0) s_multi.run(6000);
+  if (nvs_wifi_dirty()) { nvs_wifi_clear_dirty(); rebuild_aps(); net_join_reset(); }   // new creds: retry now
+  if (!net_is_up() && nvs_wifi_count() > 0 && (int32_t)(millis() - s_next_join_ms) >= 0) {
+    LOGI("wifi join attempt (fails=%u)", (unsigned)s_join_fails);
+    s_multi.run(6000);
+    if (net_is_up()) {
+      net_join_reset();                              // connected: clear the backoff
+    } else {
+      uint32_t d = s_join_fails == 0 ? 5000u : s_join_fails == 1 ? 15000u : 60000u;
+      if (s_join_fails < 2) s_join_fails++;
+      s_next_join_ms = millis() + d;                 // re-read millis: run() blocked for seconds
+      LOGW("wifi join failed; retry in %us", (unsigned)(d / 1000));
+    }
+  }
   update_snapshot();
 }
 
