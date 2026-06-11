@@ -11,6 +11,15 @@
 
 uint32_t uptime_s(void);   // monotonic uptime (defined in timekeep.cpp; ui/screen.h owns the public decl)
 
+// Cheap byte-level scan: `json` is NOT NUL-terminated (deserializeJson takes len), so use memcmp.
+// Gates the full ack parse (issue #65 M4) so status frames don't pay for an ArduinoJson parse twice.
+static bool frame_has(const char* j, size_t n, const char* key) {
+  size_t k = strlen(key);
+  if (n < k) return false;
+  for (size_t i = 0; i + k <= n; i++) if (memcmp(j + i, key, k) == 0) return true;
+  return false;
+}
+
 static HubLinkBle s_link;
 static HubLink*   g_link = nullptr;   // null until the task starts (BEACON_DEV leaves it null)
 static bool       s_was_connected = false;
@@ -34,8 +43,10 @@ static void apply_ack(const hub_ack_t& ack) {
 // Status: fill from current records so an absent block keeps its values; stamp last_updated = now so
 // staleness ages hub data on the same epoch as P1 (one epoch).
 static void on_frame(const char* json, size_t len) {
-  hub_ack_t ack;
-  if (hub_parse_ack(json, len, &ack)) { apply_ack(ack); return; }
+  if (frame_has(json, len, "\"ack\"") || frame_has(json, len, "\"err\"")) {
+    hub_ack_t ack;
+    if (hub_parse_ack(json, len, &ack)) { apply_ack(ack); return; }
+  }
 
   // A "loc" block (issue #54) may ride the (re)connect full frame or arrive alone. Parsed independently
   // of usage/buddy; persist via core/location (hub source wins) + apply tz OUTSIDE any location lock.

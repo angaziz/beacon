@@ -81,6 +81,11 @@ static struct { bool up; bool enabled; char ssid[33]; char ip[24]; } s_stat = { 
 
 static void update_snapshot(void) {
   bool up = net_is_up();
+  static bool snap_up = false; static bool snap_en = true; static uint8_t n = 0;
+  // #65 L1: WiFi.SSID()/localIP() each alloc an Arduino String; rebuild ssid/ip only on a state edge
+  // or every ~10s (ssid/ip change only via reconnect, which flips `up` first anyway).
+  if (up == snap_up && s_enabled == snap_en && (++n % 10 != 0)) return;
+  snap_up = up; snap_en = s_enabled;
   String ssid = up ? WiFi.SSID() : String();
   String ip   = up ? WiFi.localIP().toString() : String();
   if (s_stat_mtx) xSemaphoreTake(s_stat_mtx, portMAX_DELAY);

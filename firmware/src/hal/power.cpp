@@ -1,5 +1,6 @@
 #define XPOWERS_CHIP_AXP2101
 #include "power.h"
+#include <Arduino.h>
 #include <Wire.h>
 #include <XPowersLib.h>
 #include "config/pins.h"
@@ -25,10 +26,19 @@ bool power_begin() {
   return true;
 }
 
-int power_battery_pct() {
-  if (!s_pmu.isBatteryConnect()) return -1;
-  int p = s_pmu.getBatteryPercent();
-  return (p < 0) ? -1 : (p > 100 ? 100 : p);
+#define POWER_CACHE_MS 10000u
+static uint32_t s_batt_at  = 0;   // millis() of last PMU read; 0 forces the first read
+static int      s_batt_pct = -1;
+static bool     s_batt_chg = false;
+
+static void power_refresh(void) {
+  uint32_t now = millis();
+  if (s_batt_at != 0 && (uint32_t)(now - s_batt_at) < POWER_CACHE_MS) return;
+  s_batt_at = now;
+  int p = s_pmu.isBatteryConnect() ? s_pmu.getBatteryPercent() : -1;
+  s_batt_pct = (p < 0) ? -1 : (p > 100 ? 100 : p);
+  s_batt_chg = s_pmu.isCharging();
 }
 
-bool power_charging() { return s_pmu.isCharging(); }
+int  power_battery_pct() { power_refresh(); return s_batt_pct; }
+bool power_charging()    { power_refresh(); return s_batt_chg; }

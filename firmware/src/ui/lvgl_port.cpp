@@ -14,7 +14,9 @@ static const size_t   HEAP_FLOOR = 60u * 1024u;              // tech.md §8
 
 static lv_disp_draw_buf_t s_draw_buf;
 static lv_color_t* s_buf1 = nullptr;
-static lv_color_t* s_buf2 = nullptr;
+// Single draw buffer (#65 M1): flush_cb is synchronous (display_draw_bitmap blocks, then
+// lv_disp_flush_ready inline), so LVGL never renders into a second buffer while the first flushes --
+// buffer B was dead weight. One buffer frees a full BUF_BYTES (~43.8KB) with zero behavior change.
 
 static void flush_cb(lv_disp_drv_t* drv, const lv_area_t* a, lv_color_t* px) {
   int32_t w = a->x2 - a->x1 + 1;
@@ -58,22 +60,18 @@ bool lvgl_port_begin() {
   // below cannot react to that later load (BLE/WiFi start after this), so this is a build-time choice.
   caps = MALLOC_CAP_SPIRAM; region = "PSRAM (forced: BEACON_LVGL_PSRAM)";
   s_buf1 = (lv_color_t*)heap_caps_malloc(BUF_BYTES, caps);
-  s_buf2 = (lv_color_t*)heap_caps_malloc(BUF_BYTES, caps);
   uint32_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
 #else
   s_buf1 = (lv_color_t*)heap_caps_malloc(BUF_BYTES, caps);
-  s_buf2 = (lv_color_t*)heap_caps_malloc(BUF_BYTES, caps);
   uint32_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  if (!s_buf1 || !s_buf2 || free_int < HEAP_FLOOR) {       // fall back to PSRAM
+  if (!s_buf1 || free_int < HEAP_FLOOR) {                  // fall back to PSRAM
     if (s_buf1) heap_caps_free(s_buf1);
-    if (s_buf2) heap_caps_free(s_buf2);
     caps = MALLOC_CAP_SPIRAM; region = "PSRAM";
     s_buf1 = (lv_color_t*)heap_caps_malloc(BUF_BYTES, caps);
-    s_buf2 = (lv_color_t*)heap_caps_malloc(BUF_BYTES, caps);
   }
 #endif
-  if (!s_buf1 || !s_buf2) { LOGE("lvgl buffer alloc FAIL"); return false; }
-  lv_disp_draw_buf_init(&s_draw_buf, s_buf1, s_buf2, BUF_PX);
+  if (!s_buf1) { LOGE("lvgl buffer alloc FAIL"); return false; }
+  lv_disp_draw_buf_init(&s_draw_buf, s_buf1, nullptr, BUF_PX);
 
   static lv_disp_drv_t disp_drv;
   lv_disp_drv_init(&disp_drv);
@@ -89,7 +87,7 @@ bool lvgl_port_begin() {
   lv_indev_drv_register(&indev_drv);
 
   free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  LOGI("lvgl buffers in %s (2x %u B); free internal heap=%u floor=%u",
+  LOGI("lvgl buffer in %s (%u B); free internal heap=%u floor=%u",
        region, (unsigned)BUF_BYTES, (unsigned)free_int, (unsigned)HEAP_FLOOR);
   if (free_int < HEAP_FLOOR) LOGW("below 60KB internal floor (Chunk-A baseline; remeasure at P2)");
   return true;
