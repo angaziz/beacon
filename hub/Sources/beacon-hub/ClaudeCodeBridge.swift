@@ -30,6 +30,11 @@ final class ClaudeCodeBridge {
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "beacon.bridge")
 
+    // Hoisted formatters (#66 L7): every caller runs on the serial `queue`, so one shared instance each
+    // avoids constructing a formatter per log line / hook event.
+    private static let isoStamp = ISO8601DateFormatter()
+    private static let hm: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
+
     // Bumped on every bind(). State/timer closures capture their gen and early-return if it no longer
     // matches, so a delayed callback from a superseded listener can't clear/cancel/rebind a newer one.
     private var listenerGen: UInt64 = 0
@@ -85,7 +90,7 @@ final class ClaudeCodeBridge {
     // unit-testable without waiting on wall time.
     private func startReaper() {
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + 60, repeating: 60)
+        t.schedule(deadline: .now() + 60, repeating: 60, leeway: .seconds(5))   // #66 L6: coalesce wakeups.
         t.setEventHandler { [weak self] in self?.reap(now: Date()) }
         reaper = t
         t.resume()
@@ -202,13 +207,16 @@ final class ClaudeCodeBridge {
             if let data = data { buf.append(data) }
 
             guard let headerEnd = Self.range(of: Data("\r\n\r\n".utf8), in: buf) else {
-                if isComplete { conn.cancel(); return }
+                // #66 L9: a peer that never terminates the headers must not grow buf unbounded.
+                if isComplete || buf.count > 64 * 1024 { conn.cancel(); return }
                 self.readRequest(conn, buffer: buf)   // keep reading headers.
                 return
             }
             let head = buf.subdata(in: buf.startIndex..<headerEnd.lowerBound)
             let bodyStart = headerEnd.upperBound
             let (method, path, contentLength) = Self.parseHead(head)
+            // #66 L9: reject absurd or malformed (negative => inverted subdata range) Content-Length.
+            guard contentLength >= 0, contentLength <= 1024 * 1024 else { conn.cancel(); return }
             let have = buf.count - bodyStart
 
             if have >= contentLength {
@@ -520,7 +528,7 @@ final class ClaudeCodeBridge {
 
     private func log(id: String, decision: String) {
         // Only id + decision + timestamp. NEVER the hint/command (tech.md 9).
-        let ts = ISO8601DateFormatter().string(from: Date())
+        let ts = Self.isoStamp.string(from: Date())
         FileHandle.standardError.write(Data("[beacon-hub] perm id=\(id) decision=\(decision) at=\(ts)\n".utf8))
     }
 
@@ -545,13 +553,11 @@ final class ClaudeCodeBridge {
     // Passive device indicator for an AskUserQuestion (which is passed through, never held): a single
     // activity-feed line, same "HH:mm [dir] ..." shape as entryLine.
     static func questionEntry(from body: [String: Any]) -> String {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"
-        return "\(f.string(from: Date())) \(cwdTag(from: body))asking a question"
+        return "\(hm.string(from: Date())) \(cwdTag(from: body))asking a question"
     }
 
     private static func entryLine(event: String, body: [String: Any]) -> String? {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"
-        let stamp = f.string(from: Date())
+        let stamp = hm.string(from: Date())
         let tag = cwdTag(from: body)   // e.g. "[beacon] "; empty when cwd absent.
         switch event {
         case "Stop": return "\(stamp) \(tag)turn done"           // turn finished, session still alive.

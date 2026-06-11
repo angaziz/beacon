@@ -54,7 +54,7 @@ final class UsagePoller {
 
     func start() {
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now(), repeating: interval)
+        t.schedule(deadline: .now(), repeating: interval, leeway: .seconds(5))   // #66 L6: coalesce wakeups.
         t.setEventHandler { [weak self] in self?.tick() }
         timer = t
         t.resume()
