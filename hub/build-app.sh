@@ -113,6 +113,7 @@ cp "$BIN" "$APP/Contents/MacOS/beacon-hub"
 cp Info.plist "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources"
 cp Resources/beacon-prompt.wav "$APP/Contents/Resources/"   # prompt-arrival chime (MenubarController loads via Bundle.main)
+cp Resources/BeaconHub.icns "$APP/Contents/Resources/"      # app icon (CFBundleIconFile)
 # Bundle the installer assets so the in-app "Install" button works from the shipped .app (HooksInstaller
 # resolves these via Bundle.main, dev-fallback to the repo). Keep the shim executable (+x) on copy.
 cp build-app.sh "$APP/Contents/Resources/"
@@ -120,8 +121,14 @@ cp claude-code-settings.snippet.json "$APP/Contents/Resources/"
 cp statusline-shim/beacon-statusline "$APP/Contents/Resources/"
 chmod +x "$APP/Contents/Resources/beacon-statusline"
 
-# Ad-hoc signature gives TCC a stable identity to attach the Bluetooth grant to.
-codesign --force --sign - "$APP"
+# BEACON_SIGN_IDENTITY (a "Developer ID Application: ..." cert, set by release CI) gets a real
+# signature with hardened runtime + timestamp, which notarization requires. Unset (local dev),
+# an ad-hoc signature still gives TCC a stable identity to attach the Bluetooth grant to.
+if [ -n "${BEACON_SIGN_IDENTITY:-}" ]; then
+  codesign --force --options runtime --timestamp --sign "$BEACON_SIGN_IDENTITY" "$APP"
+else
+  codesign --force --sign - "$APP"
+fi
 
 echo ""
 echo "Built: $PWD/$APP"

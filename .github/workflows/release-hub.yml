@@ -1,6 +1,12 @@
 # Hub releases: push a tag like hub-v0.3.1 and this ships
-#   - Beacon-Hub-<ver>.zip   (ad-hoc-signed macOS .app; users need the Gatekeeper
-#                             "Open Anyway" step documented in hub/README.md)
+#   - Beacon-Hub-<ver>.zip   (Developer ID-signed, notarized + stapled macOS .app)
+#
+# Required repo secrets (Settings > Secrets and variables > Actions):
+#   MACOS_CERT_P12_B64    base64 of the "Developer ID Application" cert exported as .p12
+#   MACOS_CERT_PASSWORD   password chosen at .p12 export
+#   APPLE_API_KEY_B64     base64 of the App Store Connect API key (.p8)
+#   APPLE_API_KEY_ID      the key's ID (e.g. ABC123DEFG)
+#   APPLE_API_ISSUER      the issuer UUID from the App Store Connect Keys page
 name: Release hub
 
 on:
@@ -15,9 +21,43 @@ jobs:
       - uses: actions/checkout@v5
       - name: Stamp version from tag
         run: /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${GITHUB_REF_NAME#hub-v}" hub/Info.plist
-      - name: Build + bundle
+      - name: Import signing certificate
+        env:
+          MACOS_CERT_P12_B64: ${{ secrets.MACOS_CERT_P12_B64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          echo "$MACOS_CERT_P12_B64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 1800 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          rm "$RUNNER_TEMP/cert.p12"
+          # Resolve the identity name for build-app.sh.
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | awk -F'"' '/Developer ID Application/ {print $2; exit}')"
+          [ -n "$IDENTITY" ] || { echo "No Developer ID Application identity found in cert"; exit 1; }
+          echo "BEACON_SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+      - name: Build + bundle (Developer ID signed)
         working-directory: hub
         run: ./build-app.sh release
+      - name: Notarize + staple
+        working-directory: hub
+        env:
+          APPLE_API_KEY_B64: ${{ secrets.APPLE_API_KEY_B64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          echo "$APPLE_API_KEY_B64" | base64 --decode > "$RUNNER_TEMP/api-key.p8"
+          ditto -c -k --keepParent "Beacon Hub.app" notarize.zip
+          xcrun notarytool submit notarize.zip --wait \
+            --key "$RUNNER_TEMP/api-key.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER"
+          rm notarize.zip "$RUNNER_TEMP/api-key.p8"
+          xcrun stapler staple "Beacon Hub.app"
       - name: Zip (ditto preserves the signature and exec bits)
         working-directory: hub
         run: ditto -c -k --keepParent "Beacon Hub.app" "Beacon-Hub-${GITHUB_REF_NAME#hub-}.zip"

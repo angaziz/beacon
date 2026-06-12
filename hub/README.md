@@ -15,12 +15,8 @@ Requirements: macOS 13+, Bluetooth, [Claude Code](https://claude.com/claude-code
 
 ### From a release (no toolchain)
 
-1. Download `Beacon-Hub-<version>.zip` from [Releases](https://github.com/angaziz/beacon/releases), unzip, and drag **Beacon Hub.app** to `/Applications`.
-2. **Gatekeeper:** the app is ad-hoc signed, not notarized (no paid Apple developer account behind this project). On first launch macOS will block it — go to **System Settings > Privacy & Security** and click **Open Anyway**, or clear the quarantine flag yourself:
-   ```bash
-   xattr -d com.apple.quarantine "/Applications/Beacon Hub.app"
-   ```
-3. Launch it. Beacon Hub lives in the menubar (no Dock icon).
+1. Download `Beacon-Hub-<version>.zip` from [Releases](https://github.com/angaziz/beacon/releases), unzip, and drag **Beacon Hub.app** to `/Applications`. Releases are Developer ID-signed and notarized — Gatekeeper opens them without complaint. (hub-v0.1.0 was ad-hoc signed; if macOS blocks it, use **System Settings > Privacy & Security > Open Anyway**.)
+2. Launch it. Beacon Hub lives in the menubar (no Dock icon).
 
 ### From source
 

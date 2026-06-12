@@ -12,6 +12,8 @@
   <string>0.1</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleIconFile</key>
+  <string>BeaconHub</string>
   <!-- Required for CoreBluetooth: without this TCC aborts the process (privacy violation) instead of
        prompting. Embedded into the executable via a linker __info_plist section (see Package.swift). -->
   <key>NSBluetoothAlwaysUsageDescription</key>
