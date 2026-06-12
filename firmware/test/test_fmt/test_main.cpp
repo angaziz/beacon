@@ -10,6 +10,8 @@ static void test_fmt_value(void) {
   fmt_value(b, sizeof(b), 62392);   TEST_ASSERT_EQUAL_STRING("62,392", b);
   fmt_value(b, sizeof(b), 6012);    TEST_ASSERT_EQUAL_STRING("6,012", b);
   fmt_value(b, sizeof(b), 52.18);   TEST_ASSERT_EQUAL_STRING("52.18", b);
+  fmt_value(b, sizeof(b), 1.0856);  TEST_ASSERT_EQUAL_STRING("1.0856", b);  // FX majors keep 4 decimals
+  fmt_value(b, sizeof(b), 157.43);  TEST_ASSERT_EQUAL_STRING("157.43", b);
   fmt_value(b, sizeof(b), 5594);    TEST_ASSERT_EQUAL_STRING("5,594", b);
   fmt_value(b, sizeof(b), 1000000); TEST_ASSERT_EQUAL_STRING("1,000,000", b);
 }

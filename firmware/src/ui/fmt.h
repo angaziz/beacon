@@ -4,9 +4,10 @@
 #include <string.h>
 #include <math.h>
 
-// Thousands-grouped value. Decimals: 0 for >=1000, else 2 (so 18026 => "18,026", 52.18 => "52.18").
+// Thousands-grouped value. Decimals: 0 for >=1000, 2 for >=10, else 4
+// (18026 => "18,026", 52.18 => "52.18", FX majors like 1.0856 => "1.0856").
 static inline void fmt_value(char* buf, size_t n, double v) {
-  int dec = (fabs(v) >= 1000.0) ? 0 : 2;
+  int dec = (fabs(v) >= 1000.0) ? 0 : (fabs(v) >= 10.0 ? 2 : 4);
   char raw[32]; snprintf(raw, sizeof(raw), "%.*f", dec, v);
   char* dot = strchr(raw, '.');
   int int_len = dot ? (int)(dot - raw) : (int)strlen(raw);
