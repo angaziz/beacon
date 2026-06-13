@@ -1,7 +1,9 @@
 # Beacon
 
 [![CI](https://github.com/angaziz/beacon/actions/workflows/ci.yml/badge.svg)](https://github.com/angaziz/beacon/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/angaziz/beacon?include_prereleases)](https://github.com/angaziz/beacon/releases)
+[![Firmware release](https://img.shields.io/github/v/release/angaziz/beacon?include_prereleases&filter=firmware-*&label=firmware)](https://github.com/angaziz/beacon/releases)
+[![Hub release](https://img.shields.io/github/v/release/angaziz/beacon?include_prereleases&filter=hub-*&label=hub)](https://github.com/angaziz/beacon/releases)
+[![macOS](https://img.shields.io/badge/macOS-13+_Apple_Silicon-000?logo=apple&logoColor=white)](#the-macos-hub)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A dark and futuristic companion on a 2.16" AMOLED touch device — built on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**. It sits next to your keyboard and, at a glance, shows your Claude Code / Codex usage, live markets, weather, and a Claude coding "buddy" you can approve tool-prompts on — without breaking focus on your Mac.
@@ -69,14 +71,23 @@ You need the **Waveshare ESP32-S3-Touch-AMOLED-2.16** (around US$30 from Wavesha
 
 1. **Flash the firmware.** Easiest: the [web flasher](https://angaziz.github.io/beacon/) — plug the device in, open the page in Chrome or Edge, click Install. No toolchain needed. Prefer building it yourself? See [`firmware/README.md`](firmware/README.md).
 2. **Connect WiFi.** On first boot the device opens a `Beacon-setup` hotspot — join it and the captive portal asks for your network. Everything except AI Usage / Coding Buddy now works.
-3. **Install the hub (macOS).** Download `Beacon-Hub-<version>.zip` from [Releases](https://github.com/angaziz/beacon/releases), unzip, drag to Applications. Install and pairing details (including the Gatekeeper "Open Anyway" step — the app is not notarized): [`hub/README.md`](hub/README.md).
-4. **Pair.** Open Beacon Hub; the **Set up Beacon** window walks three checks — Bluetooth permission, device pairing, and a one-click **Install hooks** for Claude Code.
+3. **Add the macOS hub (optional).** AI Usage and Coding Buddy come from a companion app — see [The macOS hub](#the-macos-hub) below. Everything else works without it.
 
-If there is no release published yet, both pieces build from source in a few minutes: [`firmware/README.md`](firmware/README.md) and [`hub/README.md`](hub/README.md).
+Just validating a fresh board? Flash the bring-up spike first — [`docs/spikes/SETUP.md`](docs/spikes/SETUP.md) covers the Arduino toolchain and the AXP2101 power-rail init the stock demo omits.
 
-### macOS permissions
+## The macOS hub
 
-Beacon Hub asks for three permissions on first run. The first two are required for the BLE features; everything else (weather, markets, time) works without the hub.
+Beacon Hub is a small macOS menubar app — the device's private-data plane. It reads your Claude Code + Codex usage and bridges Claude Code's tool-permission prompts to the device over a bonded Bluetooth link. Your Claude/Codex credentials stay on the Mac; only normalized percentages, reset times, and prompt text ever cross BLE.
+
+![Beacon Hub menubar app](docs/assets/hub.png)
+
+**Requirements.** macOS 13 (Ventura) or later. The prebuilt release is **Apple Silicon only** (arm64); Intel Macs build from source ([`hub/README.md`](hub/README.md)) — SwiftPM compiles for the host architecture.
+
+**Install.** Download `Beacon-Hub-<version>-macos-apple-silicon.zip` from [Releases](https://github.com/angaziz/beacon/releases), unzip, and drag it to Applications. The app is not notarized, so first launch needs the Gatekeeper "Open Anyway" step — full details in [`hub/README.md`](hub/README.md). No release published yet? It builds from source in a few minutes.
+
+**Pair.** Open Beacon Hub; the **Set up Beacon** window walks three checks — Bluetooth permission, device pairing, and a one-click **Install hooks** for Claude Code.
+
+**Permissions.** The hub asks for three on first run. The first two are required for the BLE features; everything else (weather, markets, time) works without the hub.
 
 | Prompt | Why |
 |---|---|
@@ -85,8 +96,6 @@ Beacon Hub asks for three permissions on first run. The first two are required f
 | **Location** (optional) | A one-shot fix on launch/wake gives the device an accurate place name and time zone. Deny it and the device simply falls back to IP geolocation. |
 
 Codex usage needs no prompt — the hub reads `~/.codex/auth.json` directly. No Local Network, microphone, or accessibility permissions are used.
-
-Just validating a fresh board? Flash the bring-up spike first — [`docs/spikes/SETUP.md`](docs/spikes/SETUP.md) covers the Arduino toolchain and the AXP2101 power-rail init the stock demo omits.
 
 ## Repo layout
 
@@ -121,7 +130,7 @@ beacon/
 - [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16) — board, drivers, examples
 - [LVGL](https://lvgl.io) · [GFX Library for Arduino](https://github.com/moononournation/Arduino_GFX) · [XPowersLib](https://github.com/lewisxhe/XPowersLib) · [SensorLib](https://github.com/lewisxhe/SensorLib) · ESP32 BLE (the Arduino-ESP32 core `BLE*` wrapper — NimBLE-backed on the pinned esp32s3 libs)
 - [ESP Web Tools](https://esphome.github.io/esp-web-tools/) — the browser flasher
-- Prior art that informed the design: [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter), [claude-desktop-buddy-esp32](https://github.com/vthinkxie/claude-desktop-buddy-esp32)
+- Inspired by: [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter), [claude-desktop-buddy-esp32](https://github.com/vthinkxie/claude-desktop-buddy-esp32)
 
 ## Disclaimer
 

@@ -1,5 +1,5 @@
 # Hub releases: push a tag like hub-v0.3.1 and this ships
-#   - Beacon-Hub-<ver>.zip   (Developer ID-signed, notarized + stapled macOS .app)
+#   - Beacon-Hub-<ver>-macos-apple-silicon.zip   (Developer ID-signed, notarized + stapled macOS .app; arm64)
 #
 # Required repo secrets (Settings > Secrets and variables > Actions):
 #   MACOS_CERT_P12_B64    base64 of the "Developer ID Application" cert exported as .p12
@@ -60,7 +60,7 @@ jobs:
           xcrun stapler staple "Beacon Hub.app"
       - name: Zip (ditto preserves the signature and exec bits)
         working-directory: hub
-        run: ditto -c -k --keepParent "Beacon Hub.app" "Beacon-Hub-${GITHUB_REF_NAME#hub-}.zip"
+        run: ditto -c -k --keepParent "Beacon Hub.app" "Beacon-Hub-${GITHUB_REF_NAME#hub-}-macos-apple-silicon.zip"
       - uses: actions/upload-artifact@v7
         with:
           name: hub-app
