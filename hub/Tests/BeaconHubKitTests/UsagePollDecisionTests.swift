@@ -32,4 +32,19 @@ final class UsagePollDecisionTests: XCTestCase {
                 c.want, c.name)
         }
     }
+
+    func testShouldRereadCredential() {
+        let cases: [(name: String, since: TimeInterval?, cooldown: TimeInterval, want: Bool)] = [
+            ("never read => read",          nil, 300, true),
+            ("just read => skip",             1, 300, false),
+            ("within cooldown => skip",     299, 300, false),
+            ("at cooldown => read",         300, 300, true),
+            ("past cooldown => read",       301, 300, true),
+        ]
+        for c in cases {
+            XCTAssertEqual(
+                UsagePollDecision.shouldRereadCredential(secondsSinceLastRead: c.since, cooldown: c.cooldown),
+                c.want, c.name)
+        }
+    }
 }

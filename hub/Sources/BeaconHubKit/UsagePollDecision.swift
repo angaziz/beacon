@@ -17,4 +17,13 @@ public enum UsagePollDecision {
         guard let age = statuslineAge else { return true }
         return age >= 2 * interval
     }
+
+    // Gate Keychain re-reads while the stored Claude token sits expired (waiting for the CLI to rotate
+    // it): each SecItemCopyMatching can prompt the user unless they chose "Always Allow", so re-reading
+    // every 45s tick would nag every 45s. nil = never read.
+    public static func shouldRereadCredential(secondsSinceLastRead: TimeInterval?,
+                                              cooldown: TimeInterval) -> Bool {
+        guard let since = secondsSinceLastRead else { return true }
+        return since >= cooldown
+    }
 }
