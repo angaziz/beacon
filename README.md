@@ -4,10 +4,9 @@
 [![Release](https://img.shields.io/github/v/release/angaziz/beacon?include_prereleases)](https://github.com/angaziz/beacon/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A dark, futuristic desk command-center on a 2.16" AMOLED touch device — built on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**. It sits next to your keyboard and, at a glance, shows your Claude Code / Codex usage, live markets, weather, and a Claude coding "buddy" you can approve tool-prompts on — without breaking focus on your Mac.
+A dark and futuristic companion on a 2.16" AMOLED touch device — built on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**. It sits next to your keyboard and, at a glance, shows your Claude Code / Codex usage, live markets, weather, and a Claude coding "buddy" you can approve tool-prompts on — without breaking focus on your Mac.
 
-![Beacon on a desk](docs/assets/hero.svg)
-<!-- TODO(photo): replace docs/assets/hero.svg with a real desk photo (jpg/png), update this link -->
+![Beacon on a desk](docs/assets/hero.jpg)
 
 > **Status: early prototype — but it runs on real hardware today.** The device side (all five screens, seven themes, on-device WiFi setup, live weather + markets) and the macOS hub (AI usage + coding buddy over Bluetooth) are both working end-to-end. Expect rough edges and moving parts. See [What works today](#what-works-today).
 
@@ -112,13 +111,9 @@ beacon/
     └── spikes/             # hardware spikes (throwaway), organized by topic
 ```
 
-## Roadmap
-
-The full phased plan — requirements, acceptance, dependencies — lives in [`docs/prd.md`](docs/prd.md) §7.
-
 ## Security
 
-- **Never commit WiFi credentials or API tokens.** The spike sketches use placeholder constants you edit locally; `.gitignore` excludes `secrets.h` / `.env` style files. The product firmware needs no secrets at all — WiFi is configured on-device.
+- **Never commit WiFi credentials or API tokens.** The spike sketches use placeholder constants you edit locally; `.gitignore` guards against committing credential files. The product firmware needs no secrets at all — WiFi is configured on-device.
 - Claude/Codex credentials stay on the macOS hub and never reach the device.
 
 ## Built on / thanks
@@ -130,7 +125,7 @@ The full phased plan — requirements, acceptance, dependencies — lives in [`d
 
 ## Disclaimer
 
-Personal, unofficial project. Not affiliated with or endorsed by Anthropic, OpenAI, Spotify, or Waveshare. Some integrations rely on unofficial/unpublished endpoints that may change or break. Use at your own risk.
+Personal, unofficial project. Not affiliated with or endorsed by Anthropic, OpenAI, or Waveshare. Some integrations rely on unofficial/unpublished endpoints that may change or break. Use at your own risk.
 
 ## License
 
