@@ -48,12 +48,21 @@ Private data (your Claude/Codex tokens) lives only on a small macOS hub app and 
 
 ## Themes
 
-The UI is fully themeable — **7 themes**, each a bespoke per-screen experience (its own layout in a distinct visual language) composed from shared design tokens (color / type / gauge-style): **Editorial Index** (default), Aerospace HUD, Dot-Matrix, Blueprint, LED Matrix, Oscilloscope, and Analog Neo.
+The UI is fully themeable — **7 themes**, each a bespoke per-screen experience (its own layout in a distinct visual language) composed from shared design tokens (color / type / gauge-style): Editorial Index, Aerospace HUD, **Dot-Matrix** (default), Blueprint, LED Matrix, Oscilloscope, and Analog Neo.
 
-![The seven themes](docs/assets/themes.svg)
-<!-- TODO(photo): replace docs/assets/themes.svg with a grid of theme renders or photos -->
+Every theme across all five screens, captured straight from the device framebuffer:
 
-Interactive mockups of all seven live in [`docs/design/mockups/directions.html`](docs/design/mockups/directions.html) (clone the repo and open it in a browser — GitHub does not render HTML files).
+| Theme | Home | Markets | AI Usage | Approval | Settings |
+|---|---|---|---|---|---|
+| **Editorial Index** | <img src="docs/assets/screens/editorial_HOME.png" width="150"> | <img src="docs/assets/screens/editorial_MARKETS.png" width="150"> | <img src="docs/assets/screens/editorial_LIMITS.png" width="150"> | <img src="docs/assets/screens/editorial_CLAUDE.png" width="150"> | <img src="docs/assets/screens/editorial_SETTINGS.png" width="150"> |
+| **Aerospace HUD** | <img src="docs/assets/screens/hud_HOME.png" width="150"> | <img src="docs/assets/screens/hud_MARKETS.png" width="150"> | <img src="docs/assets/screens/hud_LIMITS.png" width="150"> | <img src="docs/assets/screens/hud_CLAUDE.png" width="150"> | <img src="docs/assets/screens/hud_SETTINGS.png" width="150"> |
+| **Dot-Matrix** (default) | <img src="docs/assets/screens/dotmatrix_HOME.png" width="150"> | <img src="docs/assets/screens/dotmatrix_MARKETS.png" width="150"> | <img src="docs/assets/screens/dotmatrix_LIMITS.png" width="150"> | <img src="docs/assets/screens/dotmatrix_CLAUDE.png" width="150"> | <img src="docs/assets/screens/dotmatrix_SETTINGS.png" width="150"> |
+| **Blueprint** | <img src="docs/assets/screens/blueprint_HOME.png" width="150"> | <img src="docs/assets/screens/blueprint_MARKETS.png" width="150"> | <img src="docs/assets/screens/blueprint_LIMITS.png" width="150"> | <img src="docs/assets/screens/blueprint_CLAUDE.png" width="150"> | <img src="docs/assets/screens/blueprint_SETTINGS.png" width="150"> |
+| **LED Matrix** | <img src="docs/assets/screens/led_HOME.png" width="150"> | <img src="docs/assets/screens/led_MARKETS.png" width="150"> | <img src="docs/assets/screens/led_LIMITS.png" width="150"> | <img src="docs/assets/screens/led_CLAUDE.png" width="150"> | <img src="docs/assets/screens/led_SETTINGS.png" width="150"> |
+| **Oscilloscope** | <img src="docs/assets/screens/oscilloscope_HOME.png" width="150"> | <img src="docs/assets/screens/oscilloscope_MARKETS.png" width="150"> | <img src="docs/assets/screens/oscilloscope_LIMITS.png" width="150"> | <img src="docs/assets/screens/oscilloscope_CLAUDE.png" width="150"> | <img src="docs/assets/screens/oscilloscope_SETTINGS.png" width="150"> |
+| **Analog Neo** | <img src="docs/assets/screens/analog_HOME.png" width="150"> | <img src="docs/assets/screens/analog_MARKETS.png" width="150"> | <img src="docs/assets/screens/analog_LIMITS.png" width="150"> | <img src="docs/assets/screens/analog_CLAUDE.png" width="150"> | <img src="docs/assets/screens/analog_SETTINGS.png" width="150"> |
+
+[**View the full montage**](docs/assets/screens/montage.png) — all 35 in a single image.
 
 ## Get one running
 
