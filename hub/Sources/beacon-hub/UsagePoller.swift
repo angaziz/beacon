@@ -104,29 +104,48 @@ final class UsagePoller {
 final class ClaudeUsageProvider: UsageProvider {
     let label = "Claude"
     private let session: URLSession
-    // Cache the Keychain token so we read (and prompt for) it ONCE per run, not every poll. macOS
+    // Cache the Keychain credential so we read (and prompt for) it ONCE per run, not every poll. macOS
     // prompts to release another app's credential on each SecItemCopyMatching; caching = one prompt.
-    // Cleared on 401 so a rotated token is re-read (one fresh prompt only when actually needed).
+    // Cleared on 401 or when expired per expiresAt, so a CLI-rotated token is re-read (one fresh
+    // prompt only when actually needed).
     // NOTE: "Always Allow" only persists across rebuilds with a stable signing identity; ad-hoc
     // signing changes the cdhash each build, so a rebuild re-prompts once.
-    private var cachedToken: String?
+    private var cachedCredential: ClaudeCredential?
+    private var lastReadAt: Date?
+    private let rereadCooldown: TimeInterval = 300
     private let lock = NSLock()
     init(session: URLSession = .shared) { self.session = session }
 
-    private func token() -> String? {
+    private func credential() -> ClaudeCredential? {
         lock.lock(); defer { lock.unlock() }
-        if let t = cachedToken { return t }
-        cachedToken = Self.accessToken()
-        return cachedToken
+        let now = Date()
+        if let c = cachedCredential, !c.isExpired(at: now) { return c }
+        // Expired (or absent) cache: the CLI may have rotated the Keychain item, but re-read at most
+        // once per cooldown -- each read can prompt the user (see cache note above).
+        guard UsagePollDecision.shouldRereadCredential(
+            secondsSinceLastRead: lastReadAt.map { now.timeIntervalSince($0) },
+            cooldown: rereadCooldown)
+        else { return cachedCredential }
+        lastReadAt = now
+        cachedCredential = Self.readCredential()
+        return cachedCredential
     }
-    private func invalidateToken() { lock.lock(); cachedToken = nil; lock.unlock() }
+    // Also resets the cooldown: a 401 is a strong rotation signal worth one immediate re-read.
+    private func invalidateToken() { lock.lock(); cachedCredential = nil; lastReadAt = nil; lock.unlock() }
 
     func fetch(completion: @escaping (ProviderResult) -> Void) {
-        guard let token = token() else {
+        guard let cred = credential() else {
             completion(ProviderResult(usage: .unavailable, reason: "Claude token missing - run claude login"))
             return
         }
-        fetch(token: token, retryOn401: true, completion: completion)
+        // Expired on disk is NOT a logged-out state: only the `claude` CLI can run the (single-use,
+        // rotating) refresh grant. Skip the doomed request and say what we are actually waiting for.
+        if cred.isExpired(at: Date()) {
+            completion(ProviderResult(usage: .unavailable,
+                                      reason: "Claude token stale - open Claude Code to refresh"))
+            return
+        }
+        fetch(token: cred.accessToken, retryOn401: true, completion: completion)
     }
 
     // retryOn401: a bool not a counter => exactly one retry, structurally impossible to loop. On 401 the
@@ -154,9 +173,10 @@ final class ClaudeUsageProvider: UsageProvider {
             if code == 401 {
                 self.invalidateToken()   // token rotated; re-read from Keychain.
                 // Self-heal within this poll: the running `claude` CLI rotates the Keychain item before
-                // expiry, so re-read once and retry iff the token changed (else it is genuinely expired).
-                if retryOn401, let fresh = self.token(), fresh != token {
-                    self.fetch(token: fresh, retryOn401: false, completion: completion)
+                // expiry, so re-read once and retry iff the token changed. An unchanged token that 401s
+                // before its expiresAt is genuinely rejected (revoked), not stale => re-login is right.
+                if retryOn401, let fresh = self.credential(), fresh.accessToken != token {
+                    self.fetch(token: fresh.accessToken, retryOn401: false, completion: completion)
                     return
                 }
                 completion(ProviderResult(usage: .unavailable, reason: "Claude token expired - re-login"))
@@ -177,7 +197,7 @@ final class ClaudeUsageProvider: UsageProvider {
     }
 
     // Keychain generic-password "Claude Code-credentials"; the JSON shape is parsed by ProviderCredentials.
-    private static func accessToken() -> String? {
+    private static func readCredential() -> ClaudeCredential? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "Claude Code-credentials",
