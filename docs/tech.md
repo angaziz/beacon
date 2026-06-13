@@ -220,7 +220,7 @@ Exact hook event field names + statusline fields: capture into a `hub/CONTRACT.m
 | WiFi | SSID/pass | Device NVS | n/a (it's the device's own) |
 | Spotify | refresh token | **Decide at P4:** device NVS *or* a proxy (Cloudflare Worker) holding the client secret | Only if NVS path chosen; proxy path keeps it off-device (preferred) |
 
-Rules: Claude/Codex secrets **never** reach the device. Device-plane tokens are **scoped** and prefer a proxy. TLS validates certs (no `setInsecure()` in product). BLE: bonding + allowlist + encrypted chars; per-prompt `id` matching. LAN-WS fallback binds local-only + shared token. Repo: secrets via `secrets.h`/NVS, gitignored (`secrets*.h`, `.env`); spikes use editable placeholders. Hub logs approve/deny (timestamp + id).
+Rules: Claude/Codex secrets **never** reach the device. Device-plane tokens are **scoped** and prefer a proxy. TLS validates certs (no `setInsecure()` in product). BLE: bonding + allowlist + encrypted chars; per-prompt `id` matching. LAN-WS fallback binds local-only + shared token. Repo: product firmware needs no in-source secrets (WiFi via on-device captive portal + NVS); spikes use editable inline placeholders, with `.gitignore` guarding against committing credential files. Hub logs approve/deny (timestamp + id).
 
 ## 10. Coding conventions
 
@@ -249,8 +249,7 @@ firmware/
 │   │   ├── core/           # datastore, hublink(iface+ble), net(wifi/tls/http), nvs, timekeep
 │   │   ├── ui/             # lvgl_port, theme engine + tokens, carousel, components
 │   │   └── screens/        # home, finance, usage, buddy, nowplaying, settings
-│   ├── partitions.csv
-│   └── secrets.example.h   # template; real secrets.h gitignored
+│   └── partitions.csv
 hub/                        # macOS Swift app (P2) + CONTRACT.md fixtures
 ```
 

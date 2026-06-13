@@ -20,6 +20,7 @@
 #include "ui/pair_overlay.h"
 #include "ui/dev_seed.h"
 #include "ui/idle_glue.h"
+#include "ui/capture.h"
 #include "hal/imu.h"
 #include "core/imu_detect.h"
 #include "ui/overlays.h"
@@ -110,12 +111,16 @@ void setup() {
   styles_init();
   carousel_init();
   idle_init();
+#if !BEACON_CAPTURE
   if (provision_needed() || force_provision) {   // first boot OR touch-hold recovery: host the setup AP
     provision_begin();
     show_provision_overlay();
   } else {
     net_begin();                   // WiFi STA from NVS creds; starts NTP on GOT_IP (non-blocking)
   }
+#endif
+  // Capture build stays fully offline: WiFi/NTP/esp async logs would interleave into the binary
+  // screenshot stream and corrupt frame alignment. Dev seed supplies the data instead.
 #if BEACON_DEV
   dev_seed_init();                 // fake data + state-cycler harness (no network/BLE)
 #else
@@ -130,6 +135,9 @@ void loop() {
   pair_overlay_service();  // show/hide the BLE passkey card while a hub is bonding (Core-1)
   timekeep_service();  // perform any staged RTC write here (Core-1, serialized with touch on I2C)
   lvgl_port_tick();
+#if BEACON_CAPTURE
+  capture_service();   // 'C' over serial => sweep every theme x screen to the host
+#endif
   idle_service();
   uint8_t g = imu_poll();
   if (g & IMU_RAISE) lv_disp_trig_activity(NULL);   // wake from dim/sleep

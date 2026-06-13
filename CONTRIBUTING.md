@@ -29,7 +29,7 @@ shows it works beats a long argument.
 ## Ground rules
 
 - **No secrets in commits.** WiFi creds and API tokens stay local — edit the placeholder
-  constants in the sketches, don't commit them. `.gitignore` covers `secrets.h` / `.env`.
+  constants in the sketches, don't commit them. `.gitignore` guards against committing credential files.
 - **Don't commit build output or `node_modules`.** Already gitignored; don't force-add.
 - **Match the surrounding style.** Firmware: keep the existing C++ conventions and pin/macro
   patterns. Surgical changes — every changed line should trace to the change you're making.

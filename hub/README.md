@@ -6,8 +6,7 @@ The menubar app that feeds the Beacon device its private-plane data over Bluetoo
 - **Coding Buddy** — bridges Claude Code session state and tool-permission prompts to the device, so you can approve or deny from the desk gadget. The decision is enforced on the Mac.
 - **Secrets stay here.** Tokens and credentials never leave the Mac; the BLE frames carry only normalized usage values and prompt metadata. Protocol + policies: [`CONTRACT.md`](CONTRACT.md).
 
-![Beacon Hub panel](../docs/assets/hub.svg)
-<!-- TODO(photo): replace docs/assets/hub.svg with a real screenshot of the Hub Deck panel -->
+<img src="../docs/assets/hub.png" alt="Beacon Hub menubar panel" width="380">
 
 Requirements: macOS 13+, Bluetooth, [Claude Code](https://claude.com/claude-code) for the Claude features (Codex optional). `jq` is needed for the hooks installer (`brew install jq`).
 

@@ -4,10 +4,9 @@
 [![Release](https://img.shields.io/github/v/release/angaziz/beacon?include_prereleases)](https://github.com/angaziz/beacon/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A dark, futuristic desk command-center on a 2.16" AMOLED touch device — built on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**. It sits next to your keyboard and, at a glance, shows your Claude Code / Codex usage, live markets, weather, and a Claude coding "buddy" you can approve tool-prompts on — without breaking focus on your Mac.
+A dark and futuristic companion on a 2.16" AMOLED touch device — built on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**. It sits next to your keyboard and, at a glance, shows your Claude Code / Codex usage, live markets, weather, and a Claude coding "buddy" you can approve tool-prompts on — without breaking focus on your Mac.
 
-![Beacon on a desk](docs/assets/hero.svg)
-<!-- TODO(photo): replace docs/assets/hero.svg with a real desk photo (jpg/png), update this link -->
+![Beacon on a desk](docs/assets/hero.jpg)
 
 > **Status: early prototype — but it runs on real hardware today.** The device side (all five screens, seven themes, on-device WiFi setup, live weather + markets) and the macOS hub (AI usage + coding buddy over Bluetooth) are both working end-to-end. Expect rough edges and moving parts. See [What works today](#what-works-today).
 
@@ -48,12 +47,21 @@ Private data (your Claude/Codex tokens) lives only on a small macOS hub app and 
 
 ## Themes
 
-The UI is fully themeable — **7 themes**, each a bespoke per-screen experience (its own layout in a distinct visual language) composed from shared design tokens (color / type / gauge-style): **Editorial Index** (default), Aerospace HUD, Dot-Matrix, Blueprint, LED Matrix, Oscilloscope, and Analog Neo.
+The UI is fully themeable — **7 themes**, each a bespoke per-screen experience (its own layout in a distinct visual language) composed from shared design tokens (color / type / gauge-style): Editorial Index, Aerospace HUD, **Dot-Matrix** (default), Blueprint, LED Matrix, Oscilloscope, and Analog Neo.
 
-![The seven themes](docs/assets/themes.svg)
-<!-- TODO(photo): replace docs/assets/themes.svg with a grid of theme renders or photos -->
+Every theme across all five screens, captured straight from the device framebuffer:
 
-Interactive mockups of all seven live in [`docs/design/mockups/directions.html`](docs/design/mockups/directions.html) (clone the repo and open it in a browser — GitHub does not render HTML files).
+| Theme | Home | Markets | AI Usage | Approval | Settings |
+|---|---|---|---|---|---|
+| **Editorial Index** | <img src="docs/assets/screens/editorial_HOME.png" width="150"> | <img src="docs/assets/screens/editorial_MARKETS.png" width="150"> | <img src="docs/assets/screens/editorial_LIMITS.png" width="150"> | <img src="docs/assets/screens/editorial_CLAUDE.png" width="150"> | <img src="docs/assets/screens/editorial_SETTINGS.png" width="150"> |
+| **Aerospace HUD** | <img src="docs/assets/screens/hud_HOME.png" width="150"> | <img src="docs/assets/screens/hud_MARKETS.png" width="150"> | <img src="docs/assets/screens/hud_LIMITS.png" width="150"> | <img src="docs/assets/screens/hud_CLAUDE.png" width="150"> | <img src="docs/assets/screens/hud_SETTINGS.png" width="150"> |
+| **Dot-Matrix** (default) | <img src="docs/assets/screens/dotmatrix_HOME.png" width="150"> | <img src="docs/assets/screens/dotmatrix_MARKETS.png" width="150"> | <img src="docs/assets/screens/dotmatrix_LIMITS.png" width="150"> | <img src="docs/assets/screens/dotmatrix_CLAUDE.png" width="150"> | <img src="docs/assets/screens/dotmatrix_SETTINGS.png" width="150"> |
+| **Blueprint** | <img src="docs/assets/screens/blueprint_HOME.png" width="150"> | <img src="docs/assets/screens/blueprint_MARKETS.png" width="150"> | <img src="docs/assets/screens/blueprint_LIMITS.png" width="150"> | <img src="docs/assets/screens/blueprint_CLAUDE.png" width="150"> | <img src="docs/assets/screens/blueprint_SETTINGS.png" width="150"> |
+| **LED Matrix** | <img src="docs/assets/screens/led_HOME.png" width="150"> | <img src="docs/assets/screens/led_MARKETS.png" width="150"> | <img src="docs/assets/screens/led_LIMITS.png" width="150"> | <img src="docs/assets/screens/led_CLAUDE.png" width="150"> | <img src="docs/assets/screens/led_SETTINGS.png" width="150"> |
+| **Oscilloscope** | <img src="docs/assets/screens/oscilloscope_HOME.png" width="150"> | <img src="docs/assets/screens/oscilloscope_MARKETS.png" width="150"> | <img src="docs/assets/screens/oscilloscope_LIMITS.png" width="150"> | <img src="docs/assets/screens/oscilloscope_CLAUDE.png" width="150"> | <img src="docs/assets/screens/oscilloscope_SETTINGS.png" width="150"> |
+| **Analog Neo** | <img src="docs/assets/screens/analog_HOME.png" width="150"> | <img src="docs/assets/screens/analog_MARKETS.png" width="150"> | <img src="docs/assets/screens/analog_LIMITS.png" width="150"> | <img src="docs/assets/screens/analog_CLAUDE.png" width="150"> | <img src="docs/assets/screens/analog_SETTINGS.png" width="150"> |
+
+[**View the full montage**](docs/assets/screens/montage.png) — all 35 in a single image.
 
 ## Get one running
 
@@ -103,13 +111,9 @@ beacon/
     └── spikes/             # hardware spikes (throwaway), organized by topic
 ```
 
-## Roadmap
-
-The full phased plan — requirements, acceptance, dependencies — lives in [`docs/prd.md`](docs/prd.md) §7.
-
 ## Security
 
-- **Never commit WiFi credentials or API tokens.** The spike sketches use placeholder constants you edit locally; `.gitignore` excludes `secrets.h` / `.env` style files. The product firmware needs no secrets at all — WiFi is configured on-device.
+- **Never commit WiFi credentials or API tokens.** The spike sketches use placeholder constants you edit locally; `.gitignore` guards against committing credential files. The product firmware needs no secrets at all — WiFi is configured on-device.
 - Claude/Codex credentials stay on the macOS hub and never reach the device.
 
 ## Built on / thanks
@@ -121,7 +125,7 @@ The full phased plan — requirements, acceptance, dependencies — lives in [`d
 
 ## Disclaimer
 
-Personal, unofficial project. Not affiliated with or endorsed by Anthropic, OpenAI, Spotify, or Waveshare. Some integrations rely on unofficial/unpublished endpoints that may change or break. Use at your own risk.
+Personal, unofficial project. Not affiliated with or endorsed by Anthropic, OpenAI, or Waveshare. Some integrations rely on unofficial/unpublished endpoints that may change or break. Use at your own risk.
 
 ## License
 
