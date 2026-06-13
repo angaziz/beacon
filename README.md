@@ -66,6 +66,18 @@ You need the **Waveshare ESP32-S3-Touch-AMOLED-2.16** (around US$30 from Wavesha
 
 If there is no release published yet, both pieces build from source in a few minutes: [`firmware/README.md`](firmware/README.md) and [`hub/README.md`](hub/README.md).
 
+### macOS permissions
+
+Beacon Hub asks for three permissions on first run. The first two are required for the BLE features; everything else (weather, markets, time) works without the hub.
+
+| Prompt | Why |
+|---|---|
+| **Bluetooth** | The hub is the BLE central that pairs with the device and streams AI usage + Coding Buddy prompts. Deny it and the hub cannot see the device at all. |
+| **Keychain — "Claude Code-credentials"** | Claude Code stores its OAuth token in this Keychain item; the hub reads it to fetch your usage. Choose **Always Allow** to avoid re-prompting on every launch. The token never leaves your Mac — only normalized percentages and reset times go over BLE. |
+| **Location** (optional) | A one-shot fix on launch/wake gives the device an accurate place name and time zone. Deny it and the device simply falls back to IP geolocation. |
+
+Codex usage needs no prompt — the hub reads `~/.codex/auth.json` directly. No Local Network, microphone, or accessibility permissions are used.
+
 Just validating a fresh board? Flash the bring-up spike first — [`docs/spikes/SETUP.md`](docs/spikes/SETUP.md) covers the Arduino toolchain and the AXP2101 power-rail init the stock demo omits.
 
 ## Repo layout

@@ -4,9 +4,17 @@ import XCTest
 final class ProviderCredentialsTests: XCTestCase {
 
     func testParseClaude() {
-        struct Case { let name: String; let json: String; let want: String? }
+        struct Case { let name: String; let json: String; let want: ClaudeCredential? }
         let cases: [Case] = [
-            Case(name: "valid", json: #"{"claudeAiOauth":{"accessToken":"tok-123","refreshToken":"r"}}"#, want: "tok-123"),
+            Case(name: "valid, no expiry", json: #"{"claudeAiOauth":{"accessToken":"tok-123","refreshToken":"r"}}"#,
+                 want: ClaudeCredential(accessToken: "tok-123", expiresAt: nil)),
+            Case(name: "valid with expiry (epoch ms)",
+                 json: #"{"claudeAiOauth":{"accessToken":"tok-123","expiresAt":1773751428445}}"#,
+                 want: ClaudeCredential(accessToken: "tok-123",
+                                        expiresAt: Date(timeIntervalSince1970: 1_773_751_428.445))),
+            Case(name: "non-numeric expiresAt tolerated",
+                 json: #"{"claudeAiOauth":{"accessToken":"tok-123","expiresAt":"soon"}}"#,
+                 want: ClaudeCredential(accessToken: "tok-123", expiresAt: nil)),
             Case(name: "malformed json", json: "not json", want: nil),
             Case(name: "missing claudeAiOauth", json: #"{"other":{"accessToken":"t"}}"#, want: nil),
             Case(name: "missing accessToken", json: #"{"claudeAiOauth":{"refreshToken":"r"}}"#, want: nil),
@@ -15,6 +23,21 @@ final class ProviderCredentialsTests: XCTestCase {
         for c in cases {
             XCTAssertEqual(
                 ProviderCredentials.parseClaude(Data(c.json.utf8)), c.want, "case: \(c.name)")
+        }
+    }
+
+    func testClaudeCredentialIsExpired() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        struct Case { let name: String; let expiresAt: Date?; let want: Bool }
+        let cases: [Case] = [
+            Case(name: "no expiry => never stale", expiresAt: nil, want: false),
+            Case(name: "future expiry", expiresAt: now.addingTimeInterval(60), want: false),
+            Case(name: "past expiry", expiresAt: now.addingTimeInterval(-60), want: true),
+            Case(name: "exactly now => expired", expiresAt: now, want: true),
+        ]
+        for c in cases {
+            let cred = ClaudeCredential(accessToken: "t", expiresAt: c.expiresAt)
+            XCTAssertEqual(cred.isExpired(at: now), c.want, "case: \(c.name)")
         }
     }
 
