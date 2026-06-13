@@ -76,12 +76,6 @@ Beacon Hub asks for three permissions on first run. The first two are required f
 | **Keychain — "Claude Code-credentials"** | Claude Code stores its OAuth token in this Keychain item; the hub reads it to fetch your usage. Choose **Always Allow** to avoid re-prompting on every launch. The token never leaves your Mac — only normalized percentages and reset times go over BLE. |
 | **Location** (optional) | A one-shot fix on launch/wake gives the device an accurate place name and time zone. Deny it and the device simply falls back to IP geolocation. |
 
-<p>
-  <img src="docs/assets/permission-bluetooth.png" alt="macOS Bluetooth permission prompt" height="280">
-  <img src="docs/assets/permission-claude-keychain.png" alt="macOS Keychain prompt for Claude Code-credentials" height="280">
-  <img src="docs/assets/permission-location.png" alt="macOS Location permission prompt" height="280">
-</p>
-
 Codex usage needs no prompt — the hub reads `~/.codex/auth.json` directly. No Local Network, microphone, or accessibility permissions are used.
 
 Just validating a fresh board? Flash the bring-up spike first — [`docs/spikes/SETUP.md`](docs/spikes/SETUP.md) covers the Arduino toolchain and the AXP2101 power-rail init the stock demo omits.
