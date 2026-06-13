@@ -9,6 +9,7 @@
 #include "ui/theme.h"
 #include "ui/theme_catalog.h"
 #include "ui/carousel.h"
+#include "ui/dev_seed.h"
 #include "core/nvs.h"
 #include "util/log.h"
 
@@ -81,6 +82,7 @@ static void run_sweep(void) {
   g_log_muted = true;                      // silence our own [BEACON] LOGx (incl. Core-0 dev_seed)
   disableLoopWDT();                        // the sweep monopolizes loop() for ~20s; don't let the WDT reset us
   Serial.setTxTimeoutMs(5000);             // CDC drops bytes on TX timeout under the 15MB blast; make writes block instead
+  dev_seed_reseed();   // re-stamp records LIVE: 'C' may arrive long after boot (or on a re-run), past the stale windows
   Serial.printf("\nBEACONCAP START %d\n", THEME_COUNT * screens);
 
   for (int t = 0; t < THEME_COUNT; t++) {

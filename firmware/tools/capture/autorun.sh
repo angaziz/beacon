@@ -2,7 +2,7 @@
 # Wait for the ESP32-S3 to enumerate, then upload the capture build and run the screenshot sweep.
 set -u
 PIO="$HOME/.beacon-pio/bin/pio"
-FW="/Users/angaziz/work/personal/beacon/firmware"
+FW="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"   # this script lives in firmware/tools/capture
 OUT="$FW/tools/capture/shots"
 cd "$FW" || exit 1
 

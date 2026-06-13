@@ -68,6 +68,9 @@ void dev_seed_init(void) {
   xTaskCreatePinnedToCore(stale_task, "stale", 3072, nullptr, 1, nullptr, 0);   // Core 0
   lv_obj_add_event_cb(carousel_root(), longpress_cb, LV_EVENT_LONG_PRESSED, NULL);
 }
+#if BEACON_CAPTURE
+void dev_seed_reseed(void) { seed(); }   // re-stamp records LIVE before a screenshot sweep
+#endif
 #else
 void dev_seed_init(void) {}
 #endif
