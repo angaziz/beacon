@@ -83,7 +83,7 @@ Beacon Hub is a small macOS menubar app — the device's private-data plane. It 
 
 **Requirements.** macOS 13 (Ventura) or later. The prebuilt release is **Apple Silicon only** (arm64); Intel Macs build from source ([`hub/README.md`](hub/README.md)) — SwiftPM compiles for the host architecture.
 
-**Install.** Download `Beacon-Hub-<version>-macos-apple-silicon.zip` from [Releases](https://github.com/angaziz/beacon/releases), unzip, and drag it to Applications. The app is not notarized, so first launch needs the Gatekeeper "Open Anyway" step — full details in [`hub/README.md`](hub/README.md). No release published yet? It builds from source in a few minutes.
+**Install.** Download `Beacon-Hub-<version>-macos-apple-silicon.zip` from [Releases](https://github.com/angaziz/beacon/releases), unzip, and drag it to Applications. Releases are Developer ID-signed and notarized, so Gatekeeper opens them without complaint — details in [`hub/README.md`](hub/README.md) (the older `hub-v0.1.0` was ad-hoc signed and may need the **Open Anyway** step). No release published yet? It builds from source in a few minutes.
 
 **Pair.** Open Beacon Hub; the **Set up Beacon** window walks three checks — Bluetooth permission, device pairing, and a one-click **Install hooks** for Claude Code.
 
