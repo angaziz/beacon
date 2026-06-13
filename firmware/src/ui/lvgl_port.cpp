@@ -6,6 +6,7 @@
 #include "config/layout.h"
 #include "util/log.h"
 #include "ui/idle_glue.h"
+#include "ui/capture.h"
 
 static const uint32_t BUF_LINES  = 47;                       // ~1/10 of 466 (tech.md §6)
 static const size_t   BUF_PX     = (size_t)SCREEN_W * BUF_LINES;
@@ -21,6 +22,9 @@ static lv_color_t* s_buf1 = nullptr;
 static void flush_cb(lv_disp_drv_t* drv, const lv_area_t* a, lv_color_t* px) {
   int32_t w = a->x2 - a->x1 + 1;
   int32_t h = a->y2 - a->y1 + 1;
+#if BEACON_CAPTURE
+  capture_blit(a, px);   // mirror the strip into the screenshot frame (no-op unless a sweep is armed)
+#endif
   display_draw_bitmap(a->x1, a->y1, w, h, (uint16_t*)px);
   lv_disp_flush_ready(drv);
 }

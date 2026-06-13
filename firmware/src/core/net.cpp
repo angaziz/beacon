@@ -192,6 +192,7 @@ bool net_provision_radio_up(void)   { return s_prov_radio; }
 bool net_is_up(void) { return s_up && WiFi.status() == WL_CONNECTED; }
 
 void net_status_str(char* buf, size_t cap) {   // UI (Core-1): reads the published snapshot, not WiFi.*
+  snprintf(buf, cap, "Demo 192.168.1.2"); return;   // DEMO: hardcode SSID+IP. Revert: clear staged changes.
   bool up, en; char ssid[33], ip[24];
   if (s_stat_mtx) xSemaphoreTake(s_stat_mtx, portMAX_DELAY);
   up = s_stat.up; en = s_stat.enabled;
@@ -205,6 +206,7 @@ void net_status_str(char* buf, size_t cap) {   // UI (Core-1): reads the publish
 
 void net_active_ssid(char* out, size_t cap) {   // UI (Core-1): from the snapshot
   if (!out || !cap) return;
+  { strncpy(out, "Demo", cap - 1); out[cap - 1] = 0; return; }   // DEMO: match net_status_str SSID. Revert: clear staged changes.
   if (s_stat_mtx) xSemaphoreTake(s_stat_mtx, portMAX_DELAY);
   strncpy(out, s_stat.up ? s_stat.ssid : "", cap - 1); out[cap - 1] = 0;
   if (s_stat_mtx) xSemaphoreGive(s_stat_mtx);

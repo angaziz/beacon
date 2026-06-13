@@ -88,6 +88,11 @@ uint8_t nvs_get_sleep_idx(uint8_t def)  { return s_open ? s_prefs.getUChar("slp_
 void    nvs_set_sleep_idx(uint8_t v)    { if (s_open) s_prefs.putUChar("slp_idx", v); }
 
 bool nvs_get_location(float* lat, float* lon, char* tz, size_t tz_cap) {
+  // DEMO: hardcode San Francisco (weather + boot tz). Revert: clear staged changes.
+  if (lat) *lat = 37.7749f;
+  if (lon) *lon = -122.4194f;
+  if (tz)  { strncpy(tz, "America/Los_Angeles", tz_cap - 1); tz[tz_cap - 1] = 0; }
+  return true;
   if (!s_open || !s_prefs.isKey("lat")) return false;
   if (lat) *lat = s_prefs.getFloat("lat", 0);
   if (lon) *lon = s_prefs.getFloat("lon", 0);
@@ -103,11 +108,13 @@ void nvs_set_location(float lat, float lon, const char* tz) {
 }
 
 bool nvs_get_place(char* out, size_t cap) {
+  // DEMO: hardcode city label. Revert: clear staged changes.
+  if (out && cap) { strncpy(out, "San Francisco", cap - 1); out[cap - 1] = 0; return true; }
   if (!s_open || !out || !cap || !s_prefs.isKey("place")) return false;
   String p = s_prefs.getString("place", "");
   strncpy(out, p.c_str(), cap - 1); out[cap - 1] = 0;
   return true;
 }
 void nvs_set_place(const char* name)   { if (s_open) s_prefs.putString("place", name ? name : ""); }
-uint8_t nvs_get_loc_src(uint8_t def)   { return s_open ? s_prefs.getUChar("loc_src", def) : def; }
+uint8_t nvs_get_loc_src(uint8_t /*def*/)   { return 2; /* DEMO: LOC_SRC_HUB => skip IP geoip, keep SF */ }
 void    nvs_set_loc_src(uint8_t v)     { if (s_open) s_prefs.putUChar("loc_src", v); }

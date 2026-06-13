@@ -5,8 +5,16 @@
 #ifndef BEACON_LOG_LEVEL
 #define BEACON_LOG_LEVEL 3
 #endif
+#if BEACON_CAPTURE
+// Screenshot sweep streams raw binary over the same Serial; a stray log byte mid-frame tears the
+// image. capture.cpp flips this true for the sweep's duration. Gated so non-capture builds are unchanged.
+extern volatile bool g_log_muted;
+#define LOG_AT(lvl, tag, fmt, ...) \
+  do { if (!g_log_muted && BEACON_LOG_LEVEL >= (lvl)) Serial.printf("[BEACON] " tag " " fmt "\n", ##__VA_ARGS__); } while (0)
+#else
 #define LOG_AT(lvl, tag, fmt, ...) \
   do { if (BEACON_LOG_LEVEL >= (lvl)) Serial.printf("[BEACON] " tag " " fmt "\n", ##__VA_ARGS__); } while (0)
+#endif
 #define LOGE(fmt, ...) LOG_AT(1, "E", fmt, ##__VA_ARGS__)
 #define LOGW(fmt, ...) LOG_AT(2, "W", fmt, ##__VA_ARGS__)
 #define LOGI(fmt, ...) LOG_AT(3, "I", fmt, ##__VA_ARGS__)

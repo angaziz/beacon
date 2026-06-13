@@ -46,9 +46,11 @@ static void on_theme(const beacon_theme_t* t) {
     lv_obj_clean(s_pages[i]);
     chrome_attach(s_pages[i]);
     MODULES[i]->build(s_pages[i]);
+    // Populate every page now so a freshly-built label never shows LVGL's default "Text"
+    // when it scrolls into view before its first tick. Off-screen invalidations are clipped.
+    if (MODULES[i]->update) MODULES[i]->update();
   }
   set_dots(s_current);
-  if (MODULES[s_current]->update) MODULES[s_current]->update();
 }
 
 // Reorder the page objects so s_current sits at the center slot with its circular neighbours
@@ -152,6 +154,12 @@ void carousel_set_tick_paused(bool paused) {
 
 int carousel_current(void) { return s_current; }
 lv_obj_t* carousel_root(void) { return s_pager; }
+
+#if BEACON_CAPTURE
+int carousel_count(void) { return COUNT; }
+const char* carousel_screen_id(int idx) { return MODULES[idx]->id; }
+void carousel_goto(int idx) { show(idx); recenter(); }   // same path scrollend_cb uses, sans gesture
+#endif
 
 void carousel_set_swipe_enabled(bool en) {
   if (en) { lv_obj_set_scroll_dir(s_pager, LV_DIR_HOR); lv_obj_add_flag(s_pager, LV_OBJ_FLAG_SCROLLABLE); }
