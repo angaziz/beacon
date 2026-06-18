@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let firstRun = FirstRunWindowController()
     private let forgetWindow = ForgetWindowController()
     private let location = LocationProvider()
+    private let tickerStore = TickerConfigStore()   // desired ticker list + monotonic rev (issue #92)
 
     // Latest known state -- the source of truth we (re)send on heartbeat/reconnect.
     private var usage = Usage(claude: .unavailable, codex: .unavailable)   // merged; resent on heartbeat
@@ -178,13 +179,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         central.onReady = { [weak self] in
             // Link state is refreshed by the isConnected didSet's onPhaseChange (fires just before
             // this); onReady only resends the full frame to a freshly-(re)subscribed device. The
-            // (re)connect frame carries the cached location fix (issue #54).
-            Task { @MainActor in self?.sendFullFrame(includeLocation: true) }
+            // (re)connect frame carries the cached location fix (issue #54). Push the ticker config after
+            // the full frame so a rebooted/re-bonded device re-syncs its list (issue #92).
+            Task { @MainActor in
+                self?.sendFullFrame(includeLocation: true)
+                self?.pushTickerConfig()
+            }
         }
         central.onCommand = { [weak self] cmd in
             Task { @MainActor in self?.handle(cmd) }
         }
         menubar.onRetryPairing = { [weak self] in self?.central.retryPairing() }
+        menubar.onApplyTickerEdit = { [weak self] rows in self?.applyTickerEdit(rows) }
         central.start()
     }
 
@@ -231,8 +237,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .unknown, nil:
                 central.send(HubAck.err(id: id, reason: "unknown_prompt_id"))
             }
-        case .configAck:
-            break   // wired to sync status in B3 (issue #92)
+        case .configAck(let rev, let ok, let count, let err):
+            // Ignore stale acks: a later edit already bumped our rev, so an ack for an older push no
+            // longer reflects the desired state we're tracking (issue #92).
+            guard rev == tickerStore.current.rev else { break }
+            menubar.setTickerSync(ok ? .synced(count ?? tickerStore.current.rows.count)
+                                     : .error(err ?? "rejected"))
         }
     }
 
@@ -299,6 +309,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // `includeLocation` rides the cached fix on the (re)connect frame but is dropped on the heartbeat.
     private func sendFullFrame(includeLocation: Bool) {
         sendFrame(StatusFrame(usage: usage, buddy: buddy, loc: includeLocation ? lastFix : nil))
+    }
+
+    // --- ticker config (issue #92) ---
+
+    // Commit an edit from the menubar editor (B4): persist (bumps rev) then push the new snapshot.
+    func applyTickerEdit(_ rows: [TickerRow]) {
+        tickerStore.save(rows: rows)
+        pushTickerConfig()
+    }
+
+    // Push the current desired list as ordered chunk frames. Skip when not connected or the list is empty
+    // (the firmware rejects an empty assembled snapshot, and ConfigFrame.chunks returns [] for it).
+    private func pushTickerConfig() {
+        guard central.isConnected, !tickerStore.current.rows.isEmpty else { return }
+        do {
+            let frames = try ConfigFrame.chunks(rows: tickerStore.current.rows, rev: tickerStore.current.rev)
+            for frame in frames { central.send(frame) }
+            menubar.setTickerSync(.pending)
+        } catch {
+            FileHandle.standardError.write(Data("[beacon-hub] ticker config encode failed: \(error.localizedDescription)\n".utf8))
+        }
     }
 
     private func sendFrame(_ frame: StatusFrame) {

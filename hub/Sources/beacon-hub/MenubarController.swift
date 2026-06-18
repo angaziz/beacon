@@ -38,6 +38,7 @@ final class MenubarController: NSObject {
     var onForgetDevice: (() -> Void)?
     var onRetryPairing: (() -> Void)?          // in-app "try again" after a .pairingFailed escalation (issue #17).
     var onMenuWillOpen: (() -> Void)?          // accessory app: popoverWillShow is the reliable login-item refresh hook.
+    var onApplyTickerEdit: (([TickerRow]) -> Void)?   // issue #92: editor commits the desired list; AppDelegate persists + pushes.
 
     // Bundled custom chime; falls back to a system sound when run without the .app bundle (bare dev build).
     private let promptSound: NSSound? = {
@@ -68,6 +69,7 @@ final class MenubarController: NSObject {
         model.onSetup = { [weak self] in self?.onOpenSetup?() }
         model.onForget = { [weak self] in self?.onForgetDevice?() }
         model.onRetryPairing = { [weak self] in self?.onRetryPairing?() }
+        model.onApplyTickerEdit = { [weak self] rows in self?.onApplyTickerEdit?(rows) }
         model.onOpenFixURL = { [weak self] in self?.openLink() }
         model.onQuit = { NSApp.terminate(nil) }
     }
@@ -140,6 +142,8 @@ final class MenubarController: NSObject {
         model.lastSync = Date()
         model.now = Date()   // restamp so reset hints stay fresh even while the popover is open
     }
+
+    func setTickerSync(_ status: TickerSyncStatus) { model.tickerSync = status }
 
     // contentTintColor must be assigned (color OR nil) on EVERY call: AppKit only tints template images,
     // and a stale tint from a fault/working render would otherwise leak into a later neutral/connected one.
