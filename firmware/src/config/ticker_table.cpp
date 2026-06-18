@@ -1,4 +1,5 @@
 #include "config/ticker_table.h"
+#include "config/ticker_store.h"   // load-or-default at boot (design §3.2)
 #include "core/ds_lock.h"   // same std::mutex (native) / FreeRTOS (device) wrapper as DataStore
 #include <string.h>
 
@@ -31,7 +32,9 @@ static void seed_from_defaults(void) {
 void ticker_table_init(void) {
   if (!s_inited) { ds_lock_init(s_lock); s_inited = true; }
   ds_lock_take(s_lock);
-  seed_from_defaults();
+  int n = ticker_store_load(s_tickers, MAX_TICKERS);   // persisted config wins; -1 if absent/invalid
+  if (n >= 1) s_count = n;
+  else        seed_from_defaults();                    // fresh device / corrupt blob => defaults
   s_gen = 0;   // no swap yet (A5 bumps on hot-swap)
   ds_lock_give(s_lock);
 }
