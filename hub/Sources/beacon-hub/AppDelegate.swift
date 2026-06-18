@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pollerClaude: ProviderUsage = .unavailable
     private var pollerCodex: ProviderUsage = .unavailable
     private var statuslineClaude: ProviderUsage?
+    private var statuslineClaudeAt: Date?   // #93: last live statusline POST, for the display-side expiry.
     private var usageErrors: [String] = []
     private var lastUsageErrors: [String] = []   // #59: last value handed to setUsage/BLE, for the equality gate.
 
@@ -161,6 +162,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         b.onClaudeUsage = { [weak self] c in
             Task { @MainActor in self?.onStatuslineClaude(c) }
         }
+        b.onStatuslineActivity = { [weak self] in
+            Task { @MainActor in self?.onStatuslineActivity() }
+        }
         b.onPromptUndeliverable = { [weak self] reason in
             Task { @MainActor in self?.menubar.setAlert("Auto-denied: \(reason)") }
         }
@@ -266,20 +270,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildUsage()
     }
 
-    // Claude usage from Claude Code's statusline rate_limits (overrides the poller; survives a 429).
+    // Liveness from Claude Code's statusline: fires on EVERY rate_limits POST (#93), even when the value
+    // is unchanged. This -- not the deduped value callback -- is what keeps the freshness stamps fresh, so
+    // an active-but-flat session never ages the gate out and re-triggers the Keychain poll/prompt.
+    // Runs before onStatuslineClaude for the same POST (the bridge fires activity first), so the stamp is
+    // set before rebuildUsage reads it.
+    private func onStatuslineActivity() {
+        poller.noteStatusline()    // #64: a live statusline => skip the (often-429) Claude oauth poll.
+        statuslineClaudeAt = Date()
+    }
+
+    // Claude usage VALUE from Claude Code's statusline rate_limits (overrides the poller; survives a 429).
+    // Deduped (#59); liveness/freshness is handled separately by onStatuslineActivity (#93).
     private func onStatuslineClaude(_ c: ProviderUsage) {
-        poller.noteStatusline()   // #64: a live statusline => skip the (often-429) Claude oauth poll.
         guard c != statuslineClaude else { return }   // #59: statusline re-fires ~3x/s, usually unchanged.
         statuslineClaude = c
         rebuildUsage()
     }
 
     private func rebuildUsage() {
-        let claude = statuslineClaude ?? pollerClaude
+        // #93: expire the statusline value on the SAME window the poll-gate uses (UsagePollDecision /
+        // poller.pollInterval), so once Claude Code quits and the shim goes silent the display falls back
+        // to the poller value within one window instead of pinning the last statusline value -- and stale
+        // poller errors stop being masked. The next poller tick (which re-enables the Claude poll on the
+        // same window) re-runs this, so display fallback and poll re-enable can't disagree.
+        let age = statuslineClaudeAt.map { Date().timeIntervalSince($0) }
+        let fresh = UsagePollDecision.statuslineFresh(age: age, interval: poller.pollInterval)
+        let usingStatusline = fresh && statuslineClaude != nil
+        let claude = (fresh ? statuslineClaude : nil) ?? pollerClaude
         let merged = Usage(claude: claude, codex: pollerCodex)
-        // Drop the Claude poller error once the statusline is supplying usage.
-        let errors = statuslineClaude == nil ? usageErrors
-            : usageErrors.filter { !$0.lowercased().contains("claude") }
+        // Drop the Claude poller error only while the statusline is actually supplying usage.
+        let errors = usingStatusline
+            ? usageErrors.filter { !$0.lowercased().contains("claude") }
+            : usageErrors
         // #59: skip the BLE frame, the @Published writes, and the lastSync/now restamp on a no-op.
         // The 30s heartbeat still resends the full frame, so a device that missed nothing loses nothing.
         guard merged != usage || errors != lastUsageErrors else { return }

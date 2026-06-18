@@ -37,5 +37,8 @@ let package = Package(
             ]
         ),
         .testTarget(name: "BeaconHubKitTests", dependencies: ["BeaconHubKit"]),
+        // Host-testable slices of the executable target (e.g. the ClaudeCodeBridge statusline path, #93).
+        // @testable import beacon_hub reaches the internal seams without the BLE/menubar runtime.
+        .testTarget(name: "beacon-hubTests", dependencies: ["beacon-hub"]),
     ]
 )

@@ -25,6 +25,9 @@ final class UsagePoller {
     private let claude: UsageProvider
     private let codex: UsageProvider
     private let interval: TimeInterval = 45
+    // Exposed so the display-side statusline expiry (#93) derives its freshness window from the SAME
+    // interval as the poll gate -- they must never disagree.
+    var pollInterval: TimeInterval { interval }
     private let backoff: TimeInterval = 300   // disconnected cadence (#64): no live device => no sub-min need.
     private let session: URLSession
     private var timer: DispatchSourceTimer?
@@ -69,6 +72,11 @@ final class UsagePoller {
                                            backoff: backoff) else { return }
         lastPollAt = now
         let age = lastStatuslineAt.map { now.timeIntervalSince($0) }
+        // #93: while the statusline shim is fresh, the Claude endpoint (hence the Keychain read) is
+        // skipped entirely. When the shim is ABSENT or no Claude session is running, this falls through
+        // to the Keychain poll so usage still shows before a session starts -- ACCEPTED tradeoff: one
+        // Keychain prompt can occur in that fallback (bounded by ClaudeUsageProvider's reread cooldown).
+        // This is expected, not a regression -- do not "fix" it by dropping the poller (issue #93 Option B).
         poll(includeClaude: UsagePollDecision.shouldPollClaude(statuslineAge: age, interval: interval))
     }
 
