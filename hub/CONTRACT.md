@@ -98,6 +98,8 @@ list (fail closed) and reports the first `err`:
 | `nvs_write_failed` | persisted blob write failed; active table untouched |
 | `malformed` | invalid JSON, bad `v`, over-length/empty `id`/`sym`/`name`, bad `part`/`parts` |
 
+**Field caps (UTF-8 bytes, enforced by the device — the hub MUST emit within these or the row is `malformed`):** `id` ≤15, `sym` ≤23, `name` ≤23. The hub clamps `name` to fit (display-only) and drops a candidate whose `sym` exceeds the cap.
+
 ## C. Upstream shapes (RECORDED — real token-redacted captures, 2026-06-11)
 
 ### C.1 Claude usage — statusline `rate_limits` (PRIMARY); `oauth/usage` (FALLBACK)
