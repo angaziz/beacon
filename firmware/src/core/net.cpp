@@ -235,12 +235,14 @@ data_err_t net_https_get(const char* host, const char* path,
   if (!reuse) {
     net_conn_close();
     s_cli.setCACert(ROOT_CA_BUNDLE);       // cert-validated; never setInsecure() (tech.md §9)
-    s_cli.setHandshakeTimeout(12);         // seconds
+    s_cli.setHandshakeTimeout(4);          // seconds; must stay < the 5s task WDT (see below)
     strncpy(s_host, host, sizeof(s_host) - 1); s_host[sizeof(s_host) - 1] = 0;
   }
   s_http.setReuse(true);
-  s_http.setConnectTimeout(8000);
-  s_http.setTimeout(8000);
+  // Every blocking phase must finish under the 5s Task WDT: a stalled fetch (esp. the body-read poll
+  // in writeToStream) that ran past 5s starved IDLE0 and panicked Core 0 (issue #92). Keep all < 5000.
+  s_http.setConnectTimeout(4000);
+  s_http.setTimeout(4000);
   if (!s_http.begin(s_cli, url)) {
     net_conn_close();
     err = ERR_NO_ROUTE;
