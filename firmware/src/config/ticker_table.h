@@ -30,3 +30,9 @@ void     ticker_table_init(void);                        // seed from DEFAULT_TI
 int      ticker_table_count(void);
 bool     ticker_table_get(int i, ticker_runtime_t* out); // copy under lock; false if out of range
 uint32_t ticker_table_gen(void);                         // starts 0; bumps on swap (A5)
+
+// A5 live re-apply. ticker_table_set swaps the table in RAM (no NVS) and bumps gen — PURE and
+// host-testable. ticker_table_apply is the device entry point: persist to NVS FIRST, and only swap
+// if the write succeeds (fail closed; on the native host the save stub fails => no swap, no gen bump).
+void     ticker_table_set(const ticker_runtime_t* rows, int count);  // clamp [0,MAX_TICKERS], copy under lock, bump gen
+bool     ticker_table_apply(const ticker_runtime_t* rows, int count);// save-then-swap; false (no swap) on NVS write fail

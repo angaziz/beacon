@@ -55,3 +55,23 @@ bool ticker_table_get(int i, ticker_runtime_t* out) {
 uint32_t ticker_table_gen(void) {
   ds_lock_take(s_lock); uint32_t g = s_gen; ds_lock_give(s_lock); return g;
 }
+
+void ticker_table_set(const ticker_runtime_t* rows, int count) {
+  if (!rows) return;
+  if (count < 0) count = 0;
+  if (count > MAX_TICKERS) count = MAX_TICKERS;
+  ds_lock_take(s_lock);
+  memset(s_tickers, 0, sizeof(s_tickers));
+  for (int i = 0; i < count; i++) s_tickers[i] = rows[i];
+  s_count = count;
+  s_gen++;                 // gen bump signals the scheduler + Finance UI to rebuild against the new set
+  ds_lock_give(s_lock);
+}
+
+bool ticker_table_apply(const ticker_runtime_t* rows, int count) {
+  // Persist FIRST, swap only on a confirmed write (design §3.2/§3.3): a failed NVS write keeps the
+  // current list running and the gen unchanged, so the hub gets nvs_write_failed and nothing live moves.
+  if (!ticker_store_save(rows, count)) return false;
+  ticker_table_set(rows, count);
+  return true;
+}

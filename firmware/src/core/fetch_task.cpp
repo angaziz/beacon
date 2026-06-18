@@ -53,7 +53,8 @@ static void mark_offline(void) {
 }
 
 static void fetch_task(void*) {
-  const int slots = 1 + ticker_table_count();   // A2: equals the default count (seeded); A5 makes this dynamic
+  int slots = 1 + ticker_table_count();
+  uint32_t last_gen = ticker_table_gen();
   for (int i = 0; i < slots; i++) s_next_due[i] = 0;   // all due at first connect
   bool was_up = false;
   bool dn_marked = false;    // device-plane already flipped offline for the current down stretch
@@ -64,6 +65,15 @@ static void fetch_task(void*) {
     net_service();   // WiFiMulti: apply saved-list changes + gated reconnect (blocks only while down)
     uint32_t now = (uint32_t)timekeep_now();
     ds_tick_staleness(now);
+
+    // A5: a hub config swap (gen bump) reshapes the finance slot set. Rebuild the slot count and make
+    // every finance slot due immediately so the new tickers fetch promptly; weather (slot 0) is untouched.
+    uint32_t gen = ticker_table_gen();
+    if (gen != last_gen) {
+      slots = 1 + ticker_table_count();
+      for (int i = 1; i < slots; i++) s_next_due[i] = now;
+      last_gen = gen;
+    }
 
     bool up = net_is_up();
     if (!up) {

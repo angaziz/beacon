@@ -46,6 +46,42 @@ static void test_gen_starts_zero(void) {
   TEST_ASSERT_EQUAL_UINT32(0u, ticker_table_gen());
 }
 
+static void mk_row(ticker_runtime_t* r, const char* id, const char* name) {
+  memset(r, 0, sizeof(*r));
+  strncpy(r->id, id, FIN_ID_LEN - 1);
+  strncpy(r->name, name, TKR_NAME_LEN - 1);
+  r->source = SRC_YAHOO; r->kind = KIND_INDEX; r->change_basis = CHG_PREV_CLOSE;
+  r->cadence_s = 300; r->stale_s = 600;
+}
+
+// ticker_table_set swaps the table in RAM and bumps gen; accessors reflect the new rows/count.
+static void test_set_swaps_and_bumps_gen(void) {
+  uint32_t g0 = ticker_table_gen();
+  ticker_runtime_t rows[2];
+  mk_row(&rows[0], "x1", "ONE");
+  mk_row(&rows[1], "x2", "TWO");
+  ticker_table_set(rows, 2);
+  TEST_ASSERT_EQUAL_UINT32(g0 + 1, ticker_table_gen());
+  TEST_ASSERT_EQUAL_INT(2, ticker_table_count());
+  ticker_runtime_t t;
+  TEST_ASSERT_TRUE(ticker_table_get(1, &t));
+  TEST_ASSERT_EQUAL_STRING("x2", t.id);
+  TEST_ASSERT_EQUAL_STRING("TWO", t.name);
+}
+
+// Reject path: the native ticker_store_save stub returns false, so apply must NOT swap and NOT bump gen.
+static void test_apply_reject_leaves_table_intact(void) {
+  int     count0 = ticker_table_count();
+  uint32_t gen0  = ticker_table_gen();
+  ticker_runtime_t r; mk_row(&r, "zz", "ZZ");
+  TEST_ASSERT_FALSE(ticker_table_apply(&r, 1));   // save stub fails on the host
+  TEST_ASSERT_EQUAL_INT(count0, ticker_table_count());
+  TEST_ASSERT_EQUAL_UINT32(gen0, ticker_table_gen());
+  ticker_runtime_t t;
+  TEST_ASSERT_TRUE(ticker_table_get(0, &t));
+  TEST_ASSERT_EQUAL_STRING(DEFAULT_TICKERS[0].id, t.id);   // still the seeded defaults
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_count_matches_defaults);
@@ -53,5 +89,7 @@ int main(int, char**) {
   RUN_TEST(test_get_out_of_range);
   RUN_TEST(test_get_returns_copy);
   RUN_TEST(test_gen_starts_zero);
+  RUN_TEST(test_set_swaps_and_bumps_gen);
+  RUN_TEST(test_apply_reject_leaves_table_intact);
   return UNITY_END();
 }

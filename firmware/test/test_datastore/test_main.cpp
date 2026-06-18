@@ -128,9 +128,47 @@ static void test_tick_buddy_prompt_preserves_hub_offline(void) {
   TEST_ASSERT_EQUAL_UINT8(PROMPT_TOO_LATE, g.prompt.decision_state);   // prompt still ages
 }
 
+// A5 stale-fetch guard: ds_set_finance_if publishes only when the slot still holds the expected id.
+static void test_set_finance_if_publish_vs_drop(void) {
+  struct { const char* name; const char* expect_id; bool published; } cases[] = {
+    {"match_publishes", nullptr,    true},    // expect_id filled from the seeded id below
+    {"mismatch_drops",  "STALE_ID", false},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    datastore_init();
+    finance_rec_t seeded = ds_get_finance(0);   // ST_LOADING, value 0
+    const char* expect = cases[i].expect_id ? cases[i].expect_id : seeded.id;
+    finance_rec_t r; memset(&r, 0, sizeof(r)); r.value = 777.0;
+    ds_set_finance_if(0, expect, &r);
+    finance_rec_t g = ds_get_finance(0);
+    if (cases[i].published) {
+      TEST_ASSERT_EQUAL_FLOAT_MESSAGE(777.0f, (float)g.value, cases[i].name);
+      TEST_ASSERT_EQUAL_INT_MESSAGE(ST_LIVE, g.hdr.state, cases[i].name);
+      TEST_ASSERT_EQUAL_STRING_MESSAGE(seeded.id, g.id, cases[i].name);   // seeded id preserved
+    } else {
+      TEST_ASSERT_EQUAL_FLOAT_MESSAGE(0.0f, (float)g.value, cases[i].name);   // dropped: value untouched
+      TEST_ASSERT_EQUAL_INT_MESSAGE(ST_LOADING, g.hdr.state, cases[i].name);  // state untouched
+    }
+  }
+}
+
+static void test_reseed_finance_sets_ids_loading_count(void) {
+  char ids[3][FIN_ID_LEN] = {"aaa", "bbb", "ccc"};
+  ds_reseed_finance(ids, 3);
+  TEST_ASSERT_EQUAL_UINT8(3, ds_get_finance_count());
+  for (int i = 0; i < 3; i++) {
+    finance_rec_t g = ds_get_finance((uint8_t)i);
+    TEST_ASSERT_EQUAL_STRING(ids[i], g.id);
+    TEST_ASSERT_EQUAL_INT(ST_LOADING, g.hdr.state);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, (float)g.value);
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_init_seeds_finance);
+  RUN_TEST(test_set_finance_if_publish_vs_drop);
+  RUN_TEST(test_reseed_finance_sets_ids_loading_count);
   RUN_TEST(test_weather_set_get_forces_live);
   RUN_TEST(test_finance_isolation_and_id_preserved);
   RUN_TEST(test_staleness_inclusive_boundary);

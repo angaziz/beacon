@@ -10,11 +10,13 @@
 #include <stdio.h>
 #include <string.h>
 
-static void publish(uint8_t idx, double value, double change, double change_pct) {
+static void publish(uint8_t idx, const char* expect_id, double value, double change, double change_pct) {
   finance_rec_t f; memset(&f, 0, sizeof(f));
   f.value = value; f.change = change; f.change_pct = change_pct;
   f.hdr.last_updated = (uint32_t)timekeep_now();
-  ds_set_finance(idx, &f);   // preserves the seeded id, forces ST_LIVE
+  // expect_id is the slot id captured before the (blocking) fetch; the guarded publish drops the
+  // result if a hub reseed swapped this slot to a different ticker while the fetch was in flight.
+  ds_set_finance_if(idx, expect_id, &f);   // preserves the seeded id, forces ST_LIVE
 }
 
 static data_err_t fail(uint8_t idx, data_err_t e) {
@@ -33,7 +35,7 @@ static data_err_t fetch_binance(uint8_t idx, const ticker_runtime_t* c) {
   if (parse_binance(fetch_scratch(), strlen(fetch_scratch()), &last, &pct) != ERR_NONE) return fail(idx, ERR_PARSE);
   double open = (1.0 + pct / 100.0) != 0.0 ? last / (1.0 + pct / 100.0) : last;   // 24h open from pct
   double change = 0; change_compute(last, open, &change, nullptr);
-  publish(idx, last, change, pct);   // keep the source's exact 24h pct
+  publish(idx, c->id, last, change, pct);   // keep the source's exact 24h pct
   return ERR_NONE;
 }
 
@@ -47,7 +49,7 @@ static data_err_t fetch_yahoo(uint8_t idx, const ticker_runtime_t* c) {
   double price = 0, prev = 0;
   if (parse_yahoo(fetch_scratch(), strlen(fetch_scratch()), &price, &prev) != ERR_NONE) return fail(idx, ERR_PARSE);
   double change = 0, pct = 0; change_compute(price, prev, &change, &pct);
-  publish(idx, price, change, pct);
+  publish(idx, c->id, price, change, pct);
   return ERR_NONE;
 }
 
