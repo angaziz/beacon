@@ -29,25 +29,8 @@ static bool               s_open = false;
 static uint32_t           s_open_ms = 0;     // millis() of last use, for the idle close
 static uint32_t           s_handshakes = 0;  // cumulative; logged so a sweep's handshake count is verifiable
 #define NET_IDLE_CLOSE_MS 8000u
-
-// A Stream sink that copies the response body straight into the caller's fixed buffer -- no body-sized
-// String alloc (#61). Overflow is discarded but still "accepted" so HTTPClient::writeToStream drains
-// the whole body off the socket (keep-alive stays clean for reuse). chunked + Content-Length both work.
-struct BufWriter : public Stream {
-  char*  buf; size_t cap; size_t len = 0; bool over = false;
-  BufWriter(char* b, size_t c) : buf(b), cap(c) {}
-  size_t write(uint8_t c) override {
-    if (cap && len < cap - 1) buf[len++] = (char)c; else over = true; return 1;
-  }
-  size_t write(const uint8_t* d, size_t n) override {
-    size_t room = (cap && len < cap - 1) ? (cap - 1 - len) : 0;
-    size_t w = n < room ? n : room; if (w) memcpy(buf + len, d, w);
-    len += w; if (w < n) over = true; return n;   // claim n so writeToStream keeps draining
-  }
-  int available() override { return 0; }
-  int read() override { return -1; }
-  int peek() override { return -1; }
-};
+#define NET_BODY_DEADLINE_MS 8000u   // overall body-read budget; the cooperative drain yields, so this
+                                     // only bounds a half-dead socket -- it is not a WDT mitigation
 
 // caller holds s_tls_mtx (or is the sole fetch-task path before the lock is contended)
 static void net_conn_close(void) {
@@ -56,6 +39,102 @@ static void net_conn_close(void) {
   s_cli.stop();
   s_open = false;
   s_host[0] = 0;
+}
+
+// --- cooperative HTTP body drain (#92) -----------------------------------------------------
+// HTTPClient::writeToStream drains via Stream::timedRead, a busy-spin with no yield; on a multi-second
+// body stall it starved IDLE0 on the Core-0 fetch task and tripped the 5s task WDT (panic + reboot).
+// These helpers read straight off s_cli, gating every read on available() and vTaskDelay-ing IDLE0 when
+// the socket has no data -- so the WDT stays fed however slowly the body arrives. An overall deadline
+// (NET_BODY_DEADLINE_MS) bounds a half-dead keep-alive socket; the per-read yield, not the deadline, is
+// the WDT fix. Content-Length and Transfer-Encoding: chunked are the only shapes our HTTP/1.1 hosts use.
+
+// Copy n body bytes into the caller buffer; flag overflow but keep draining so the keep-alive socket
+// stays clean (#61). The caller NUL-terminates out once the whole body is drained.
+static void body_emit(char* out, size_t cap, size_t* outlen, bool* over, const uint8_t* d, int n) {
+  if (!out || !cap) return;
+  size_t room = (*outlen < cap - 1) ? (cap - 1 - *outlen) : 0;
+  size_t w = ((size_t)n < room) ? (size_t)n : room;
+  if (w) memcpy(out + *outlen, d, w);
+  *outlen += w;
+  if (w < (size_t)n) *over = true;
+}
+
+// Read one chunk-size line ("<hex>[;ext]\r\n"). Returns the size (>= 0; 0 = last chunk) or -1 on stall.
+static long read_chunk_size(uint32_t deadline) {
+  long sz = 0; bool digit = false, in_ext = false;
+  for (;;) {
+    if ((int32_t)(millis() - deadline) >= 0 || !s_cli.connected()) return -1;
+    uint8_t b; if (s_cli.read(&b, 1) <= 0) { vTaskDelay(pdMS_TO_TICKS(2)); continue; }
+    if (b == '\n') return digit ? sz : -1;
+    if (b == '\r' || in_ext) continue;
+    if (b == ';') { in_ext = true; continue; }   // chunk extension: ignore to end of line
+    int v = (b >= '0' && b <= '9') ? b - '0'
+          : (b >= 'a' && b <= 'f') ? b - 'a' + 10
+          : (b >= 'A' && b <= 'F') ? b - 'A' + 10 : -1;
+    if (v >= 0) { sz = sz * 16 + v; digit = true; }
+  }
+}
+
+// Copy exactly n_bytes of body off the socket into out. Returns false on stall/disconnect/deadline.
+static bool read_body_bytes(int n_bytes, uint32_t deadline, char* out, size_t cap,
+                            size_t* outlen, bool* over) {
+  uint8_t tmp[256];
+  while (n_bytes > 0) {
+    if ((int32_t)(millis() - deadline) >= 0 || !s_cli.connected()) return false;
+    if (s_cli.available() <= 0) { vTaskDelay(pdMS_TO_TICKS(2)); continue; }   // no data yet: yield IDLE0
+    int want = n_bytes < (int)sizeof(tmp) ? n_bytes : (int)sizeof(tmp);
+    int n = s_cli.read(tmp, (size_t)want);
+    if (n <= 0) { vTaskDelay(pdMS_TO_TICKS(2)); continue; }
+    body_emit(out, cap, outlen, over, tmp, n);
+    n_bytes -= n;
+  }
+  return true;
+}
+
+// After the terminating 0-size chunk, drain the trailer section (lines through the final empty CRLF) so
+// the keep-alive socket is positioned at the next response. Returns false on stall.
+static bool consume_trailers(uint32_t deadline) {
+  for (;;) {
+    bool any = false;
+    for (;;) {
+      if ((int32_t)(millis() - deadline) >= 0 || !s_cli.connected()) return false;
+      uint8_t b; if (s_cli.read(&b, 1) <= 0) { vTaskDelay(pdMS_TO_TICKS(2)); continue; }
+      if (b == '\n') break;
+      if (b != '\r') any = true;
+    }
+    if (!any) return true;   // empty line => end of trailers
+  }
+}
+
+// Drain the response body cooperatively. len = Content-Length (>= 0) or -1 for chunked. Writes up to
+// cap-1 bytes into out (NUL-terminated); sets *truncated if the body exceeded the buffer. Returns
+// ERR_NONE on a complete body, ERR_TIMEOUT on a stall/short read (caller drops the socket).
+static data_err_t drain_body(int len, char* out, size_t cap, bool* truncated) {
+  size_t outlen = 0; bool over = false;
+  uint32_t deadline = millis() + NET_BODY_DEADLINE_MS;
+  data_err_t rc = ERR_NONE;
+
+  if (len >= 0) {
+    if (!read_body_bytes(len, deadline, out, cap, &outlen, &over)) rc = ERR_TIMEOUT;
+  } else {
+    for (;;) {   // chunked: <hex>\r\n <data> \r\n ... 0\r\n [trailers] \r\n
+      long sz = read_chunk_size(deadline);
+      if (sz < 0) { rc = ERR_TIMEOUT; break; }
+      if (sz == 0) { if (!consume_trailers(deadline)) rc = ERR_TIMEOUT; break; }
+      if (!read_body_bytes((int)sz, deadline, out, cap, &outlen, &over)) { rc = ERR_TIMEOUT; break; }
+      for (int got = 0; got < 2; ) {   // consume the CRLF trailing each chunk's data
+        if ((int32_t)(millis() - deadline) >= 0 || !s_cli.connected()) { rc = ERR_TIMEOUT; break; }
+        uint8_t b; if (s_cli.read(&b, 1) <= 0) { vTaskDelay(pdMS_TO_TICKS(2)); continue; }
+        got++;
+      }
+      if (rc != ERR_NONE) break;
+    }
+  }
+
+  if (out && cap) out[outlen] = 0;
+  if (truncated) *truncated = over;
+  return rc;
 }
 // WiFiMulti is touched ONLY by net_service() (Core-0). The UI/portal mutate the saved list (nvs, under
 // its own mutex) + set the dirty flag; net_service rebuilds the AP set + runs the (blocking) reconnect.
@@ -253,13 +332,13 @@ data_err_t net_https_get(const char* host, const char* path,
     if (status) *status = code;
     err = map_http(code);
     if (err == ERR_NONE) {
-      // Stream the body straight into the caller's buffer -- no body-sized String (#61). writeToStream
-      // decodes chunked + Content-Length and drains the whole body, so the keep-alive socket stays clean.
-      BufWriter bw(out, cap);
-      int wrote = s_http.writeToStream(&bw);
-      if (out && cap) out[bw.len] = 0;
-      if (wrote < 0) { net_conn_close(); }   // read error mid-body: socket suspect, force a fresh one
-      else if (bw.over) LOGW("http body truncated host=%s cap=%u", host, (unsigned)cap);
+      // Cooperative drain (see drain_body, #92): yields IDLE0 so a slow/stalled body never starves the
+      // Core-0 task WDT, unlike HTTPClient::writeToStream's busy-spin. getSize() is the Content-Length,
+      // or -1 for a chunked body (Open-Meteo); both are handled.
+      bool truncated = false;
+      err = drain_body(s_http.getSize(), out, cap, &truncated);
+      if (err != ERR_NONE) { net_conn_close(); LOGW("http body stalled host=%s", host); }   // suspect: force a fresh socket
+      else if (truncated) LOGW("http body truncated host=%s cap=%u", host, (unsigned)cap);
     } else {
       LOGW("http get host=%s code=%d", host, code);
     }
