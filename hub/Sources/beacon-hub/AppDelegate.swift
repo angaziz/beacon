@@ -16,6 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let forgetWindow = ForgetWindowController()
     private let location = LocationProvider()
     private let tickerStore = TickerConfigStore()   // desired ticker list + monotonic rev (issue #92)
+    private let tickerSearch = TickerSearch()        // Binance(cached) + Yahoo(live) discovery (issue #92 B4)
+    private lazy var tickerEditor = TickerEditorWindowController(model: menubar.viewModel)
+    private var binanceCandidates: [TickerCandidate] = []   // warmed-once cache for local Binance filtering
 
     // Latest known state -- the source of truth we (re)send on heartbeat/reconnect.
     private var usage = Usage(claude: .unavailable, codex: .unavailable)   // merged; resent on heartbeat
@@ -39,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startFirstRun()
         startLoginItem()
         startLocation()
+        startTickerEditor()
 
         // Heartbeat resends the full frame WITHOUT loc (issue #54): location rides the (re)connect frame
         // and on-change frames only, never the 30s heartbeat.
@@ -313,9 +317,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // --- ticker config (issue #92) ---
 
-    // Commit an edit from the menubar editor (B4): persist (bumps rev) then push the new snapshot.
+    // Wire the B4 editor: seed it with the persisted list, warm the Binance universe once for local
+    // filtering, route the open action, and provide the merged search hook (Binance local + Yahoo live).
+    private func startTickerEditor() {
+        menubar.setTickerRows(tickerStore.current.rows)
+        menubar.onOpenTickerEditor = { [weak self] in self?.tickerEditor.show() }
+        menubar.setTickerSearch { [weak self] query, completion in self?.searchTickers(query, completion) }
+
+        tickerSearch.fetchBinanceCatalog { [weak self] candidates in
+            Task { @MainActor in self?.binanceCandidates = candidates }
+        }
+    }
+
+    // Local Binance filter merged with a live Yahoo query: fire Yahoo, and in its completion unify it with
+    // the already-cached Binance filter. Both deliver on the main actor so the editor mutates @State safely.
+    private func searchTickers(_ query: String, _ completion: @escaping ([TickerCandidate]) -> Void) {
+        let binance = BinanceCatalog.search(query, in: binanceCandidates)
+        tickerSearch.searchYahoo(query) { yahoo in
+            Task { @MainActor in completion(TickerMerge.unify(binance: binance, yahoo: yahoo)) }
+        }
+    }
+
+    // Commit an edit from the menubar editor (B4): persist (bumps rev) then push the new snapshot. Mirror
+    // the persisted list back to the view model so the editor reflects exactly what was saved.
     func applyTickerEdit(_ rows: [TickerRow]) {
         tickerStore.save(rows: rows)
+        menubar.setTickerRows(tickerStore.current.rows)
         pushTickerConfig()
     }
 

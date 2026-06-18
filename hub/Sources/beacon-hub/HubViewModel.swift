@@ -22,6 +22,7 @@ final class HubViewModel: ObservableObject {
     @Published var muted: Bool
     @Published var now: Date
     @Published var tickerSync: TickerSyncStatus = .idle
+    @Published var tickerRows: [TickerRow] = []   // issue #92: current desired list, seeds the B4 editor
 
     // Intent closures, populated by MenubarController (weakly, so VM<->controller is not a retain cycle).
     var onToggleMute: () -> Void = {}
@@ -30,6 +31,10 @@ final class HubViewModel: ObservableObject {
     var onForget: () -> Void = {}
     var onRetryPairing: () -> Void = {}
     var onApplyTickerEdit: ([TickerRow]) -> Void = { _ in }   // issue #92: B4 editor commits the desired list
+    var onOpenTickerEditor: () -> Void = {}                    // issue #92: open the dedicated editor window
+    // issue #92: editor calls this with a query; AppDelegate runs Binance(local) + Yahoo(live) and delivers
+    // the merged candidates on the main actor. The closure does not retain results; the editor owns them.
+    var onSearchTickers: ((String, @escaping ([TickerCandidate]) -> Void) -> Void)?
     var onOpenFixURL: () -> Void = {}
     var onQuit: () -> Void = {}
 
