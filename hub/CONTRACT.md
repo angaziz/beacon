@@ -47,6 +47,57 @@ loc-only frame on meaningful (> ~0.01 deg) change — **never** on the 30s heart
 - `ok:false` = the device decided but the hub had already resolved the prompt (e.g. the 25s fail-closed
   cap fired first, or it was superseded). The device must surface this, not treat it as success.
 
+## B2. Hub -> device ticker config + device -> hub config ack (FROZEN, issue #92, design `docs/specs/2026-06-17-hub-ticker-config-design.md` §2)
+
+The hub is the source of truth for the device's market-ticker list. It pushes a **full-snapshot
+replace** as a chunked `config` frame; the device persists it (NVS), live-applies it, and acks once per
+completed snapshot. Frozen blocks (status/buddy/loc/permission) are untouched. Mirror of
+`firmware/src/core/hub_proto.cpp` (`hub_parse_config_chunk` / `hub_config_accum_step` /
+`hub_build_config_ack`) and `BeaconHubKit/TickerConfig.swift`.
+
+### Hub -> device: config frame (chunked)
+
+```json
+{"v":1,"config":{"rev":7,"part":0,"parts":2,"tickers":[
+  {"id":"ygspc","src":"yahoo","sym":"%5EGSPC","name":"S&P 500","kind":"index","cadence":300,"stale":600,"basis":"prev_close"}]}}
+{"v":1,"config":{"rev":7,"part":1,"parts":2,"tickers":[
+  {"id":"bbtcusdt","src":"binance","sym":"BTCUSDT","name":"BTC","kind":"crypto","cadence":60,"stale":600,"basis":"24h"}]}}
+```
+
+- `rev` — hub's monotonic revision (uint32). Echoed in the ack; correlates ack to push.
+- `part` / `parts` — 0-based chunk index and total. Rows concatenated across parts in `part` order ==
+  display order (full replace).
+- **Chunking rule:** each serialized newline-terminated line is `<= ~900 B` (margin under firmware
+  `HUB_FRAME_MAX`=1024). A row is **never split** across chunks. The hub packs as many whole rows per
+  chunk as fit; an empty list is never pushed (the device rejects an empty assembled snapshot). Encoder:
+  `JSONEncoder(.sortedKeys)` + a trailing `0x0A`, matching the status-frame framing.
+- **Row keys (exact):** `id` (<=15 chars, stable, deterministic from `(src,sym)`, invariant under
+  reorder/removal), `src` (`binance`|`yahoo`), `sym` (Yahoo percent-encoded **once** for the URL path,
+  e.g. `^GSPC` => `%5EGSPC`; Binance raw), `name`, `kind` (`fx`|`crypto`|`index`|`etf`), `cadence` (int
+  seconds), `stale` (int seconds), `basis` (`prev_close`|`24h`).
+
+### Device -> hub: config ack (one per completed `rev`)
+
+```json
+{"v":1,"cmd":"config_ack","rev":7,"ok":true,"count":8}
+{"v":1,"cmd":"config_ack","rev":7,"ok":false,"err":"too_many_tickers"}
+```
+
+Uses the device->hub `cmd` channel (parsed by `DeviceCommand.configAck`); it does **not** overload the
+prompt-id `ack`. On `ok:true`, `count` = applied ticker count. On reject the device keeps its current
+list (fail closed) and reports the first `err`:
+
+| `err` | meaning |
+|---|---|
+| `too_many_tickers` | assembled count > MAX_TICKERS (16) |
+| `empty` | assembled count == 0 |
+| `bad_source` | `src` not `binance`/`yahoo` |
+| `bad_kind` | `kind` not `fx`/`crypto`/`index`/`etf` |
+| `bad_basis` | `basis` not `prev_close`/`24h` |
+| `bad_chunking` | out-of-order / duplicate / gap / `rev` mismatch / window timeout |
+| `nvs_write_failed` | persisted blob write failed; active table untouched |
+| `malformed` | invalid JSON, bad `v`, over-length/empty `id`/`sym`/`name`, bad `part`/`parts` |
+
 ## C. Upstream shapes (RECORDED — real token-redacted captures, 2026-06-11)
 
 ### C.1 Claude usage — statusline `rate_limits` (PRIMARY); `oauth/usage` (FALLBACK)

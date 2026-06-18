@@ -231,6 +231,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .unknown, nil:
                 central.send(HubAck.err(id: id, reason: "unknown_prompt_id"))
             }
+        case .configAck:
+            break   // wired to sync status in B3 (issue #92)
         }
     }
 
