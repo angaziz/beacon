@@ -16,6 +16,10 @@ struct TickerEditorView: View {
     @State private var results: [TickerCandidate] = []
     @State private var working: [TickerRow] = []
     @State private var searchTask: Task<Void, Never>?
+    // Per-row add gating (issue #92): the row whose test-fetch is in flight, and the last failure reason
+    // keyed by row id (cleared when that row is retried). Keeps add async without blocking the UI.
+    @State private var validatingID: String?
+    @State private var addErrors: [String: String] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -94,6 +98,8 @@ struct TickerEditorView: View {
                         ForEach(results, id: \.row.id) { candidate in
                             ResultRow(candidate: candidate,
                                       canAdd: working.count < maxTickers && !working.contains { $0.id == candidate.row.id },
+                                      validating: validatingID == candidate.row.id,
+                                      error: addErrors[candidate.row.id],
                                       add: { add(candidate.row) })
                             Divider().padding(.leading, 11)
                         }
@@ -144,10 +150,24 @@ struct TickerEditorView: View {
 
     // MARK: - Mutations (each commits via B3: persist + push)
 
+    // Test-fetch the device's data endpoint before adding (issue #92): only a row that returns live data
+    // joins the list. While validating, the row's Add button shows a spinner; on failure the reason is
+    // surfaced inline and the row is NOT added. Ignore re-taps while a validation is already in flight.
     private func add(_ row: TickerRow) {
-        guard working.count < maxTickers, !working.contains(where: { $0.id == row.id }) else { return }
-        working.append(row)
-        commit()
+        guard working.count < maxTickers, !working.contains(where: { $0.id == row.id }), validatingID == nil
+        else { return }
+        addErrors[row.id] = nil
+        guard let validate = model.onValidateTicker else {
+            working.append(row); commit(); return   // no hook (bare dev build): keep the prior add behavior
+        }
+        validatingID = row.id
+        validate(row) { ok, reason in
+            validatingID = nil
+            guard ok else { addErrors[row.id] = reason ?? "No live data for \(row.sym)"; return }
+            guard working.count < maxTickers, !working.contains(where: { $0.id == row.id }) else { return }
+            working.append(row)
+            commit()
+        }
     }
 
     private func remove(_ row: TickerRow) {
@@ -170,19 +190,30 @@ struct TickerEditorView: View {
 private struct ResultRow: View {
     let candidate: TickerCandidate
     let canAdd: Bool
+    let validating: Bool
+    let error: String?
     let add: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(candidate.row.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                HStack(spacing: 6) {
-                    Text(candidate.row.sym).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                    SourceChip(label: candidate.sourceLabel)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(candidate.row.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(candidate.row.sym).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                        SourceChip(label: candidate.sourceLabel)
+                    }
+                }
+                Spacer(minLength: 6)
+                if validating {
+                    ProgressView().controlSize(.small)
+                } else {
+                    DeckButton(title: "Add", kind: .primary, enabled: canAdd, action: add)
                 }
             }
-            Spacer(minLength: 6)
-            DeckButton(title: "Add", kind: .primary, enabled: canAdd, action: add)
+            if let error {
+                Text(error).font(.system(size: 10)).foregroundStyle(.red).lineLimit(2)
+            }
         }
         .padding(.horizontal, 11).padding(.vertical, 8)
     }

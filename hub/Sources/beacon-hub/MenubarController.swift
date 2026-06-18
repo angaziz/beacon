@@ -154,6 +154,9 @@ final class MenubarController: NSObject {
     func setTickerSearch(_ search: @escaping (String, @escaping ([TickerCandidate]) -> Void) -> Void) {
         model.onSearchTickers = search
     }
+    func setTickerValidate(_ validate: @escaping (TickerRow, @escaping (Bool, String?) -> Void) -> Void) {
+        model.onValidateTicker = validate
+    }
 
     // contentTintColor must be assigned (color OR nil) on EVERY call: AppKit only tints template images,
     // and a stale tint from a fault/working render would otherwise leak into a later neutral/connected one.

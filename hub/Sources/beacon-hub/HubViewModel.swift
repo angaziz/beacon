@@ -35,6 +35,9 @@ final class HubViewModel: ObservableObject {
     // issue #92: editor calls this with a query; AppDelegate runs Binance(local) + Yahoo(live) and delivers
     // the merged candidates on the main actor. The closure does not retain results; the editor owns them.
     var onSearchTickers: ((String, @escaping ([TickerCandidate]) -> Void) -> Void)?
+    // issue #92: editor calls this before adding a candidate; AppDelegate test-fetches the device's data
+    // endpoint and delivers (ok, failureReason) on the main actor so non-working symbols are rejected.
+    var onValidateTicker: ((TickerRow, @escaping (Bool, String?) -> Void) -> Void)?
     var onOpenFixURL: () -> Void = {}
     var onQuit: () -> Void = {}
 

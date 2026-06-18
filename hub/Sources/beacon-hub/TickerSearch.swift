@@ -62,6 +62,45 @@ final class TickerSearch {
         }.resume()
     }
 
+    // Pre-add test-fetch (issue #92): hit the EXACT data endpoint the device will fetch (finance.cpp) and
+    // confirm a live instrument via the pure TickerValidation parse, so a non-working catalog symbol never
+    // lands on the device. Binance uses row.sym raw; Yahoo uses row.sym verbatim (already percent-encoded
+    // once by SymbolEncoding.yahooPath) with the browser-ish UA Yahoo requires. Bounded by the session's
+    // request timeout. Delivers (ok, failureReason) on the main actor for the UI.
+    func validate(_ row: TickerRow, completion: @escaping (Bool, String?) -> Void) {
+        let finish: (Bool, String?) -> Void = { ok, reason in
+            Task { @MainActor in completion(ok, reason) }
+        }
+        switch row.src {
+        case .binance:
+            guard let url = URL(string: "https://data-api.binance.vision/api/v3/ticker/24hr?symbol=\(row.sym)") else {
+                finish(false, "Symbol not tradeable"); return
+            }
+            session.dataTask(with: url) { data, resp, _ in
+                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                guard code == 200, let data, TickerValidation.binanceOK(data) else {
+                    finish(false, "No live data for \(row.sym)"); return
+                }
+                finish(true, nil)
+            }.resume()
+        case .yahoo:
+            guard let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(row.sym)?interval=1d&range=1d") else {
+                finish(false, "Symbol not tradeable"); return
+            }
+            var req = URLRequest(url: url)
+            req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+                         forHTTPHeaderField: "User-Agent")
+            req.setValue("application/json", forHTTPHeaderField: "Accept")
+            session.dataTask(with: req) { data, resp, _ in
+                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                guard code == 200, let data, TickerValidation.yahooOK(data) else {
+                    finish(false, "No live data for \(row.sym)"); return
+                }
+                finish(true, nil)
+            }.resume()
+        }
+    }
+
     // --- raw cache (Application Support/Beacon/binance-exchangeInfo.json) ---
 
     private var cacheURL: URL? {

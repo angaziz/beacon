@@ -323,6 +323,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menubar.setTickerRows(tickerStore.current.rows)
         menubar.onOpenTickerEditor = { [weak self] in self?.tickerEditor.show() }
         menubar.setTickerSearch { [weak self] query, completion in self?.searchTickers(query, completion) }
+        menubar.setTickerValidate { [weak self] row, completion in self?.tickerSearch.validate(row, completion: completion) }
 
         tickerSearch.fetchBinanceCatalog { [weak self] candidates in
             Task { @MainActor in self?.binanceCandidates = candidates }
