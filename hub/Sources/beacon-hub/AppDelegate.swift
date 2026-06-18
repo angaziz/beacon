@@ -15,6 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let firstRun = FirstRunWindowController()
     private let forgetWindow = ForgetWindowController()
     private let location = LocationProvider()
+    private let tickerStore = TickerConfigStore()   // desired ticker list + monotonic rev (issue #92)
+    private let tickerSearch = TickerSearch()        // Binance(cached) + Yahoo(live) discovery (issue #92 B4)
+    private lazy var tickerEditor = TickerEditorWindowController(model: menubar.viewModel)
+    private var binanceCandidates: [TickerCandidate] = []   // warmed-once cache for local Binance filtering
 
     // Latest known state -- the source of truth we (re)send on heartbeat/reconnect.
     private var usage = Usage(claude: .unavailable, codex: .unavailable)   // merged; resent on heartbeat
@@ -38,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startFirstRun()
         startLoginItem()
         startLocation()
+        startTickerEditor()
 
         // Heartbeat resends the full frame WITHOUT loc (issue #54): location rides the (re)connect frame
         // and on-change frames only, never the 30s heartbeat.
@@ -178,13 +183,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         central.onReady = { [weak self] in
             // Link state is refreshed by the isConnected didSet's onPhaseChange (fires just before
             // this); onReady only resends the full frame to a freshly-(re)subscribed device. The
-            // (re)connect frame carries the cached location fix (issue #54).
-            Task { @MainActor in self?.sendFullFrame(includeLocation: true) }
+            // (re)connect frame carries the cached location fix (issue #54). Push the ticker config after
+            // the full frame so a rebooted/re-bonded device re-syncs its list (issue #92).
+            Task { @MainActor in
+                self?.sendFullFrame(includeLocation: true)
+                self?.pushTickerConfig()
+            }
         }
         central.onCommand = { [weak self] cmd in
             Task { @MainActor in self?.handle(cmd) }
         }
         menubar.onRetryPairing = { [weak self] in self?.central.retryPairing() }
+        menubar.onApplyTickerEdit = { [weak self] rows in self?.applyTickerEdit(rows) }
         central.start()
     }
 
@@ -231,6 +241,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .unknown, nil:
                 central.send(HubAck.err(id: id, reason: "unknown_prompt_id"))
             }
+        case .configAck(let rev, let ok, let count, let err):
+            // Ignore stale acks: a later edit already bumped our rev, so an ack for an older push no
+            // longer reflects the desired state we're tracking (issue #92).
+            guard rev == tickerStore.current.rev else { break }
+            menubar.setTickerSync(ok ? .synced(count ?? tickerStore.current.rows.count)
+                                     : .error(err ?? "rejected"))
         }
     }
 
@@ -297,6 +313,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // `includeLocation` rides the cached fix on the (re)connect frame but is dropped on the heartbeat.
     private func sendFullFrame(includeLocation: Bool) {
         sendFrame(StatusFrame(usage: usage, buddy: buddy, loc: includeLocation ? lastFix : nil))
+    }
+
+    // --- ticker config (issue #92) ---
+
+    // Wire the B4 editor: seed it with the persisted list, warm the Binance universe once for local
+    // filtering, route the open action, and provide the merged search hook (Binance local + Yahoo live).
+    private func startTickerEditor() {
+        menubar.setTickerRows(tickerStore.current.rows)
+        menubar.onOpenTickerEditor = { [weak self] in self?.tickerEditor.show() }
+        menubar.setTickerSearch { [weak self] query, completion in self?.searchTickers(query, completion) }
+        menubar.setTickerValidate { [weak self] row, completion in self?.tickerSearch.validate(row, completion: completion) }
+
+        tickerSearch.fetchBinanceCatalog { [weak self] candidates in
+            Task { @MainActor in self?.binanceCandidates = candidates }
+        }
+    }
+
+    // Local Binance filter merged with a live Yahoo query: fire Yahoo, and in its completion unify it with
+    // the already-cached Binance filter. Both deliver on the main actor so the editor mutates @State safely.
+    private func searchTickers(_ query: String, _ completion: @escaping ([TickerCandidate]) -> Void) {
+        let binance = BinanceCatalog.search(query, in: binanceCandidates)
+        tickerSearch.searchYahoo(query) { yahoo in
+            Task { @MainActor in completion(TickerMerge.unify(binance: binance, yahoo: yahoo)) }
+        }
+    }
+
+    // Commit an edit from the menubar editor (B4): persist (bumps rev) then push the new snapshot. Mirror
+    // the persisted list back to the view model so the editor reflects exactly what was saved.
+    func applyTickerEdit(_ rows: [TickerRow]) {
+        tickerStore.save(rows: rows)
+        menubar.setTickerRows(tickerStore.current.rows)
+        pushTickerConfig()
+    }
+
+    // Push the current desired list as ordered chunk frames. Skip when not connected or the list is empty
+    // (the firmware rejects an empty assembled snapshot, and ConfigFrame.chunks returns [] for it).
+    private func pushTickerConfig() {
+        guard central.isConnected, !tickerStore.current.rows.isEmpty else { return }
+        do {
+            let frames = try ConfigFrame.chunks(rows: tickerStore.current.rows, rev: tickerStore.current.rev)
+            for frame in frames { central.send(frame) }
+            menubar.setTickerSync(.pending)
+        } catch {
+            FileHandle.standardError.write(Data("[beacon-hub] ticker config encode failed: \(error.localizedDescription)\n".utf8))
+        }
     }
 
     private func sendFrame(_ frame: StatusFrame) {

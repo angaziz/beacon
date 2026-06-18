@@ -12,8 +12,16 @@ void datastore_init(void);   // seeds finance_count + ids from DEFAULT_TICKERS, 
 // Setters (Core-0). Copy value fields; force hdr.state=ST_LIVE, hdr.err=ERR_NONE.
 void ds_set_weather(const weather_rec_t* r);
 void ds_set_finance(uint8_t idx, const finance_rec_t* r);  // preserves the slot's seeded id
+// Guarded publish (A5, stale-fetch race / design §3.3 Codex #1): a fetch captures the slot's id at
+// start; this writes ONLY if slot idx still holds that id. After a hub reseed swaps the slot to a new
+// id, an in-flight fetch that completes against the old id is DROPPED, not shown live. Else like ds_set_finance.
+void ds_set_finance_if(uint8_t idx, const char* expect_id, const finance_rec_t* r);
 void ds_set_usage(const usage_rec_t* r);
 void ds_set_buddy(const buddy_rec_t* r);
+
+// Reseed the finance slots from a new ticker set (A5 live re-apply): set the new count and, per slot,
+// the new id + ST_LOADING with value/change zeroed. Called after a validated hub config swap.
+void ds_reseed_finance(const char ids[][FIN_ID_LEN], int count);
 
 // Explicit failure/transport transitions (do NOT touch the value payload).
 void ds_set_state_weather(screen_state_t s, data_err_t e);

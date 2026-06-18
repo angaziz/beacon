@@ -4,13 +4,15 @@
 #include "ui/theme.h"
 #include "ui/fmt.h"
 #include "config/layout.h"
-#include "config/tickers.h"
+#include "config/ticker_table.h"
 #include "core/datastore.h"
 #include <Arduino.h>
 
-// Human-readable ticker name for slot i (slot i == ticker i, guaranteed by datastore_init).
-static inline const char* fin_name(int i, const finance_rec_t& r) {
-  return (i < DEFAULT_TICKERS_COUNT) ? DEFAULT_TICKERS[i].display_name : r.id;
+// Human-readable ticker name for slot i. Result is consumed immediately by lv_label_set_text
+// (it copies). Core-1 render thread only.
+static const char* fin_name(int i, const finance_rec_t& r) {
+  static ticker_runtime_t t;
+  return ticker_table_get(i, &t) ? t.name : r.id;
 }
 
 // Analog Neo markets: thin geometric rows in the analog language -- lowercase eyebrow, ice-blue
@@ -71,6 +73,10 @@ static void build(lv_obj_t* page) {
     s_id[i] = lv_label_create(row);
     lv_obj_set_style_text_font(s_id[i], t->f_mono, 0);
     lv_obj_set_style_text_color(s_id[i], t->ink_dim, 0);
+    // Value is centered at +24 (row center 193 => ~217). Cap the name so a long user-configured
+    // name ellipsizes instead of overlapping the centered value figure.
+    lv_obj_set_width(s_id[i], 150);
+    lv_label_set_long_mode(s_id[i], LV_LABEL_LONG_DOT);
     lv_obj_align(s_id[i], LV_ALIGN_LEFT_MID, 0, 0);
     lv_label_set_text(s_id[i], "");
 

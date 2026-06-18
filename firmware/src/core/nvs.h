@@ -16,6 +16,11 @@ void    nvs_begin(void);                 // open the namespace once at boot (bef
 
 uint8_t nvs_get_byte(const char* key, uint8_t def);  void nvs_set_byte(const char* key, uint8_t v);  // generic (avoid IDF's nvs_get_u8)
 
+// Generic blob (ticker config, design §3.2). Getter returns bytes copied (0 if absent/oversize);
+// setter returns false on write failure (unlike the byte setters, callers MUST check this).
+size_t nvs_get_bytes(const char* key, void* out, size_t cap);
+bool   nvs_set_bytes(const char* key, const void* data, size_t len);
+
 uint8_t nvs_get_screen(uint8_t def);     void nvs_set_screen(uint8_t v);
 uint8_t nvs_get_brightness(uint8_t def); void nvs_set_brightness(uint8_t v);
 uint8_t nvs_get_theme(uint8_t def);      void nvs_set_theme(uint8_t v);

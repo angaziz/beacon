@@ -5,17 +5,18 @@
 #include "core/timekeep.h"
 #include "core/change_basis.h"
 #include "core/fetch_task.h"
-#include "config/tickers.h"
+#include "config/ticker_table.h"
 #include "util/log.h"
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
-static void publish(uint8_t idx, double value, double change, double change_pct) {
+static void publish(uint8_t idx, const char* expect_id, double value, double change, double change_pct) {
   finance_rec_t f; memset(&f, 0, sizeof(f));
   f.value = value; f.change = change; f.change_pct = change_pct;
   f.hdr.last_updated = (uint32_t)timekeep_now();
-  ds_set_finance(idx, &f);   // preserves the seeded id, forces ST_LIVE
+  // expect_id is the slot id captured before the (blocking) fetch; the guarded publish drops the
+  // result if a hub reseed swapped this slot to a different ticker while the fetch was in flight.
+  ds_set_finance_if(idx, expect_id, &f);   // preserves the seeded id, forces ST_LIVE
 }
 
 static data_err_t fail(uint8_t idx, data_err_t e) {
@@ -23,27 +24,7 @@ static data_err_t fail(uint8_t idx, data_err_t e) {
   return e;
 }
 
-// Frankfurter timeseries over the last ~7 days: one call yields the latest published X/IDR AND the
-// prior business day for a real prev-close change. (A single dated call collides over weekends -- both
-// "today" and "yesterday" resolve to the same Friday close -> zero change.)
-static data_err_t fetch_frankfurter(uint8_t idx, const ticker_cfg_t* c) {
-  time_t now = timekeep_now();
-  struct tm g; char start[11], end[11];
-  time_t s = now - 7 * 86400;
-  gmtime_r(&s,   &g); strftime(start, sizeof(start), "%Y-%m-%d", &g);
-  gmtime_r(&now, &g); strftime(end,   sizeof(end),   "%Y-%m-%d", &g);
-  char path[96]; int status = 0;
-  snprintf(path, sizeof(path), "/v1/%s..%s?base=%s&symbols=IDR", start, end, c->symbol);
-  data_err_t e = net_https_get("api.frankfurter.dev", path, nullptr, nullptr, 0, fetch_scratch(), fetch_scratch_cap(), &status);
-  if (e != ERR_NONE) return fail(idx, e);
-  double rate = 0, prev = 0;
-  if (parse_frankfurter_series(fetch_scratch(), strlen(fetch_scratch()), &rate, &prev) != ERR_NONE) return fail(idx, ERR_PARSE);
-  double change = 0, pct = 0; change_compute(rate, prev, &change, &pct);
-  publish(idx, rate, change, pct);
-  return ERR_NONE;
-}
-
-static data_err_t fetch_binance(uint8_t idx, const ticker_cfg_t* c) {
+static data_err_t fetch_binance(uint8_t idx, const ticker_runtime_t* c) {
   char path[96]; int status = 0;
   snprintf(path, sizeof(path), "/api/v3/ticker/24hr?symbol=%s", c->symbol);
   // Binance's public data mirror: same REST shape as api.binance.com, but reachable where the main
@@ -54,11 +35,11 @@ static data_err_t fetch_binance(uint8_t idx, const ticker_cfg_t* c) {
   if (parse_binance(fetch_scratch(), strlen(fetch_scratch()), &last, &pct) != ERR_NONE) return fail(idx, ERR_PARSE);
   double open = (1.0 + pct / 100.0) != 0.0 ? last / (1.0 + pct / 100.0) : last;   // 24h open from pct
   double change = 0; change_compute(last, open, &change, nullptr);
-  publish(idx, last, change, pct);   // keep the source's exact 24h pct
+  publish(idx, c->id, last, change, pct);   // keep the source's exact 24h pct
   return ERR_NONE;
 }
 
-static data_err_t fetch_yahoo(uint8_t idx, const ticker_cfg_t* c) {
+static data_err_t fetch_yahoo(uint8_t idx, const ticker_runtime_t* c) {
   char path[96]; int status = 0;
   snprintf(path, sizeof(path), "/v8/finance/chart/%s?interval=1d&range=1d", c->symbol);
   const char* hk[] = { "User-Agent" };
@@ -68,17 +49,16 @@ static data_err_t fetch_yahoo(uint8_t idx, const ticker_cfg_t* c) {
   double price = 0, prev = 0;
   if (parse_yahoo(fetch_scratch(), strlen(fetch_scratch()), &price, &prev) != ERR_NONE) return fail(idx, ERR_PARSE);
   double change = 0, pct = 0; change_compute(price, prev, &change, &pct);
-  publish(idx, price, change, pct);
+  publish(idx, c->id, price, change, pct);
   return ERR_NONE;
 }
 
 data_err_t fetch_finance(uint8_t idx) {
-  if (idx >= DEFAULT_TICKERS_COUNT) return ERR_NONE;
-  const ticker_cfg_t* c = &DEFAULT_TICKERS[idx];
-  switch (c->source) {
-    case SRC_FRANKFURTER: return fetch_frankfurter(idx, c);
-    case SRC_BINANCE:     return fetch_binance(idx, c);
-    case SRC_YAHOO:       return fetch_yahoo(idx, c);
+  ticker_runtime_t c;   // copy the row out of the locked table before any network call
+  if (!ticker_table_get(idx, &c)) return ERR_NONE;
+  switch (c.source) {
+    case SRC_BINANCE:     return fetch_binance(idx, &c);
+    case SRC_YAHOO:       return fetch_yahoo(idx, &c);
     default:              return fail(idx, ERR_PARSE);
   }
 }

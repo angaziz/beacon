@@ -1,12 +1,14 @@
 #include "ui/screen.h"
 #include "ui/screens/screen_common.h"
 #include "ui/fmt.h"
-#include "config/tickers.h"
+#include "config/ticker_table.h"
 #include "core/datastore.h"
 
-// Human-readable ticker name for slot i (slot i == ticker i, guaranteed by datastore_init).
-static inline const char* fin_name(int i, const finance_rec_t& r) {
-  return (i < DEFAULT_TICKERS_COUNT) ? DEFAULT_TICKERS[i].display_name : r.id;
+// Human-readable ticker name for slot i. Result is consumed immediately by txt_set (it copies).
+// Core-1 render thread only.
+static const char* fin_name(int i, const finance_rec_t& r) {
+  static ticker_runtime_t t;
+  return ticker_table_get(i, &t) ? t.name : r.id;
 }
 
 #define MAX_ROWS 16
@@ -32,6 +34,10 @@ static void build(lv_obj_t* page) {
     lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     s_row[i].id  = lv_label_create(r); lv_obj_add_style(s_row[i].id, &S.slot, 0);
+    // Flex row (SPACE_BETWEEN): cap the name so a long user-configured name ellipsizes instead of
+    // expanding and overlapping/squeezing the value and change fields.
+    lv_obj_set_width(s_row[i].id, 150);
+    lv_label_set_long_mode(s_row[i].id, LV_LABEL_LONG_DOT);
     s_row[i].val = lv_label_create(r); lv_obj_add_style(s_row[i].val, &S.display, 0);
     s_row[i].chg = lv_label_create(r); lv_obj_add_style(s_row[i].chg, &S.slot, 0);
   }

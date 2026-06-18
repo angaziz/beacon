@@ -4,6 +4,7 @@
 #include "core/datastore.h"
 #include "core/location.h"
 #include "core/timekeep.h"
+#include "config/ticker_table.h"
 #include "util/log.h"
 #include <Arduino.h>
 #include <esp_heap_caps.h>
@@ -24,6 +25,49 @@ static HubLinkBle s_link;
 static HubLink*   g_link = nullptr;   // null until the task starts (BEACON_DEV leaves it null)
 static bool       s_was_connected = false;
 static uint32_t   s_min_int_free  = UINT32_MAX;
+
+// Reassembled-across-parts config snapshot (design §2). Single-threaded: on_frame runs only on Core-0.
+static config_accum_t s_cfg_accum;
+
+// Send a config_ack back to the hub over the SAME link permission acks use (g_link->send). On the
+// native host g_link is always null (no BLE), so this no-ops there.
+static void send_config_ack(uint32_t rev, bool ok, const char* err, int count) {
+  if (!g_link) return;
+  char buf[96];
+  size_t n = hub_build_config_ack(buf, sizeof(buf), rev, ok, err, count);
+  if (n) g_link->send(buf, n);
+  LOGI("hub: config_ack rev=%u ok=%d err=%s count=%d", (unsigned)rev, ok, err ? err : "", count);
+}
+
+// A config frame (chunked ticker snapshot, design §3.3). Parse => accumulate => on the last part
+// persist+swap the table, reseed the DataStore finance slots, then ack. Fail closed: any error keeps
+// the current list and acks ok:false. The scheduler/UI pick up the swap via ticker_table_gen().
+static void on_config(const char* json, size_t len) {
+  config_chunk_t chunk; memset(&chunk, 0, sizeof(chunk));   // rev defaults to 0 if parse fails before reading it
+  const char* err = nullptr;
+  if (hub_parse_config_chunk(json, len, &chunk, &err) != ERR_NONE) {
+    send_config_ack(chunk.rev, false, err ? err : "malformed", 0);   // parser sets rev best-effort
+    return;
+  }
+  const char* aerr = nullptr;
+  switch (hub_config_accum_step(&s_cfg_accum, &chunk, &aerr)) {
+    case CFG_PENDING: return;                                          // await more parts
+    case CFG_ERR:     send_config_ack(s_cfg_accum.rev, false, aerr, 0); return;
+    case CFG_DONE:    break;
+  }
+
+  if (!ticker_table_apply(s_cfg_accum.rows, s_cfg_accum.row_count)) {  // NVS write failed => no swap
+    send_config_ack(s_cfg_accum.rev, false, "nvs_write_failed", 0);
+    return;
+  }
+  char ids[MAX_TICKERS][FIN_ID_LEN];
+  for (int i = 0; i < s_cfg_accum.row_count; i++) {
+    strncpy(ids[i], s_cfg_accum.rows[i].id, FIN_ID_LEN - 1);
+    ids[i][FIN_ID_LEN - 1] = 0;
+  }
+  ds_reseed_finance(ids, s_cfg_accum.row_count);                       // new ids + ST_LOADING
+  send_config_ack(s_cfg_accum.rev, true, nullptr, s_cfg_accum.row_count);
+}
 
 // A hub ack for an in-flight decision (issue #8): apply the truthful outcome to the buddy prompt's
 // confirm state. ok:true clears the prompt; ok:false / err keeps it so the UI can warn "too late".
@@ -47,6 +91,10 @@ static void on_frame(const char* json, size_t len) {
     hub_ack_t ack;
     if (hub_parse_ack(json, len, &ack)) { apply_ack(ack); return; }
   }
+
+  // A config frame (chunked ticker snapshot) carries neither "ack" nor "err"; dispatch it before the
+  // loc/status fall-through so it isn't silently swallowed by hub_parse_status.
+  if (frame_has(json, len, "\"config\"")) { on_config(json, len); return; }
 
   // A "loc" block (issue #54) may ride the (re)connect full frame or arrive alone. Parsed independently
   // of usage/buddy; persist via core/location (hub source wins) + apply tz OUTSIDE any location lock.

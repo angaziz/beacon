@@ -5,7 +5,7 @@
 #include "fetch/weather.h"
 #include "fetch/finance.h"
 #include "fetch/geoip.h"
-#include "config/tickers.h"
+#include "config/ticker_table.h"
 #include "util/log.h"
 #include <Arduino.h>
 #include <esp_heap_caps.h>
@@ -23,7 +23,9 @@ char*  fetch_scratch(void) { return s_scratch; }
 size_t fetch_scratch_cap(void) { return sizeof(s_scratch); }
 
 static uint32_t cadence_of(int slot) {
-  return (slot == SRC_WEATHER) ? WEATHER_CADENCE_S : DEFAULT_TICKERS[slot - 1].cadence_s;
+  if (slot == SRC_WEATHER) return WEATHER_CADENCE_S;
+  ticker_runtime_t t;
+  return ticker_table_get(slot - 1, &t) ? t.cadence_s : WEATHER_CADENCE_S;
 }
 
 // Host each slot fetches from -- lets the scheduler drain same-host due slots back-to-back so one TLS
@@ -31,10 +33,11 @@ static uint32_t cadence_of(int slot) {
 // fetch modules; a mismatch only loses the reuse (falls back to oldest-due), never correctness.
 static const char* slot_host(int slot) {
   if (slot == SRC_WEATHER) return "api.open-meteo.com";
-  switch (DEFAULT_TICKERS[slot - 1].source) {
+  ticker_runtime_t t;
+  if (!ticker_table_get(slot - 1, &t)) return "";
+  switch (t.source) {
     case SRC_YAHOO:       return "query1.finance.yahoo.com";
     case SRC_BINANCE:     return "data-api.binance.vision";
-    case SRC_FRANKFURTER: return "api.frankfurter.dev";
     default:              return "";
   }
 }
@@ -50,7 +53,8 @@ static void mark_offline(void) {
 }
 
 static void fetch_task(void*) {
-  const int slots = 1 + DEFAULT_TICKERS_COUNT;
+  int slots = 1 + ticker_table_count();
+  uint32_t last_gen = ticker_table_gen();
   for (int i = 0; i < slots; i++) s_next_due[i] = 0;   // all due at first connect
   bool was_up = false;
   bool dn_marked = false;    // device-plane already flipped offline for the current down stretch
@@ -61,6 +65,15 @@ static void fetch_task(void*) {
     net_service();   // WiFiMulti: apply saved-list changes + gated reconnect (blocks only while down)
     uint32_t now = (uint32_t)timekeep_now();
     ds_tick_staleness(now);
+
+    // A5: a hub config swap (gen bump) reshapes the finance slot set. Rebuild the slot count and make
+    // every finance slot due immediately so the new tickers fetch promptly; weather (slot 0) is untouched.
+    uint32_t gen = ticker_table_gen();
+    if (gen != last_gen) {
+      slots = 1 + ticker_table_count();
+      for (int i = 1; i < slots; i++) s_next_due[i] = now;
+      last_gen = gen;
+    }
 
     bool up = net_is_up();
     if (!up) {

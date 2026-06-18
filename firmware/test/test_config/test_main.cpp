@@ -27,8 +27,8 @@ static void test_ticker_ids_unique(void) {
 static void test_ticker_fields_valid(void) {
   for (uint8_t i = 0; i < DEFAULT_TICKERS_COUNT; i++) {
     const ticker_cfg_t* t = &DEFAULT_TICKERS[i];
-    TEST_ASSERT_TRUE(t->source >= SRC_FRANKFURTER && t->source <= SRC_YAHOO);
-    TEST_ASSERT_TRUE(t->kind >= KIND_FX_IDR && t->kind <= KIND_ETF);
+    TEST_ASSERT_TRUE(t->source >= SRC_BINANCE && t->source <= SRC_YAHOO);
+    TEST_ASSERT_TRUE(t->kind >= KIND_FX && t->kind <= KIND_ETF);
     TEST_ASSERT_TRUE(t->change_basis == CHG_PREV_CLOSE || t->change_basis == CHG_24H);
     TEST_ASSERT_NOT_NULL(t->symbol);
     TEST_ASSERT_NOT_NULL(t->display_name);

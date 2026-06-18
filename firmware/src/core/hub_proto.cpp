@@ -156,3 +156,125 @@ bool hub_apply_ack(buddy_rec_t* buddy, const hub_ack_t* ack) {
   }
   return true;
 }
+
+// --- config chunk: wire enum string => firmware enum ---
+// Returns false (leaving *out untouched) on an unknown string so the caller can ack the right bad_*.
+static bool map_source(const char* s, ticker_source_t* out) {
+  if (!s) return false;
+  if (!strcmp(s, "binance")) { *out = SRC_BINANCE; return true; }
+  if (!strcmp(s, "yahoo"))   { *out = SRC_YAHOO;   return true; }
+  return false;
+}
+static bool map_kind(const char* s, ticker_kind_t* out) {
+  if (!s) return false;
+  if (!strcmp(s, "fx"))     { *out = KIND_FX;     return true; }
+  if (!strcmp(s, "crypto")) { *out = KIND_CRYPTO; return true; }
+  if (!strcmp(s, "index"))  { *out = KIND_INDEX;  return true; }
+  if (!strcmp(s, "etf"))    { *out = KIND_ETF;    return true; }
+  return false;
+}
+static bool map_basis(const char* s, change_basis_t* out) {
+  if (!s) return false;
+  if (!strcmp(s, "prev_close")) { *out = CHG_PREV_CLOSE; return true; }
+  if (!strcmp(s, "24h"))        { *out = CHG_24H;        return true; }
+  return false;
+}
+
+// Copy src into dst[cap] only if it fits (<= cap-1, +NUL); false otherwise (no silent truncation: the
+// spec rejects over-length id/sym/name with "malformed", design §3.4). NULL/empty handled by caller.
+static bool copy_bounded(char* dst, size_t cap, const char* src) {
+  size_t n = strlen(src);
+  if (n > cap - 1) return false;
+  memcpy(dst, src, n);
+  dst[n] = '\0';
+  return true;
+}
+
+#define CFG_SET_ERR(s) do { if (err_out) *err_out = (s); } while (0)
+
+data_err_t hub_parse_config_chunk(const char* json, size_t len, config_chunk_t* out,
+                                  const char** err_out) {
+  JsonDocument doc;
+  if (deserializeJson(doc, json, len)) { CFG_SET_ERR("malformed"); return ERR_PARSE; }
+  if ((doc["v"] | 0) != 1)            { CFG_SET_ERR("malformed"); return ERR_PARSE; }
+
+  JsonVariantConst cfg = doc["config"];
+  JsonVariantConst tickers = cfg["tickers"];
+  if (cfg.isNull() || !tickers.is<JsonArrayConst>()) { CFG_SET_ERR("malformed"); return ERR_PARSE; }
+
+  // parts must be a positive total; part a valid 0-based index within it.
+  int parts = cfg["parts"] | 0;
+  int part  = cfg["part"]  | -1;
+  if (parts <= 0 || part < 0 || part >= parts) { CFG_SET_ERR("malformed"); return ERR_PARSE; }
+  out->rev   = cfg["rev"] | (uint32_t)0;
+  out->part  = part;
+  out->parts = parts;
+
+  out->row_count = 0;
+  for (JsonVariantConst row : tickers.as<JsonArrayConst>()) {
+    if (out->row_count >= MAX_TICKERS) { CFG_SET_ERR("malformed"); return ERR_PARSE; }  // accumulator re-checks totals
+    ticker_runtime_t* r = &out->rows[out->row_count];
+
+    const char* id = row["id"].as<const char*>();
+    if (!id || id[0] == '\0' || !copy_bounded(r->id, FIN_ID_LEN, id)) {  // id required + non-empty
+      CFG_SET_ERR("malformed"); return ERR_PARSE;
+    }
+    const char* sym = row["sym"].as<const char*>();
+    const char* name = row["name"].as<const char*>();
+    if (!sym || !name || !copy_bounded(r->symbol, TKR_SYM_LEN, sym) ||
+        !copy_bounded(r->name, TKR_NAME_LEN, name)) {
+      CFG_SET_ERR("malformed"); return ERR_PARSE;
+    }
+    if (!map_source(row["src"].as<const char*>(), &r->source)) { CFG_SET_ERR("bad_source"); return ERR_PARSE; }
+    if (!map_kind(row["kind"].as<const char*>(), &r->kind))    { CFG_SET_ERR("bad_kind");   return ERR_PARSE; }
+    if (!map_basis(row["basis"].as<const char*>(), &r->change_basis)) { CFG_SET_ERR("bad_basis"); return ERR_PARSE; }
+    r->cadence_s = (uint16_t)(row["cadence"] | 0);
+    r->stale_s   = row["stale"] | (uint32_t)0;
+    out->row_count++;
+  }
+  return ERR_NONE;
+}
+
+config_status_t hub_config_accum_step(config_accum_t* acc, const config_chunk_t* chunk,
+                                      const char** err_out) {
+  if (chunk->part == 0) {                 // part 0 always (re)starts a fresh accumulation
+    acc->active    = true;
+    acc->rev       = chunk->rev;
+    acc->parts     = chunk->parts;
+    acc->next_part = 0;
+    acc->row_count = 0;
+  } else if (!acc->active || chunk->rev != acc->rev || chunk->parts != acc->parts ||
+             chunk->part != acc->next_part) {
+    acc->active = false;                   // discard partial: out-of-order/duplicate/rev mismatch/gap
+    CFG_SET_ERR("bad_chunking");
+    return CFG_ERR;
+  }
+
+  if (acc->row_count + chunk->row_count > MAX_TICKERS) {
+    acc->active = false;
+    CFG_SET_ERR("too_many_tickers");
+    return CFG_ERR;
+  }
+  for (int i = 0; i < chunk->row_count; i++) acc->rows[acc->row_count++] = chunk->rows[i];
+  acc->next_part = chunk->part + 1;
+
+  if (acc->next_part < acc->parts) return CFG_PENDING;   // more parts to come
+
+  acc->active = false;                    // snapshot complete (success or empty both end accumulation)
+  if (acc->row_count < 1) { CFG_SET_ERR("empty"); return CFG_ERR; }
+  return CFG_DONE;
+}
+
+#undef CFG_SET_ERR
+
+size_t hub_build_config_ack(char* buf, size_t cap, uint32_t rev, bool ok, const char* err, int count) {
+  if (!buf || cap == 0) return 0;
+  JsonDocument doc;
+  doc["v"] = 1;
+  doc["cmd"] = "config_ack";
+  doc["rev"] = rev;
+  doc["ok"] = ok;
+  if (ok) doc["count"] = count;
+  else    doc["err"] = err ? err : "malformed";
+  return finish_frame(doc, buf, cap);
+}

@@ -76,6 +76,16 @@ void nvs_wifi_clear_dirty(void) { s_wifi_dirty = false; }
 uint8_t nvs_get_byte(const char* key, uint8_t def) { return s_open ? s_prefs.getUChar(key, def) : def; }
 void    nvs_set_byte(const char* key, uint8_t v)   { if (s_open) s_prefs.putUChar(key, v); }
 
+size_t nvs_get_bytes(const char* key, void* out, size_t cap) {
+  if (!s_open || !out || !s_prefs.isKey(key)) return 0;
+  if (s_prefs.getBytesLength(key) > cap) return 0;          // never overflow the caller's buffer
+  return s_prefs.getBytes(key, out, cap);
+}
+bool nvs_set_bytes(const char* key, const void* data, size_t len) {
+  if (!s_open) return false;
+  return s_prefs.putBytes(key, data, len) == len;          // putBytes returns bytes written
+}
+
 uint8_t nvs_get_screen(uint8_t def)     { return s_open ? s_prefs.getUChar("screen", def) : def; }
 void    nvs_set_screen(uint8_t v)       { if (s_open) s_prefs.putUChar("screen", v); }
 uint8_t nvs_get_brightness(uint8_t def) { return s_open ? s_prefs.getUChar("bright", def) : def; }

@@ -1,7 +1,7 @@
 #include "core/datastore.h"
 #include "core/ds_lock.h"
 #include "core/stale.h"
-#include "config/tickers.h"
+#include "config/ticker_table.h"
 #include <string.h>
 
 static ds_lock_t        s_lock;
@@ -20,12 +20,17 @@ void datastore_init(void) {
   memset(&s_usage, 0, sizeof(s_usage));           hdr_loading(&s_usage.hdr);
   memset(&s_buddy, 0, sizeof(s_buddy));           hdr_loading(&s_buddy.hdr);
 
-  s_finance_count = DEFAULT_TICKERS_COUNT;
-  if (s_finance_count > MAX_TICKERS) s_finance_count = MAX_TICKERS;
+  // Seed finance ids/count from the runtime ticker table (already initialized -- NVS-restored list or
+  // defaults), NOT DEFAULT_TICKERS: after a reboot with a saved hub config the table holds the restored
+  // ids, and fetch publishes via ds_set_finance_if(idx, <table id>); seeding default ids here would
+  // mismatch and drop every publish, leaving finance stuck loading until a live hub push reseeds (#92).
+  int n = ticker_table_count();
+  if (n > MAX_TICKERS) n = MAX_TICKERS;
+  s_finance_count = (uint8_t)n;
   memset(s_finance, 0, sizeof(s_finance));
-  for (uint8_t i = 0; i < s_finance_count; i++) {
-    strncpy(s_finance[i].id, DEFAULT_TICKERS[i].id, FIN_ID_LEN - 1);
-    s_finance[i].id[FIN_ID_LEN - 1] = 0;
+  for (int i = 0; i < n; i++) {
+    ticker_runtime_t t;
+    if (ticker_table_get(i, &t)) { strncpy(s_finance[i].id, t.id, FIN_ID_LEN - 1); s_finance[i].id[FIN_ID_LEN - 1] = 0; }
     hdr_loading(&s_finance[i].hdr);
   }
   ds_lock_give(s_lock);
@@ -46,6 +51,18 @@ void ds_set_finance(uint8_t idx, const finance_rec_t* r) {
   s_finance[idx].hdr.state = ST_LIVE; s_finance[idx].hdr.err = ERR_NONE;
   ds_lock_give(s_lock);
 }
+void ds_set_finance_if(uint8_t idx, const char* expect_id, const finance_rec_t* r) {
+  if (idx >= MAX_TICKERS || !expect_id) return;
+  ds_lock_take(s_lock);
+  // Drop the publish if the slot was reseeded to a different id since the fetch began (stale fetch).
+  if (strncmp(s_finance[idx].id, expect_id, FIN_ID_LEN) == 0) {
+    char id[FIN_ID_LEN]; strncpy(id, s_finance[idx].id, FIN_ID_LEN); id[FIN_ID_LEN - 1] = 0;
+    s_finance[idx] = *r;
+    strncpy(s_finance[idx].id, id, FIN_ID_LEN); s_finance[idx].id[FIN_ID_LEN - 1] = 0;
+    s_finance[idx].hdr.state = ST_LIVE; s_finance[idx].hdr.err = ERR_NONE;
+  }
+  ds_lock_give(s_lock);
+}
 void ds_set_usage(const usage_rec_t* r) {
   ds_lock_take(s_lock);
   s_usage = *r; s_usage.hdr.state = ST_LIVE; s_usage.hdr.err = ERR_NONE;
@@ -64,6 +81,19 @@ void ds_set_state_weather(screen_state_t s, data_err_t e) {
 void ds_set_state_finance(uint8_t idx, screen_state_t s, data_err_t e) {
   if (idx >= MAX_TICKERS) return;
   ds_lock_take(s_lock); s_finance[idx].hdr.state = s; s_finance[idx].hdr.err = e; ds_lock_give(s_lock);
+}
+void ds_reseed_finance(const char ids[][FIN_ID_LEN], int count) {
+  if (count < 0) count = 0;
+  if (count > MAX_TICKERS) count = MAX_TICKERS;
+  ds_lock_take(s_lock);
+  memset(s_finance, 0, sizeof(s_finance));
+  for (int i = 0; i < count; i++) {
+    strncpy(s_finance[i].id, ids[i], FIN_ID_LEN - 1);
+    s_finance[i].id[FIN_ID_LEN - 1] = 0;
+    hdr_loading(&s_finance[i].hdr);
+  }
+  s_finance_count = (uint8_t)count;
+  ds_lock_give(s_lock);
 }
 void ds_set_hub_offline(void) {
   ds_lock_take(s_lock);

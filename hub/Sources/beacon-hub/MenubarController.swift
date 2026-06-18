@@ -23,6 +23,10 @@ final class MenubarController: NSObject {
     private let popover = NSPopover()
     private let model = HubViewModel()
 
+    // The shared view model, exposed so the dedicated ticker editor window (issue #92) observes the same
+    // live tickerSync/tickerRows/search closure that the popover panel does.
+    var viewModel: HubViewModel { model }
+
     private var link: Link = .searching
     private var alert: String?         // persistent loud surface for an undeliverable prompt; nil => none.
     private var bridgeAlert: String?   // bridge bind failure; nil => none. Independent of `alert`.
@@ -38,6 +42,8 @@ final class MenubarController: NSObject {
     var onForgetDevice: (() -> Void)?
     var onRetryPairing: (() -> Void)?          // in-app "try again" after a .pairingFailed escalation (issue #17).
     var onMenuWillOpen: (() -> Void)?          // accessory app: popoverWillShow is the reliable login-item refresh hook.
+    var onApplyTickerEdit: (([TickerRow]) -> Void)?   // issue #92: editor commits the desired list; AppDelegate persists + pushes.
+    var onOpenTickerEditor: (() -> Void)?             // issue #92: opens the dedicated ticker editor window.
 
     // Bundled custom chime; falls back to a system sound when run without the .app bundle (bare dev build).
     private let promptSound: NSSound? = {
@@ -68,6 +74,8 @@ final class MenubarController: NSObject {
         model.onSetup = { [weak self] in self?.onOpenSetup?() }
         model.onForget = { [weak self] in self?.onForgetDevice?() }
         model.onRetryPairing = { [weak self] in self?.onRetryPairing?() }
+        model.onApplyTickerEdit = { [weak self] rows in self?.onApplyTickerEdit?(rows) }
+        model.onOpenTickerEditor = { [weak self] in self?.onOpenTickerEditor?() }
         model.onOpenFixURL = { [weak self] in self?.openLink() }
         model.onQuit = { NSApp.terminate(nil) }
     }
@@ -139,6 +147,15 @@ final class MenubarController: NSObject {
         model.errors = errors
         model.lastSync = Date()
         model.now = Date()   // restamp so reset hints stay fresh even while the popover is open
+    }
+
+    func setTickerSync(_ status: TickerSyncStatus) { model.tickerSync = status }
+    func setTickerRows(_ rows: [TickerRow]) { model.tickerRows = rows }   // issue #92: seed the editor with the persisted list
+    func setTickerSearch(_ search: @escaping (String, @escaping ([TickerCandidate]) -> Void) -> Void) {
+        model.onSearchTickers = search
+    }
+    func setTickerValidate(_ validate: @escaping (TickerRow, @escaping (Bool, String?) -> Void) -> Void) {
+        model.onValidateTicker = validate
     }
 
     // contentTintColor must be assigned (color OR nil) on EVERY call: AppKit only tints template images,

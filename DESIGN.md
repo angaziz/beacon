@@ -102,7 +102,7 @@ The mockup device frames render the true rounded shape; [`docs/design/mockups/sa
 
 - **Clock** — display figures + date line (or analog face in Analog theme).
 - **Gauge** — renders per `gauge-style` token (bar/ring/cell/waveform/measure/bigfig/subdial). Single component, token-switched.
-- **List row** — label (body) + value (mono/display) + optional caret; hairline separator. Used by Finance, Settings.
+- **List row** — label (body) + value (mono/display) + optional caret; hairline separator. Used by Finance, Settings. Labels are width-capped and ellipsize (`…`): Finance ticker names are user-configurable (hub-pushed) and can exceed the short defaults, so they truncate rather than overrun the value.
 - **Stat block** — name + big figure + detail line + gauge. Used by AI Usage.
 - **Prompt** — alert label + tool + mono command hint + Deny/Approve split actions. Used by Coding Buddy.
 - **Eyebrow** — mono `BEACON / <SCREEN>` + right-side status (used sparingly, one per screen — not on every section).

@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "core/records.h"   // usage_rec_t, buddy_rec_t, *_LEN capacities
+#include "core/screen_state.h"     // data_err_t
+#include "config/ticker_table.h"   // ticker_runtime_t, MAX_TICKERS bounds
 
 // Pure, host-testable codec for the FROZEN tech.md §7.1 hub<->device BLE protocol
 // (UTF-8, newline-delimited JSON, every frame carries "v":1). No Arduino/BLE deps: only
@@ -68,6 +70,53 @@ bool hub_parse_ack(const char* json, size_t len, hub_ack_t* out);
 // PROMPT_TOO_LATE + keeps present. A stale/mismatched id leaves *buddy untouched. Returns true if the
 // record was changed (so the caller knows to persist + log). Codec stays clock-free. Host-testable.
 bool hub_apply_ack(buddy_rec_t* buddy, const hub_ack_t* ack);
+
+// --- Inbound: hub -> device ticker config (chunked snapshot, design §2) ---
+// A config frame: {"v":1,"config":{"rev":R,"part":P,"parts":N,"tickers":[{...row...}]}}.
+// Wire enum strings map to firmware enums: src {binance,yahoo}, kind {fx,crypto,index,etf},
+// basis {prev_close,24h}. Rows concatenated across parts in part order == display order.
+
+// One parsed chunk. rows[]/row_count are this chunk's rows only (the accumulator concatenates).
+typedef struct {
+  uint32_t        rev;
+  int             part;
+  int             parts;
+  ticker_runtime_t rows[MAX_TICKERS];
+  int             row_count;
+} config_chunk_t;
+
+// Parse ONE config chunk frame. Returns ERR_NONE on a structurally valid chunk (v==1, a "config"
+// object, integer rev/part/parts, a tickers array whose every row maps cleanly to enums and fits the
+// length bounds). On failure returns ERR_PARSE and sets *err_out to the static ack-err string that the
+// accumulator should surface: "malformed" (bad JSON / missing required field / over-length / empty id /
+// too many rows in one chunk), or "bad_source"/"bad_kind"/"bad_basis" for an unknown enum string. On
+// success *err_out is left untouched. err_out may be NULL.
+data_err_t hub_parse_config_chunk(const char* json, size_t len, config_chunk_t* out, const char** err_out);
+
+// Accumulator across parts. Caller owns the struct (no globals); zero it before the first chunk.
+typedef enum { CFG_PENDING, CFG_DONE, CFG_ERR } config_status_t;
+typedef struct {
+  uint32_t         rev;
+  int              parts;
+  int              next_part;     // the part index expected next (0-based)
+  ticker_runtime_t rows[MAX_TICKERS];
+  int              row_count;
+  bool             active;        // a partial snapshot is in progress
+} config_accum_t;
+
+// Feed one parsed chunk. part 0 (re)starts accumulation for chunk->rev (resets any prior partial).
+// Parts must arrive contiguously 0..parts-1; a gap/duplicate/out-of-range part, or a non-part-0 chunk
+// whose rev differs from the in-progress rev, => CFG_ERR "bad_chunking". Appending past MAX_TICKERS =>
+// CFG_ERR "too_many_tickers". On the last part: finalize => CFG_DONE (rows/row_count hold the full list)
+// when count in [1,MAX_TICKERS], else CFG_ERR "empty". On any CFG_ERR the partial is discarded and
+// *err_out is set to the static ack-err string. (NVS/apply errors are handled by the caller in A5.)
+config_status_t hub_config_accum_step(config_accum_t* acc, const config_chunk_t* chunk, const char** err_out);
+
+// --- Outbound: device -> hub config ack (uses the cmd channel, NOT the ack field) ---
+// ok  => {"v":1,"cmd":"config_ack","rev":R,"ok":true,"count":N}\n
+// err => {"v":1,"cmd":"config_ack","rev":R,"ok":false,"err":"E"}\n
+// Returns bytes written (incl. '\n', excl. NUL), or 0 on overflow / invalid args (cf. hub_build_permission).
+size_t hub_build_config_ack(char* buf, size_t cap, uint32_t rev, bool ok, const char* err, int count);
 
 #ifdef __cplusplus
 }

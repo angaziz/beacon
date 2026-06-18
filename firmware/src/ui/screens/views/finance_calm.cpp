@@ -7,14 +7,16 @@
 #include "ui/theme.h"
 #include "ui/fmt.h"
 #include "config/layout.h"
-#include "config/tickers.h"
+#include "config/ticker_table.h"
 #include "core/datastore.h"
 #include <Arduino.h>
 #include <time.h>
 static void update(void);
 
-static inline const char* fin_name(int i, const finance_rec_t& r) {
-  return (i < DEFAULT_TICKERS_COUNT) ? DEFAULT_TICKERS[i].display_name : r.id;
+// Result is consumed immediately by lv_label_set_text (it copies). Core-1 render thread only.
+static const char* fin_name(int i, const finance_rec_t& r) {
+  static ticker_runtime_t t;
+  return ticker_table_get(i, &t) ? t.name : r.id;
 }
 
 #define FIN_ROWS_MAX 12
@@ -69,6 +71,10 @@ static void build(lv_obj_t* page) {
     lv_obj_set_style_text_font(s_name[i], t->f_body, 0);
     lv_obj_set_style_text_color(s_name[i], t->ink_dim, 0);
     lv_obj_set_style_text_letter_space(s_name[i], 2, 0);
+    // Value (width 150) sits at RIGHT_MID -104 => its left edge is at row_w(386)-104-150=132.
+    // Cap the name so a long user-configured name ellipsizes instead of overlapping the value.
+    lv_obj_set_width(s_name[i], 120);
+    lv_label_set_long_mode(s_name[i], LV_LABEL_LONG_DOT);
     lv_label_set_text(s_name[i], "");
     lv_obj_align(s_name[i], LV_ALIGN_LEFT_MID, 0, 0);
 

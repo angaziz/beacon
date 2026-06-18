@@ -266,6 +266,7 @@ private struct ActionBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
+            ActionButton("Tickers…", systemImage: "chart.line.uptrend.xyaxis") { closeAndRun(model.onOpenTickerEditor) }
             ActionButton("Setup…", systemImage: "gearshape") { closeAndRun(model.onSetup) }
             ActionButton("Forget / re-pair", systemImage: "arrow.triangle.2.circlepath") { closeAndRun(model.onForget) }
             ActionButton("Quit Beacon", systemImage: "power", tint: .red) { closeAndRun(model.onQuit) }

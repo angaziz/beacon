@@ -2,8 +2,8 @@
 
 // Bundled root CAs for cert-validated TLS (tech.md §9). Concatenated PEM for WiFiClientSecure::setCACert().
 // Roots: ISRG Root X1 (Let's Encrypt), DigiCert Global Root G2, GTS Root R1 (Google Trust Services),
-//        GlobalSign Root CA (Frankfurter), Starfield Services Root CA G2 (Binance data mirror).
-// Covers Open-Meteo / Frankfurter (Let's Encrypt) + Binance / Yahoo (DigiCert) + rotation headroom.
+//        GlobalSign Root CA, Starfield Services Root CA G2 (Binance data mirror).
+// Covers Open-Meteo / ipwho.is / BigDataCloud (Let's Encrypt) + Binance / Yahoo (DigiCert) + rotation headroom.
 // Never use setInsecure() in product.
 static const char ROOT_CA_BUNDLE[] =
 "-----BEGIN CERTIFICATE-----\n"

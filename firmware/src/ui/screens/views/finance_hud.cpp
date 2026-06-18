@@ -4,13 +4,15 @@
 #include "ui/theme.h"
 #include "ui/fmt.h"
 #include "config/layout.h"
-#include "config/tickers.h"
+#include "config/ticker_table.h"
 #include "core/datastore.h"
 #include <Arduino.h>
 
 // Human-readable ticker name for slot i (slot i == ticker i, guaranteed by datastore_init).
-static inline const char* fin_name(int i, const finance_rec_t& r) {
-  return (i < DEFAULT_TICKERS_COUNT) ? DEFAULT_TICKERS[i].display_name : r.id;
+// Result is consumed immediately by lv_label_set_text (it copies). Core-1 render thread only.
+static const char* fin_name(int i, const finance_rec_t& r) {
+  static ticker_runtime_t t;
+  return ticker_table_get(i, &t) ? t.name : r.id;
 }
 
 // Aerospace HUD / Markets. "// MARKETS" eyebrow + vertical list of instrument rows:
@@ -66,6 +68,10 @@ static void build(lv_obj_t* page) {
 
     s_id[i] = lv_label_create(row);
     lv_obj_add_style(s_id[i], &S.slot, 0);
+    // Flex row: value grows, change is 78 (+SPACE_M pad). Cap the name with a fixed width so a
+    // long user-configured name ellipsizes instead of expanding and squeezing the value figure.
+    lv_obj_set_width(s_id[i], 150);
+    lv_label_set_long_mode(s_id[i], LV_LABEL_LONG_DOT);
     lv_label_set_text(s_id[i], "");
 
     s_val[i] = lv_label_create(row);

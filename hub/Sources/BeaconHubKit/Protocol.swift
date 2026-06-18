@@ -87,6 +87,9 @@ public struct StatusFrame: Codable {
 // device->hub commands (tech.md §7.1). Parsed from a reassembled RX line.
 public enum DeviceCommand: Equatable {
     case permission(id: String, approve: Bool)
+    // One ack per completed config snapshot (issue #92). Echoes the pushed `rev`; on ok carries the
+    // applied ticker count, on reject the first `err` (see TickerConfig / CONTRACT.md §C for the enum).
+    case configAck(rev: UInt32, ok: Bool, count: Int?, err: String?)
 
     public static func parse(_ data: Data) -> DeviceCommand? {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -95,6 +98,9 @@ public enum DeviceCommand: Equatable {
         case "permission":
             guard let id = obj["id"] as? String, let dec = obj["decision"] as? String else { return nil }
             return .permission(id: id, approve: dec == "approve")
+        case "config_ack":
+            guard let rev = obj["rev"] as? Int, rev >= 0, let ok = obj["ok"] as? Bool else { return nil }
+            return .configAck(rev: UInt32(rev), ok: ok, count: obj["count"] as? Int, err: obj["err"] as? String)
         default:
             return nil
         }
