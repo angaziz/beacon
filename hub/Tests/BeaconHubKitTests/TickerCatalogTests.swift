@@ -103,6 +103,18 @@ final class YahooCatalogTests: XCTestCase {
         XCTAssertTrue(YahooCatalog.map(searchJSON: Data("not json".utf8)).isEmpty)
         XCTAssertTrue(YahooCatalog.map(searchJSON: Data("{}".utf8)).isEmpty)
     }
+
+    // Regression (#92): a long company name must be clamped to the device's name buffer (<=23 bytes),
+    // else the device rejects the whole snapshot as "malformed". TSMC was the repro.
+    func testLongNameClampedToDeviceBound() {
+        let got = YahooCatalog.map(searchJSON: Data(#"""
+        {"quotes":[{"symbol":"TSMC.BA","shortname":"TAIWAN SEMICONDUCTOR MANUFACTUR","quoteType":"EQUITY"}]}
+        """#.utf8))
+        let row = got.first { $0.row.sym == "TSMC.BA" }?.row
+        XCTAssertNotNil(row)
+        XCTAssertLessThanOrEqual(row!.name.utf8.count, TickerLimits.nameMaxBytes)
+        XCTAssertEqual(row!.name, "TAIWAN SEMICONDUCTOR MA")   // first 23 bytes, character-safe
+    }
 }
 
 final class TickerMergeTests: XCTestCase {

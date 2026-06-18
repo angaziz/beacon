@@ -6,6 +6,19 @@ import Foundation
 // JSON Data here. Defaults (cadence/stale/basis) are keyed by (source, kind) and frozen as constants
 // below. Malformed JSON never crashes: every map returns [] and skips rows it cannot classify.
 
+// Trim a string to <= maxBytes of UTF-8 on a character boundary (the device counts bytes, not glyphs).
+// Used so a long Yahoo company name fits the device's name buffer instead of being rejected as malformed.
+func clampUTF8(_ s: String, _ maxBytes: Int) -> String {
+    if s.utf8.count <= maxBytes { return s }
+    var out = "", n = 0
+    for ch in s {
+        let b = String(ch).utf8.count
+        if n + b > maxBytes { break }
+        out.append(ch); n += b
+    }
+    return out
+}
+
 // One search/merge result: the canonical row plus a human source label for UI chips ("Binance"/"Yahoo").
 public struct TickerCandidate: Equatable {
     public var row: TickerRow
@@ -42,8 +55,9 @@ public enum BinanceCatalog {
                   let symbol = s["symbol"] as? String, !symbol.isEmpty,
                   let quote = s["quoteAsset"] as? String, allowedQuotes.contains(quote)
             else { continue }
+            guard symbol.utf8.count <= TickerLimits.symMaxBytes else { continue }   // device can't store it
             let base = (s["baseAsset"] as? String) ?? symbol
-            let name = base.isEmpty ? symbol : "\(base)/\(quote)"
+            let name = clampUTF8(base.isEmpty ? symbol : "\(base)/\(quote)", TickerLimits.nameMaxBytes)
             let d = TickerDefaults.binanceCrypto
             let row = TickerRow(id: TickerID.make(src: .binance, sym: symbol), src: .binance, sym: symbol,
                                 name: name, kind: .crypto, cadence: d.cadence, stale: d.stale, basis: d.basis)
@@ -106,11 +120,13 @@ public enum YahooCatalog {
                   let quoteType = q["quoteType"] as? String,
                   let kind = kind(for: quoteType)
             else { continue }
-            let name = (q["shortname"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let rawName = (q["shortname"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 ?? (q["longname"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 ?? symbol
             let d = TickerDefaults.yahoo
             let sym = SymbolEncoding.yahooPath(symbol)
+            guard sym.utf8.count <= TickerLimits.symMaxBytes else { continue }       // device can't store it
+            let name = clampUTF8(rawName, TickerLimits.nameMaxBytes)                 // long company names get trimmed
             let row = TickerRow(id: TickerID.make(src: .yahoo, sym: sym), src: .yahoo, sym: sym,
                                 name: name, kind: kind, cadence: d.cadence, stale: d.stale, basis: d.basis)
             out.append(TickerCandidate(row: row, sourceLabel: label))

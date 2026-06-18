@@ -9,6 +9,15 @@ public enum TickerSource: String, Codable { case binance, yahoo }
 public enum TickerKind: String, Codable { case fx, crypto, index, etf }
 public enum ChangeBasis: String, Codable { case prevClose = "prev_close", h24 = "24h" }
 
+// Firmware field capacities (firmware ticker_table.h / records.h) the device enforces on parse: it
+// rejects any longer id/sym/name as "malformed" (fail-closed, no silent truncation). The hub MUST emit
+// rows within these UTF-8 byte bounds -- names get clamped, over-long symbols get dropped at the adapter.
+public enum TickerLimits {
+    public static let idMaxBytes   = 15   // FIN_ID_LEN - 1
+    public static let symMaxBytes  = 23   // TKR_SYM_LEN - 1
+    public static let nameMaxBytes = 23   // TKR_NAME_LEN - 1
+}
+
 // One canonical ticker. JSON keys are frozen by the firmware row parser: id/src/sym/name/kind/cadence/
 // stale/basis. Property names already match every key, so no CodingKeys remap is needed; the enum-typed
 // fields serialize via their String rawValues (which equal the wire strings above).
