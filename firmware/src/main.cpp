@@ -7,6 +7,7 @@
 #include "hal/touch.h"
 #include "ui/lvgl_port.h"
 #include "core/datastore.h"
+#include "config/ticker_table.h"
 #include "core/timekeep.h"
 #include "core/nvs.h"
 #include "core/location.h"
@@ -107,6 +108,7 @@ void setup() {
        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
   if (!lvgl_port_begin()) { LOGE("halt: lvgl"); return; }
 
+  ticker_table_init();   // seed the runtime ticker table before fetch/UI read it
   datastore_init();   // seeds finance_count + ids (screens read these at build time)
   styles_init();
   carousel_init();

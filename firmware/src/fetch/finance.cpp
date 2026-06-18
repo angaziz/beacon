@@ -5,7 +5,7 @@
 #include "core/timekeep.h"
 #include "core/change_basis.h"
 #include "core/fetch_task.h"
-#include "config/tickers.h"
+#include "config/ticker_table.h"
 #include "util/log.h"
 #include <stdio.h>
 #include <string.h>
@@ -22,7 +22,7 @@ static data_err_t fail(uint8_t idx, data_err_t e) {
   return e;
 }
 
-static data_err_t fetch_binance(uint8_t idx, const ticker_cfg_t* c) {
+static data_err_t fetch_binance(uint8_t idx, const ticker_runtime_t* c) {
   char path[96]; int status = 0;
   snprintf(path, sizeof(path), "/api/v3/ticker/24hr?symbol=%s", c->symbol);
   // Binance's public data mirror: same REST shape as api.binance.com, but reachable where the main
@@ -37,7 +37,7 @@ static data_err_t fetch_binance(uint8_t idx, const ticker_cfg_t* c) {
   return ERR_NONE;
 }
 
-static data_err_t fetch_yahoo(uint8_t idx, const ticker_cfg_t* c) {
+static data_err_t fetch_yahoo(uint8_t idx, const ticker_runtime_t* c) {
   char path[96]; int status = 0;
   snprintf(path, sizeof(path), "/v8/finance/chart/%s?interval=1d&range=1d", c->symbol);
   const char* hk[] = { "User-Agent" };
@@ -52,11 +52,11 @@ static data_err_t fetch_yahoo(uint8_t idx, const ticker_cfg_t* c) {
 }
 
 data_err_t fetch_finance(uint8_t idx) {
-  if (idx >= DEFAULT_TICKERS_COUNT) return ERR_NONE;
-  const ticker_cfg_t* c = &DEFAULT_TICKERS[idx];
-  switch (c->source) {
-    case SRC_BINANCE:     return fetch_binance(idx, c);
-    case SRC_YAHOO:       return fetch_yahoo(idx, c);
+  ticker_runtime_t c;   // copy the row out of the locked table before any network call
+  if (!ticker_table_get(idx, &c)) return ERR_NONE;
+  switch (c.source) {
+    case SRC_BINANCE:     return fetch_binance(idx, &c);
+    case SRC_YAHOO:       return fetch_yahoo(idx, &c);
     default:              return fail(idx, ERR_PARSE);
   }
 }
