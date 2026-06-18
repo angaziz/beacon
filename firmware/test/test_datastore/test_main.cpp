@@ -2,8 +2,11 @@
 #include <string.h>
 #include "core/datastore.h"
 #include "config/tickers.h"
+#include "config/ticker_table.h"
 
-void setUp(void) { datastore_init(); }   // reset the static store before each test
+// datastore_init() now seeds finance ids/count from the runtime ticker table (#92), so the table must
+// be initialized first; ticker_table_init() seeds from DEFAULT_TICKERS on the native build (NVS stub).
+void setUp(void) { ticker_table_init(); datastore_init(); }   // reset the static store before each test
 void tearDown(void) {}
 
 static void test_init_seeds_finance(void) {

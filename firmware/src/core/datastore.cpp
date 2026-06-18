@@ -1,7 +1,7 @@
 #include "core/datastore.h"
 #include "core/ds_lock.h"
 #include "core/stale.h"
-#include "config/tickers.h"
+#include "config/ticker_table.h"
 #include <string.h>
 
 static ds_lock_t        s_lock;
@@ -20,12 +20,17 @@ void datastore_init(void) {
   memset(&s_usage, 0, sizeof(s_usage));           hdr_loading(&s_usage.hdr);
   memset(&s_buddy, 0, sizeof(s_buddy));           hdr_loading(&s_buddy.hdr);
 
-  s_finance_count = DEFAULT_TICKERS_COUNT;
-  if (s_finance_count > MAX_TICKERS) s_finance_count = MAX_TICKERS;
+  // Seed finance ids/count from the runtime ticker table (already initialized -- NVS-restored list or
+  // defaults), NOT DEFAULT_TICKERS: after a reboot with a saved hub config the table holds the restored
+  // ids, and fetch publishes via ds_set_finance_if(idx, <table id>); seeding default ids here would
+  // mismatch and drop every publish, leaving finance stuck loading until a live hub push reseeds (#92).
+  int n = ticker_table_count();
+  if (n > MAX_TICKERS) n = MAX_TICKERS;
+  s_finance_count = (uint8_t)n;
   memset(s_finance, 0, sizeof(s_finance));
-  for (uint8_t i = 0; i < s_finance_count; i++) {
-    strncpy(s_finance[i].id, DEFAULT_TICKERS[i].id, FIN_ID_LEN - 1);
-    s_finance[i].id[FIN_ID_LEN - 1] = 0;
+  for (int i = 0; i < n; i++) {
+    ticker_runtime_t t;
+    if (ticker_table_get(i, &t)) { strncpy(s_finance[i].id, t.id, FIN_ID_LEN - 1); s_finance[i].id[FIN_ID_LEN - 1] = 0; }
     hdr_loading(&s_finance[i].hdr);
   }
   ds_lock_give(s_lock);
