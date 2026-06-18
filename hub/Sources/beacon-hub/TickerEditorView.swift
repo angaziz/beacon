@@ -171,6 +171,10 @@ struct TickerEditorView: View {
     }
 
     private func remove(_ row: TickerRow) {
+        // Keep at least one ticker: an empty list bumps rev but pushTickerConfig() no-ops (the firmware
+        // rejects an empty snapshot), so hub + device would silently diverge with no ack (#92). The user
+        // replaces the last ticker by adding another first, or removing then adding.
+        guard working.count > 1 else { return }
         working.removeAll { $0.id == row.id }
         commit()
     }
