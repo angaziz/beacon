@@ -34,7 +34,6 @@ static const char* slot_host(int slot) {
   switch (DEFAULT_TICKERS[slot - 1].source) {
     case SRC_YAHOO:       return "query1.finance.yahoo.com";
     case SRC_BINANCE:     return "data-api.binance.vision";
-    case SRC_FRANKFURTER: return "api.frankfurter.dev";
     default:              return "";
   }
 }

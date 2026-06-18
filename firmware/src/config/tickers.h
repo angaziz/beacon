@@ -2,8 +2,8 @@
 #include <stdint.h>
 
 // FROZEN schema (FR-STATE-0). Values stay editable; NVS override arrives in chunk D.
-typedef enum { SRC_FRANKFURTER, SRC_BINANCE, SRC_YAHOO } ticker_source_t;
-typedef enum { KIND_FX_IDR, KIND_CRYPTO, KIND_INDEX, KIND_ETF } ticker_kind_t;
+typedef enum { SRC_BINANCE, SRC_YAHOO } ticker_source_t;
+typedef enum { KIND_FX, KIND_CRYPTO, KIND_INDEX, KIND_ETF } ticker_kind_t;
 typedef enum { CHG_PREV_CLOSE, CHG_24H } change_basis_t;
 
 typedef struct {
@@ -22,13 +22,11 @@ typedef struct {
 // === EDIT HERE to add/remove/reorder instruments. id must stay unique + stable. ===
 // Fields: id, source, symbol, display_name, kind, cadence_s, stale_s, change_basis
 static const ticker_cfg_t DEFAULT_TICKERS[] = {
-  // FX via Yahoo (<PAIR>=X): near-live market rate + daily prev-close change. Frankfurter (SRC_FRANKFURTER)
-  // is still supported but serves only once-daily ECB reference rates, which lag the live market.
-  // (KIND_FX_IDR is the frozen enum name for the FX kind; pairs need not involve IDR.)
-  {"eur_usd", SRC_YAHOO, "EURUSD=X", "EUR/USD", KIND_FX_IDR, 300, 600, CHG_PREV_CLOSE},
-  {"gbp_usd", SRC_YAHOO, "GBPUSD=X", "GBP/USD", KIND_FX_IDR, 300, 600, CHG_PREV_CLOSE},
-  {"usd_jpy", SRC_YAHOO, "JPY=X",    "USD/JPY", KIND_FX_IDR, 300, 600, CHG_PREV_CLOSE},
-  {"usd_cny", SRC_YAHOO, "CNY=X",    "USD/CNY", KIND_FX_IDR, 300, 600, CHG_PREV_CLOSE},
+  // FX via Yahoo (<PAIR>=X): near-live market rate + daily prev-close change.
+  {"eur_usd", SRC_YAHOO, "EURUSD=X", "EUR/USD", KIND_FX, 300, 600, CHG_PREV_CLOSE},
+  {"gbp_usd", SRC_YAHOO, "GBPUSD=X", "GBP/USD", KIND_FX, 300, 600, CHG_PREV_CLOSE},
+  {"usd_jpy", SRC_YAHOO, "JPY=X",    "USD/JPY", KIND_FX, 300, 600, CHG_PREV_CLOSE},
+  {"usd_cny", SRC_YAHOO, "CNY=X",    "USD/CNY", KIND_FX, 300, 600, CHG_PREV_CLOSE},
   {"btc",     SRC_BINANCE,     "BTCUSDT", "BTC",     KIND_CRYPTO, 60,    600,   CHG_24H},
   {"eth",     SRC_BINANCE,     "ETHUSDT", "ETH",     KIND_CRYPTO, 60,    600,   CHG_24H},
   {"sp500",   SRC_YAHOO,       "%5EGSPC", "S&P 500", KIND_INDEX,  300,   600,   CHG_PREV_CLOSE},
