@@ -71,6 +71,10 @@ static void build(lv_obj_t* page) {
     lv_obj_set_style_text_font(s_name[i], t->f_body, 0);
     lv_obj_set_style_text_color(s_name[i], t->ink_dim, 0);
     lv_obj_set_style_text_letter_space(s_name[i], 2, 0);
+    // Value (width 150) sits at RIGHT_MID -104 => its left edge is at row_w(386)-104-150=132.
+    // Cap the name so a long user-configured name ellipsizes instead of overlapping the value.
+    lv_obj_set_width(s_name[i], 120);
+    lv_label_set_long_mode(s_name[i], LV_LABEL_LONG_DOT);
     lv_label_set_text(s_name[i], "");
     lv_obj_align(s_name[i], LV_ALIGN_LEFT_MID, 0, 0);
 

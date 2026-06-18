@@ -64,6 +64,9 @@ static void build(lv_obj_t* page) {
     lv_obj_set_style_text_font(s_id[i], t->f_mono, 0);
     lv_obj_set_style_text_color(s_id[i], t->ink_dim, 0);
     lv_obj_set_width(s_id[i], 120);
+    // Cap (already 120-wide) so a long user-configured name ellipsizes within its flex column
+    // instead of growing and pushing the value/change.
+    lv_label_set_long_mode(s_id[i], LV_LABEL_LONG_DOT);
 
     s_val[i] = lv_label_create(row);
     lv_label_set_text(s_val[i], "--");

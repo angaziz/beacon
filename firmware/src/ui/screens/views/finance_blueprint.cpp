@@ -61,6 +61,10 @@ static void build(lv_obj_t* page) {
     s_id[i] = lv_label_create(row);
     lv_obj_set_style_text_color(s_id[i], t->ink_dim, 0);
     lv_obj_set_style_text_font(s_id[i], t->f_mono, 0);
+    // Value is right-anchored at -96 (change occupies the rightmost 96 of row_w=386). Cap the
+    // name so a long user-configured name ellipsizes instead of overlapping the value figure.
+    lv_obj_set_width(s_id[i], 150);
+    lv_label_set_long_mode(s_id[i], LV_LABEL_LONG_DOT);
     lv_obj_align(s_id[i], LV_ALIGN_LEFT_MID, 0, 0);
     lv_label_set_text(s_id[i], "----");
 

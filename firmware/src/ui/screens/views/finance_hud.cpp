@@ -68,6 +68,10 @@ static void build(lv_obj_t* page) {
 
     s_id[i] = lv_label_create(row);
     lv_obj_add_style(s_id[i], &S.slot, 0);
+    // Flex row: value grows, change is 78 (+SPACE_M pad). Cap the name with a fixed width so a
+    // long user-configured name ellipsizes instead of expanding and squeezing the value figure.
+    lv_obj_set_width(s_id[i], 150);
+    lv_label_set_long_mode(s_id[i], LV_LABEL_LONG_DOT);
     lv_label_set_text(s_id[i], "");
 
     s_val[i] = lv_label_create(row);
