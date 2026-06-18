@@ -33,6 +33,27 @@ final class UsagePollDecisionTests: XCTestCase {
         }
     }
 
+    // The display-side freshness gate (#93) must mirror the poll gate so the displayed Claude value and
+    // the Keychain-skip decision never disagree: statuslineFresh is exactly the inverse of shouldPollClaude.
+    func testStatuslineFresh() {
+        let cases: [(name: String, age: TimeInterval?, interval: TimeInterval, want: Bool)] = [
+            ("never received => stale",      nil, 45, false),
+            ("just received => fresh",         1, 45, true),
+            ("within 2x interval => fresh",   89, 45, true),
+            ("at 2x interval => stale",       90, 45, false),
+            ("long stale => stale",          600, 45, false),
+        ]
+        for c in cases {
+            XCTAssertEqual(
+                UsagePollDecision.statuslineFresh(age: c.age, interval: c.interval),
+                c.want, c.name)
+            // Complementary by construction: fresh display <=> skip the Claude poll.
+            XCTAssertNotEqual(
+                UsagePollDecision.statuslineFresh(age: c.age, interval: c.interval),
+                UsagePollDecision.shouldPollClaude(statuslineAge: c.age, interval: c.interval), c.name)
+        }
+    }
+
     func testShouldRereadCredential() {
         let cases: [(name: String, since: TimeInterval?, cooldown: TimeInterval, want: Bool)] = [
             ("never read => read",          nil, 300, true),

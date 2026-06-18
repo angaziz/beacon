@@ -10,12 +10,20 @@ public enum UsagePollDecision {
         connected || secondsSinceLastPoll >= backoff
     }
 
+    // Single source of the statusline freshness window (#93): a statusline value counts as live for 2x
+    // the poll interval. Both the Claude poll-gate (skip the Keychain while fresh) and the display
+    // fallback (prefer the statusline value while fresh, else fall back to the poller) derive from this,
+    // so they can never disagree. nil age (never seen) => never fresh.
+    public static func statuslineFresh(age: TimeInterval?, interval: TimeInterval) -> Bool {
+        guard let age else { return false }
+        return age < 2 * interval
+    }
+
     // The Claude oauth/usage endpoint (now best-effort, often 429) is wasted work while the Claude Code
-    // statusline shim is feeding usage -- AppDelegate prefers the statusline value. "Fresh" = a statusline
-    // value arrived within 2x the poll interval; nil age (never seen) or a stale age => poll as fallback.
+    // statusline shim is feeding usage -- AppDelegate prefers the statusline value. Skip the poll exactly
+    // while the statusline is fresh; nil age (never seen) or a stale age => poll as fallback.
     public static func shouldPollClaude(statuslineAge: TimeInterval?, interval: TimeInterval) -> Bool {
-        guard let age = statuslineAge else { return true }
-        return age >= 2 * interval
+        !statuslineFresh(age: statuslineAge, interval: interval)
     }
 
     // Gate Keychain re-reads while the stored Claude token sits expired (waiting for the CLI to rotate

@@ -17,7 +17,8 @@ final class ClaudeCodeBridge {
     }
 
     var onBuddyUpdate: ((BuddyState) -> Void)?
-    var onClaudeUsage: ((ProviderUsage) -> Void)?   // Claude 5h/7d from statusline rate_limits
+    var onClaudeUsage: ((ProviderUsage) -> Void)?   // Claude 5h/7d from statusline rate_limits (deduped, #59)
+    var onStatuslineActivity: (() -> Void)?         // liveness: fires on EVERY rate_limits POST, undeduped (#93)
     var onPromptUndeliverable: ((String) -> Void)?  // a prompt couldn't be shown (device offline)
     var onPromptArrived: (() -> Void)?              // a deliverable prompt was shown on the device (cue the user)
     var onBridgeStatus: ((String?) -> Void)?        // non-nil = bind failed (loud); nil = recovered
@@ -444,7 +445,8 @@ final class ClaudeCodeBridge {
         publishBuddy()
     }
 
-    private func handleStatusline(_ body: [String: Any]) {
+    // internal (not private) so beacon-hubTests can drive the statusline path without the Network stack.
+    func handleStatusline(_ body: [String: Any]) {
         // Confirmed Claude Code statusline schema: context_window.{used_percentage,total_input_tokens,
         // total_output_tokens}. (The payload also carries rate_limits.{five_hour,seven_day} -- a future
         // path to Claude usage without the Keychain/oauth call.)
@@ -464,9 +466,15 @@ final class ClaudeCodeBridge {
         // Claude usage is also in the statusline (rate_limits) -- authoritative, no token/endpoint, so
         // it survives the oauth/usage 429. AppDelegate prefers this over the poller's Claude value.
         if let rl = body["rate_limits"] as? [String: Any] {
+            // #93: a rate_limits-carrying POST proves Claude Code is alive and feeding usage, regardless of
+            // whether the parsed value changed. Fire liveness on EVERY such POST -- BEFORE the #59 value
+            // dedup -- so the poller's statusline-freshness stamp can't age out during a flat session and
+            // wrongly re-enable the (Keychain-prompting) Claude poll.
+            let cbActivity = onStatuslineActivity
+            DispatchQueue.main.async { cbActivity?() }
             let claude = ProviderUsage(h5: Self.rlWindow(rl["five_hour"]),
                                        d7: Self.rlWindow(rl["seven_day"]))
-            if claude != lastClaudeUsage {   // #59: skip the per-tick byte-identical resend.
+            if claude != lastClaudeUsage {   // #59: skip the per-tick byte-identical resend of the value.
                 lastClaudeUsage = claude
                 let cb = onClaudeUsage
                 DispatchQueue.main.async { cb?(claude) }
