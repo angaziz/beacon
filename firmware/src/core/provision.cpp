@@ -80,11 +80,10 @@ static void handle_save(void) {
   String ssid = s_server.arg("ssid");
   String pass = s_server.arg("pass");
   if (ssid.length() == 0) { send_html(400, "<h2>SSID required</h2>"); return; }
-  // IEEE 802.11 SSID max is 32 bytes; WPA2 passphrase max is 63 chars. Reject
-  // oversized values up front so the user gets clear feedback (wifi_list truncates
-  // safely, but a truncated SSID would silently target the wrong network).
+  // IEEE 802.11 SSID max is 32 bytes; WPA2 credentials are either a passphrase
+  // (8-63 ASCII chars) or a 64-hex-char raw PSK. WIFI_PASS_CAP is 65 (64 + NUL).
   if (ssid.length() > 32) { send_html(400, "<h2>SSID too long (32 char max)</h2>"); return; }
-  if (pass.length() > 63) { send_html(400, "<h2>Password too long (63 char max)</h2>"); return; }
+  if (pass.length() > 64) { send_html(400, "<h2>Password too long (64 char max)</h2>"); return; }
   if (!nvs_wifi_add(ssid.c_str(), pass.c_str())) {   // append (dedup); creds never logged
     send_html(200, "<h2>Saved networks full</h2><p>Forget one on the device first.</p>");
     return;
