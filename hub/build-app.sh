@@ -58,7 +58,7 @@ if [ "${1:-}" = "install-hooks" ]; then
   # into the jq program. Beacon wrappers are matched by the INNER hook object (type+url) -- hand-installed
   # entries may lack a matcher, so we match the inner http-8765 object anywhere in an event's wrappers --
   # then REFRESHED: drop any existing beacon wrapper and re-add the canonical one from the snippet, so a
-  # reinstall propagates field changes (e.g. the timeout bump 35->190); non-beacon wrappers are preserved.
+  # reinstall propagates field changes (e.g. the timeout bump 35->600); non-beacon wrappers are preserved.
   # Still idempotent (re-running yields the same result). def's must precede the pipeline (a leading/
   # trailing `|` around them is a jq syntax error).
   jq -n --arg shim "$SHIM" --slurpfile cur "$SETTINGS" --slurpfile snip "$SNIPPET" '

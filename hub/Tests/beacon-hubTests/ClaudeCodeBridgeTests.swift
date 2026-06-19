@@ -66,6 +66,45 @@ final class ClaudeCodeBridgeTests: XCTestCase {
         XCTAssertNil(next.qlen, "only one left => qlen omitted")
     }
 
+    func testQueuedExpirySilentlyDropsAndKeepsFront() {
+        let bridge = ClaudeCodeBridge()
+        bridge.setDeviceConnected(true)
+        var published: [BuddyState] = []
+        bridge.onBuddyUpdate = { published.append($0) }
+        bridge.injectPermissionForTest(toolUseId: "t1", tool: "Bash", hint: "front")
+        bridge.injectPermissionForTest(toolUseId: "t2", tool: "Write", hint: "behind")
+
+        let behindId = bridge.queuedIdsForTest().last!   // the non-front one
+        bridge.expirePromptForTest(id: behindId)          // simulate its 590s cap firing (hub-internal deny)
+
+        drainMain()
+        let front = published.last!.prompt!
+        XCTAssertEqual(front.hint, "front", "front prompt unchanged by a queued expiry")
+        XCTAssertNil(front.qlen, "only the front remains => qlen omitted")
+    }
+
+    func testResolveRejectsNonFrontId() {
+        let bridge = ClaudeCodeBridge()
+        bridge.setDeviceConnected(true)
+        bridge.injectPermissionForTest(toolUseId: "t1", tool: "Bash", hint: "front")
+        bridge.injectPermissionForTest(toolUseId: "t2", tool: "Write", hint: "behind")
+        let behindId = bridge.queuedIdsForTest().last!
+        // The device only ever shows the front, so a decision for a non-front id is illegitimate: reject it.
+        XCTAssertEqual(bridge.resolve(id: behindId, approve: true), .unknown)
+        XCTAssertEqual(bridge.queuedIdsForTest().count, 2, "rejected resolve must not advance the queue")
+    }
+
+    func testDrainDeniesEveryQueuedPrompt() {
+        let bridge = ClaudeCodeBridge()
+        bridge.setDeviceConnected(true)
+        bridge.injectPermissionForTest(toolUseId: "t1", tool: "Bash", hint: "one")
+        bridge.injectPermissionForTest(toolUseId: "t2", tool: "Write", hint: "two")
+        let drained = expectation(description: "drained")
+        bridge.drainHeldPrompts(reason: "quitting") { drained.fulfill() }
+        wait(for: [drained], timeout: 1)
+        XCTAssertTrue(bridge.queuedIdsForTest().isEmpty, "drain clears the whole queue")
+    }
+
     // onBuddyUpdate is delivered via DispatchQueue.main.async; flush pending main-queue work (FIFO)
     // so the published snapshots are visible before assertions.
     private func drainMain() {

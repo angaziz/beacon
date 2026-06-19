@@ -11,7 +11,7 @@ final class HooksDetectionTests: XCTestCase {
             "hooks": [
                 "PermissionRequest": [
                     ["matcher": "*", "hooks": [
-                        ["type": "http", "url": HooksDetection.beaconHookURL, "timeout": 190],
+                        ["type": "http", "url": HooksDetection.beaconHookURL, "timeout": 600],
                     ]],
                 ],
             ],

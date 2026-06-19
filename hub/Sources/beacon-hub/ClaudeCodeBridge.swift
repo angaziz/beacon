@@ -83,6 +83,7 @@ final class ClaudeCodeBridge {
     private var sessionStats: [String: (tokens: Int, ctxPct: Int)] = [:]   // per-session statusline (queue-confined).
     private var reaper: DispatchSourceTimer?
     private static let sessionTTL: TimeInterval = 600      // 10 min: bounds a missed-SessionEnd leak.
+    private static let tombstoneTTL: TimeInterval = 30   // keep a resolved id long enough for a racing late device decision -> .late
 
     init() {}
 
@@ -179,7 +180,12 @@ final class ClaudeCodeBridge {
     // (issue #8). Deadlock-safe on the real path: the BLE callback hops to @MainActor before calling
     // here, and finish only posts main callbacks / HTTP asynchronously (never blocks back on main).
     func resolve(id: String, approve: Bool) -> ResolveOutcome {
-        queue.sync { finish(id: id, approve: approve, capped: false) }
+        queue.sync {
+            // Device shows only the front; a decision for a live non-front id is out-of-order -> reject as
+            // unknown (never advance the queue). A done id still falls through to finish -> .late tombstone.
+            if let p = pending[id], !p.done, promptQueue.first != id { return .unknown }
+            return finish(id: id, approve: approve, capped: false)
+        }
     }
 
     // Mirror the BLE link state so an arriving prompt can be denied as "offline" instead of held
@@ -338,6 +344,11 @@ final class ClaudeCodeBridge {
         }
     }
 
+    // Test seams: inspect the FIFO, and drive the hub-internal cap-expiry path (finish(capped:)) that
+    // a prompt's 590s timer would fire -- NOT the device resolve path.
+    func queuedIdsForTest() -> [String] { queue.sync { self.promptQueue } }
+    func expirePromptForTest(id: String) { queue.sync { _ = self.finish(id: id, approve: false, capped: true) } }
+
     // Append a held prompt to the FIFO and publish the (possibly unchanged) front with the new depth.
     // Each prompt races its own 590s cap (under the 600s hook timeout); see finish/timeout handling.
     private func enqueuePrompt(respond: @escaping (Bool, String?, (() -> Void)?) -> Void,
@@ -361,6 +372,9 @@ final class ClaudeCodeBridge {
         onPromptArrived?()
     }
 
+    // A non-front (queued) prompt resolving -- including its own 590s cap firing -- removes just that id
+    // and republishes the unchanged front with a lower qlen: the device never shows a "too late" for a
+    // prompt it never displayed (design decision 5, issue #98). The front keeps today's on-screen UX.
     @discardableResult
     private func finish(id: String, approve: Bool, capped: Bool, message: String? = nil,
                         onSent: (() -> Void)? = nil) -> ResolveOutcome {
@@ -538,6 +552,10 @@ final class ClaudeCodeBridge {
         waitingSessionCounts = waitingSessionCounts.filter { sessions[$0.key] != nil }   // a wait for a dead session is stuck.
         for sid in sessionStats.keys where sid != "_" && sessions[sid] == nil {
             sessionStats.removeValue(forKey: sid)   // a dead session must stop inflating the token sum.
+        }
+        let tombCutoff = now.addingTimeInterval(-Self.tombstoneTTL)
+        for (pid, p) in pending where p.done && (p.resolvedAt ?? now) < tombCutoff {
+            pending.removeValue(forKey: pid)   // bounded tombstone GC (replaces prune-on-enqueue)
         }
         buddy.running = sessions.count
         buddy.waiting = waitingSessionCounts.count

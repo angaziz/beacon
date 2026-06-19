@@ -1,12 +1,12 @@
 {
-  "_comment": "Merge these keys into ~/.claude/settings.json to wire Claude Code to the Beacon hub (127.0.0.1:8765, ClaudeCodeBridge). ESSENTIAL for the buddy round-trip: the PermissionRequest hook + statusLine. PermissionRequest fires ONLY when a tool actually needs permission (Write, Edit, Bash, MCP, ...) -- unlike PreToolUse, which fires on EVERY tool and would block routine reads if held open. SessionStart/Stop/Notification/SessionEnd are optional (running count + activity feed). RUNNING is NOT a SessionStart counter: SessionStart may not fire via http, so the bridge counts any session it has SEEN recently (first-seen + 10min TTL reaper) and SessionEnd (http, carries session_id) drives clean per-session removal on a normal exit; the TTL backstops SIGKILL/crash. timeout is in SECONDS; PermissionRequest is 190 to cover the device's ~180s (3 min) decision window (CC's PermissionRequest default is 600s, so there is ample headroom). If you already have other hooks for these events, ADD these as additional array entries -- do not overwrite. (PreToolUse with a narrow matcher like \"Bash\" is the back-compat alternative; the bridge still accepts it.) Prefer `./build-app.sh install-hooks`, which merges these keys idempotently and rewrites __BEACON_SHIM__ to the absolute shim path on this machine.",
+  "_comment": "Merge these keys into ~/.claude/settings.json to wire Claude Code to the Beacon hub (127.0.0.1:8765, ClaudeCodeBridge). ESSENTIAL for the buddy round-trip: the PermissionRequest hook + statusLine. PermissionRequest fires ONLY when a tool actually needs permission (Write, Edit, Bash, MCP, ...) -- unlike PreToolUse, which fires on EVERY tool and would block routine reads if held open. SessionStart/Stop/Notification/SessionEnd are optional (running count + activity feed). RUNNING is NOT a SessionStart counter: SessionStart may not fire via http, so the bridge counts any session it has SEEN recently (first-seen + 10min TTL reaper) and SessionEnd (http, carries session_id) drives clean per-session removal on a normal exit; the TTL backstops SIGKILL/crash. timeout is in SECONDS; PermissionRequest is 600 (its max) to cover the device's ~590s decision window (CC's PermissionRequest default is 600s, so this is the ceiling). If you already have other hooks for these events, ADD these as additional array entries -- do not overwrite. (PreToolUse with a narrow matcher like \"Bash\" is the back-compat alternative; the bridge still accepts it.) Prefer `./build-app.sh install-hooks`, which merges these keys idempotently and rewrites __BEACON_SHIM__ to the absolute shim path on this machine.",
 
   "hooks": {
     "PermissionRequest": [
       {
         "matcher": "*",
         "hooks": [
-          { "type": "http", "url": "http://127.0.0.1:8765/hook", "timeout": 190 }
+          { "type": "http", "url": "http://127.0.0.1:8765/hook", "timeout": 600 }
         ]
       }
     ],
