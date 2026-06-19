@@ -256,9 +256,11 @@ int hub_report_plan(const ticker_runtime_t* rows, int count, int group_start[MAX
   for (int i = 0; i < count; i++) {
     char tmp[HUB_FRAME_MAX];
     size_t n = hub_build_report_frame(rows, lo, i + 1, wp, count, tmp, sizeof(tmp));
-    if (n == 0) return 0;                            // unmappable enum / serialize failure
-    if (n <= REPORT_CHUNK_MAX) continue;            // row i still fits the current group
-    if (i == lo) return 0;                          // a single row alone exceeds the budget
+    // n==0 when the probe overflowed HUB_FRAME_MAX (so definitely > REPORT_CHUNK_MAX) OR an enum error.
+    // Both => "over budget"; the i==lo / n2==0 guards below still abort on a genuine single-row failure.
+    bool over = (n == 0 || n > REPORT_CHUNK_MAX);
+    if (!over) continue;                            // row i still fits the current group
+    if (i == lo) return 0;                          // a single row alone exceeds the budget (or enum error)
     group_start[groups++] = lo;                     // close [lo..i)
     lo = i;                                          // row i opens a new group
     size_t n2 = hub_build_report_frame(rows, lo, i + 1, wp, count, tmp, sizeof(tmp));
