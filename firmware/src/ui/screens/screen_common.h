@@ -9,6 +9,15 @@
 #include "ui/screen.h"
 #include "ui/theme.h"
 #include "core/nvs.h"
+#include "config/ticker_table.h"
+
+// Human-readable ticker name for slot i. Result points into a function-local static and is
+// valid only until the next call — callers must consume it immediately (lv_label_set_text
+// copies). Core-1 render thread only; never store the returned pointer.
+static inline const char* fin_name(int i, const finance_rec_t& r) {
+  static ticker_runtime_t t;
+  return ticker_table_get(i, &t) ? t.name : r.id;
+}
 
 // Diff-aware setters (#60). LVGL 8 reallocs+invalidates on every lv_label_set_text and refreshes+
 // invalidates on every lv_obj_set_style_* / lv_bar_set_value regardless of whether the value changed,

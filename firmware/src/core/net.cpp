@@ -125,6 +125,7 @@ static data_err_t drain_body(int len, char* out, size_t cap, bool* truncated) {
       if (!read_body_bytes((int)sz, deadline, out, cap, &outlen, &over)) { rc = ERR_TIMEOUT; break; }
       for (int got = 0; got < 2; ) {   // consume the CRLF trailing each chunk's data
         if ((int32_t)(millis() - deadline) >= 0 || !s_cli.connected()) { rc = ERR_TIMEOUT; break; }
+        if (s_cli.available() <= 0) { vTaskDelay(pdMS_TO_TICKS(2)); continue; }   // yield IDLE0 like read_body_bytes
         uint8_t b; if (s_cli.read(&b, 1) <= 0) { vTaskDelay(pdMS_TO_TICKS(2)); continue; }
         got++;
       }

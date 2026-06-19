@@ -4,16 +4,9 @@
 #include "ui/theme.h"
 #include "ui/fmt.h"
 #include "config/layout.h"
-#include "config/ticker_table.h"
+#include "ui/screens/screen_common.h"
 #include "core/datastore.h"
 #include <Arduino.h>
-
-// Human-readable ticker name for slot i (slot i == ticker i, guaranteed by datastore_init).
-// Result is consumed immediately by lv_label_set_text (it copies). Core-1 render thread only.
-static const char* fin_name(int i, const finance_rec_t& r) {
-  static ticker_runtime_t t;
-  return ticker_table_get(i, &t) ? t.name : r.id;
-}
 
 // Aerospace HUD / Markets. "// MARKETS" eyebrow + vertical list of instrument rows:
 // id (mono dim) | value (display, tabular) | change (up/down color + ^/v glyph). Hairline
