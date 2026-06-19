@@ -71,6 +71,7 @@ typedef struct {
   char id[BUDDY_ID_LEN];       // prompt id (echoed back on decide)
   char tool[BUDDY_TOOL_LEN];   // tool name
   char hint[BUDDY_HINT_LEN];   // command hint
+  uint8_t queue_len;           // total pending prompts incl. this front one (1 = lone); from qlen, NOT a local stamp
   uint8_t decision_state;      // device-local confirm lifecycle (PROMPT_*); NOT serialized
   // Device-local monotonic-uptime stamps (uptime_s()), NOT serialized; live in a different epoch from
   // hdr.last_updated (wall clock) and are only ever compared against each other (each-other deltas).

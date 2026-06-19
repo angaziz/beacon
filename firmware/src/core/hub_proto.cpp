@@ -75,6 +75,7 @@ bool hub_parse_status(const char* json, size_t len,
     if (p.isNull()) {                                   // absent prompt => idle
       buddy->prompt.present = false;
       buddy->prompt.id[0] = buddy->prompt.tool[0] = buddy->prompt.hint[0] = '\0';
+      buddy->prompt.queue_len = 1;
     } else {
       const char* pid = p["id"].as<const char*>();
       // A full-frame resend (e.g. on reconnect) can repeat the SAME prompt we are already showing;
@@ -86,6 +87,8 @@ bool hub_parse_status(const char* json, size_t len,
       copy_trunc(buddy->prompt.id,   BUDDY_ID_LEN,   pid);
       copy_trunc(buddy->prompt.tool, BUDDY_TOOL_LEN, p["tool"].as<const char*>());
       copy_trunc(buddy->prompt.hint, BUDDY_HINT_LEN, p["hint"].as<const char*>());
+      int q = p["qlen"] | 1;                                 // absent/non-numeric => 1
+      buddy->prompt.queue_len = (uint8_t)(q < 1 ? 1 : (q > 255 ? 255 : q));  // clamp: 0/neg => 1, cap at 255
     }
   }
   return true;
