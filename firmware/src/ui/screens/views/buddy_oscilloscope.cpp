@@ -2,6 +2,7 @@
 #include "ui/styles.h"
 #include "ui/state_view.h"
 #include "ui/theme.h"
+#include "ui/screens/views/view_common.h"
 #include "config/layout.h"
 #include "core/datastore.h"
 #include "core/hub_task.h"
@@ -116,9 +117,7 @@ static void update(void) {
     lv_label_set_text(s_telem, chip);
   } else {
     char tl[64];
-    snprintf(tl, sizeof(tl), "%u RUN . %u WAIT . %uK TOK . CTX %u%%",
-             (unsigned)b.running, (unsigned)b.waiting,
-             (unsigned)(b.tokens / 1000), (unsigned)b.context_pct);
+    buddy_stats_fmt(tl, sizeof(tl), &b, true);
     lv_label_set_text(s_telem, tl);
   }
 

@@ -6,11 +6,11 @@
 #include "ui/state_view.h"
 #include "ui/theme.h"
 #include "ui/fmt.h"
+#include "ui/screens/views/view_common.h"
 #include "config/layout.h"
 #include "ui/screens/screen_common.h"
 #include "core/datastore.h"
 #include <Arduino.h>
-#include <time.h>
 static void update(void);
 
 #define FIN_ROWS_MAX 12

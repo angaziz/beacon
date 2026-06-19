@@ -2,6 +2,7 @@
 #include "ui/styles.h"
 #include "ui/state_view.h"
 #include "ui/theme.h"
+#include "ui/screens/views/view_common.h"
 #include "config/layout.h"
 #include "core/datastore.h"
 #include "core/timekeep.h"

@@ -7,13 +7,11 @@
 #include "ui/state_view.h"
 #include "ui/theme.h"
 #include "ui/batt_chip.h"
+#include "ui/screens/views/view_common.h"
 #include "config/layout.h"
 #include "core/datastore.h"
-#include "core/timekeep.h"
 #include "fetch/geoip.h"
 #include <Arduino.h>
-#include <time.h>
-#include <ctype.h>
 static void update(void);
 
 
@@ -21,16 +19,6 @@ static lv_obj_t *s_dot, *s_brand, *s_topright;
 static lv_obj_t *s_clock, *s_date, *s_city;
 static lv_obj_t *s_temp, *s_hum;
 static lv_obj_t *s_status;
-
-// Clock + date from the time service. RTC time is always "live" (FR-HOME-3); show "--" until known.
-static void render_clock(lv_obj_t* clock, lv_obj_t* date) {
-  if (!timekeep_has_time()) { lv_label_set_text(clock, "--:--"); lv_label_set_text(date, "--"); return; }
-  struct tm lt; timekeep_localtime(&lt);
-  char hm[8];  strftime(hm, sizeof(hm), "%H:%M", &lt);            lv_label_set_text(clock, hm);
-  char dt[24]; strftime(dt, sizeof(dt), "%a %d %b", &lt);
-  for (char* p = dt; *p; ++p) *p = (char)toupper((unsigned char)*p);
-  lv_label_set_text(date, dt);
-}
 
 static void build(lv_obj_t* page) {
   const beacon_theme_t* t = theme_active();
@@ -117,7 +105,7 @@ static void build(lv_obj_t* page) {
 }
 
 static void update(void) {
-  render_clock(s_clock, s_date);
+  render_clock_ex(s_clock, s_date, "%a %d %b", lv_set);
   { char c[48]; strncpy(c, geoip_city(), sizeof(c) - 1); c[sizeof(c) - 1] = 0;   // matches place[48] (issue #54)
     for (char* p = c; *p; ++p) *p = (char)tolower((unsigned char)*p);   // calm lane is lowercase
     lv_label_set_text(s_city, c); }

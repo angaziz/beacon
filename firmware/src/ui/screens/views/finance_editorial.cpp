@@ -1,5 +1,6 @@
 #include "ui/screen.h"
 #include "ui/screens/screen_common.h"
+#include "ui/screens/views/view_common.h"
 #include "ui/fmt.h"
 #include "core/datastore.h"
 
