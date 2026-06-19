@@ -125,9 +125,13 @@ final class TickerSearch {
 
     private func writeCache(_ data: Data) {
         guard let url = cacheURL else { return }
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
-                                                 withIntermediateDirectories: true)
-        try? data.write(to: url, options: .atomic)
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                     withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            FileHandle.standardError.write(Data("[beacon-hub] Binance cache write failed: \(error.localizedDescription)\n".utf8))
+        }
     }
 }
 

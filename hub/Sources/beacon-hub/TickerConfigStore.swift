@@ -23,8 +23,11 @@ final class TickerConfigStore {
 
     func save(rows: [TickerRow]) {
         current = current.updating(rows: rows)
-        if let data = try? JSONEncoder().encode(current) {
+        do {
+            let data = try JSONEncoder().encode(current)
             defaults.set(data, forKey: Self.key)
+        } catch {
+            FileHandle.standardError.write(Data("[beacon-hub] ticker config encode failed (not persisted): \(error.localizedDescription)\n".utf8))
         }
     }
 }

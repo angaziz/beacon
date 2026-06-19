@@ -187,9 +187,18 @@ final class ClaudeCodeBridge {
 
     private func writePortFile(_ p: UInt16) {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".beacon-hub")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            FileHandle.standardError.write(Data("[beacon-hub] failed to create ~/.beacon-hub: \(error.localizedDescription)\n".utf8))
+            return
+        }
         let file = dir.appendingPathComponent("port")
-        try? "\(p)\n".data(using: .utf8)?.write(to: file)
+        do {
+            try "\(p)\n".data(using: .utf8)?.write(to: file)
+        } catch {
+            FileHandle.standardError.write(Data("[beacon-hub] failed to write port file: \(error.localizedDescription)\n".utf8))
+        }
     }
 
     // --- connection handling ---
@@ -203,7 +212,10 @@ final class ClaudeCodeBridge {
     private func readRequest(_ conn: NWConnection, buffer: Data) {
         conn.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
             guard let self else { return }
-            if let error = error { _ = error; conn.cancel(); return }
+            if let error = error {
+                FileHandle.standardError.write(Data("[beacon-hub] connection read error: \(error.localizedDescription)\n".utf8))
+                conn.cancel(); return
+            }
             var buf = buffer
             if let data = data { buf.append(data) }
 

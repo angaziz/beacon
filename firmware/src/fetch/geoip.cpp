@@ -36,8 +36,11 @@ data_err_t fetch_geoip(void) {
   char path[112];
   snprintf(path, sizeof(path),
            "/data/reverse-geocode-client?latitude=%.4f&longitude=%.4f&localityLanguage=en", lat, lon);
-  if (net_https_get("api.bigdatacloud.net", path, hk, hv, 1, fetch_scratch(), fetch_scratch_cap(), &status) == ERR_NONE)
+  data_err_t rgeo = net_https_get("api.bigdatacloud.net", path, hk, hv, 1, fetch_scratch(), fetch_scratch_cap(), &status);
+  if (rgeo == ERR_NONE)
     parse_bdc_city(fetch_scratch(), strlen(fetch_scratch()), city, sizeof(city));
+  else
+    LOGW("reverse geocode failed err=%d; using area only", (int)rgeo);
 
   // "Area, City" => e.g. "Suka Asih, Bandung". Never the province; collapse "X, X" duplicates.
   char name[48] = "";
