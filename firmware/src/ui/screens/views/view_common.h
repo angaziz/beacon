@@ -5,7 +5,6 @@
 #include <time.h>
 #include "core/timekeep.h"
 #include "core/records.h"
-#include "config/ticker_table.h"
 
 // Clock + date from the time service (FR-HOME-3). `set` writes text to the label
 // (lv_label_set_text or diff-aware txt_set). `date_fmt` is a strftime pattern;
@@ -24,16 +23,8 @@ static inline void render_clock_ex(lv_obj_t* clock_lbl, lv_obj_t* date_lbl,
 
 static inline void lv_set(lv_obj_t* l, const char* s) { lv_label_set_text(l, s); }
 
-// Human-readable ticker name for slot i. Result is consumed immediately by the
-// caller's label setter (which copies). Core-1 render thread only.
-static inline const char* fin_name(int i, const finance_rec_t& r) {
-  static ticker_runtime_t _fn_tmp;
-  return ticker_table_get(i, &_fn_tmp) ? _fn_tmp.name : r.id;
-}
-
 // Status chip update: when the record is non-live, show the state chip (colored
-// down for severe states); otherwise show the battery chip via `live_fn`. Falls
-// back to a static `live_text` when `live_fn` is NULL.
+// down for severe states); otherwise show the battery chip.
 // Returns true if the chip is showing a non-live state.
 #include "ui/state_view.h"
 #include "ui/theme.h"
