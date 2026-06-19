@@ -19,7 +19,7 @@ Five screens, navigated by swipe + motion gestures:
 | Screen | Shows | Source |
 |---|---|---|
 | Home | clock, date, weather, humidity | WiFi (direct) |
-| Finance | FX->IDR, crypto, indices, ETFs — curated from the Mac hub | WiFi (direct) |
+| Finance | FX, crypto, indices, ETFs — curated from the Mac hub | WiFi (direct) |
 | AI Usage | Claude + Codex, **both** 5h and 7-day windows + reset | Mac hub (BLE) |
 | Coding Buddy | session state + approve/deny Claude tool-permission prompts | Mac hub (BLE) |
 | Settings | WiFi, brightness, theme picker, sleep, etc. | local (NVS) |
@@ -27,7 +27,7 @@ Five screens, navigated by swipe + motion gestures:
 ## What works today
 
 - **All five screens render on-device** in 7 bespoke per-theme layouts (35 views), with an honest screen-state model: a value is shown as loading / live / stale / offline — never a guess dressed up as live data.
-- **Home + Finance run on live data** over WiFi: NTP/RTC time, Open-Meteo weather (auto-located by IP), FX->IDR / BTC / indices.
+- **Home + Finance run on live data** over WiFi: NTP/RTC time, Open-Meteo weather (auto-located by IP), FX / BTC / indices.
 - **Markets are curated from the hub, no re-flashing** — search Binance + Yahoo in the macOS menubar app, pick your tickers, and they push to the device over BLE and apply instantly (persisted on-device, no reboot, no code change). The device keeps fetching prices itself over WiFi.
 - **WiFi setup happens on-device** — the device opens a hotspot with a captive portal; no credentials are ever compiled into the firmware. Multiple networks are remembered.
 - **AI Usage is live over Bluetooth**: the macOS hub reads Claude Code + Codex usage and streams it to the device over a bonded BLE link, alongside the device's own WiFi plane.
