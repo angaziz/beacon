@@ -80,8 +80,10 @@ static void update(void) {
       txt_color(s_approve, t->ink_dim);
       break;
     default: {
-      char eb[32];
-      snprintf(eb, sizeof(eb), "PERMISSION -- APPROVE? %us", (unsigned)buddy_prompt_secs_left(&b, uptime_s()));
+      char badge[16]; buddy_queue_badge(b.prompt.queue_len, badge, sizeof(badge));
+      char eb[48];
+      snprintf(eb, sizeof(eb), "PERMISSION -- APPROVE?%s %us",
+               badge, (unsigned)buddy_prompt_secs_left(&b, uptime_s()));
       txt_set(s_kicker, eb);
       txt_color(s_kicker, t->accent);
       txt_set(s_deny, "< DENY");

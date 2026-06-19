@@ -30,7 +30,10 @@ public struct BuddyPrompt: Codable, Equatable {
     public var id: String
     public var tool: String
     public var hint: String
-    public init(id: String, tool: String, hint: String) { self.id = id; self.tool = tool; self.hint = hint }
+    public var qlen: Int?   // total pending prompts incl. this front one; nil/<=1 => lone prompt (omitted)
+    public init(id: String, tool: String, hint: String, qlen: Int? = nil) {
+        self.id = id; self.tool = tool; self.hint = hint; self.qlen = qlen
+    }
 }
 
 public struct BuddyState: Codable, Equatable {

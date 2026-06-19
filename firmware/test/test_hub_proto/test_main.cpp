@@ -1,4 +1,5 @@
 #include <unity.h>
+#include <stdio.h>
 #include <string.h>
 #include "core/hub_proto.h"
 
@@ -146,6 +147,13 @@ static void test_parse_new_prompt_resets_decision(void) {
   b.prompt.present = true; strcpy(b.prompt.id, "p7"); b.prompt.decision_state = PROMPT_PENDING;
   TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
   TEST_ASSERT_EQUAL_UINT8(PROMPT_IDLE_DECISION, b.prompt.decision_state);
+
+  // queue advance: front p1 (qlen 2) -> next p2 (lone) resets decision_state and drops the badge
+  const char* nxt = "{\"v\":1,\"buddy\":{\"prompt\":{\"id\":\"p2\",\"tool\":\"Write\",\"hint\":\"b\"}}}";
+  hub_parse_status(nxt, strlen(nxt), &u, &hu, &b, &hb);
+  TEST_ASSERT_EQUAL_STRING("p2", b.prompt.id);
+  TEST_ASSERT_EQUAL_UINT8(PROMPT_IDLE_DECISION, b.prompt.decision_state);
+  TEST_ASSERT_EQUAL_UINT8(1, b.prompt.queue_len);
 }
 
 static void test_parse_truncates_long_strings(void) {
@@ -336,6 +344,39 @@ static void test_apply_ack_not_pending_ignored(void) {
   TEST_ASSERT_TRUE(b.prompt.present);
 }
 
+// ===== qlen / queue_len =====
+
+static void test_parse_prompt_qlen(void) {
+  const char* j = "{\"v\":1,\"buddy\":{\"prompt\":"
+                  "{\"id\":\"p1\",\"tool\":\"Bash\",\"hint\":\"ls\",\"qlen\":3}}}";
+  usage_rec_t u{}; buddy_rec_t b{}; bool hu=false, hb=false;
+  TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
+  TEST_ASSERT_TRUE(b.prompt.present);
+  TEST_ASSERT_EQUAL_UINT8(3, b.prompt.queue_len);
+}
+
+static void test_parse_prompt_qlen_absent_defaults_one(void) {
+  const char* j = "{\"v\":1,\"buddy\":{\"prompt\":"
+                  "{\"id\":\"p1\",\"tool\":\"Bash\",\"hint\":\"ls\"}}}";
+  usage_rec_t u{}; buddy_rec_t b{}; bool hu=false, hb=false;
+  TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
+  TEST_ASSERT_EQUAL_UINT8(1, b.prompt.queue_len);
+}
+
+static void test_parse_prompt_qlen_clamps_out_of_range(void) {
+  usage_rec_t u{}; buddy_rec_t b{}; bool hu=false, hb=false;
+  struct { const char* qlen; uint8_t want; } cases[] = {
+      {"0", 1}, {"-3", 1}, {"256", 255}, {"1000", 255}, {"2", 2},
+  };
+  for (auto& c : cases) {
+    char j[128];
+    snprintf(j, sizeof(j),
+        "{\"v\":1,\"buddy\":{\"prompt\":{\"id\":\"p1\",\"tool\":\"B\",\"hint\":\"h\",\"qlen\":%s}}}", c.qlen);
+    TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
+    TEST_ASSERT_EQUAL_UINT8(c.want, b.prompt.queue_len);
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_reassemble_single_frame);
@@ -367,5 +408,8 @@ int main(int, char**) {
   RUN_TEST(test_apply_ack_err_keeps_prompt);
   RUN_TEST(test_apply_ack_mismatched_id_ignored);
   RUN_TEST(test_apply_ack_not_pending_ignored);
+  RUN_TEST(test_parse_prompt_qlen);
+  RUN_TEST(test_parse_prompt_qlen_absent_defaults_one);
+  RUN_TEST(test_parse_prompt_qlen_clamps_out_of_range);
   return UNITY_END();
 }

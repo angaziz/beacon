@@ -3,6 +3,7 @@
 // => recent entries or "idle". Decide routes through buddy_decide; the prompt waits on the hub ack
 // and clears only on ok:true, else warns "too late" with a dismiss. Grid/reticle drawn by chrome.
 #include "ui/screen.h"
+#include "ui/screens/screen_common.h"
 #include "ui/styles.h"
 #include "ui/state_view.h"
 #include "ui/theme.h"
@@ -176,8 +177,10 @@ static void update(void) {
       lv_obj_clear_flag(s_approve, LV_OBJ_FLAG_CLICKABLE);
       break;
     default: {
-      char eb[32];
-      snprintf(eb, sizeof(eb), "PERMISSION - APPROVE? %us", (unsigned)buddy_prompt_secs_left(&r, uptime_s()));
+      char badge[16]; buddy_queue_badge(r.prompt.queue_len, badge, sizeof(badge));
+      char eb[48];
+      snprintf(eb, sizeof(eb), "PERMISSION - APPROVE?%s %us",
+               badge, (unsigned)buddy_prompt_secs_left(&r, uptime_s()));
       lv_label_set_text(s_eyebrow, eb);
       lv_obj_set_style_text_color(s_eyebrow, t->accent, 0);
       lv_label_set_text(s_deny, "< DENY");

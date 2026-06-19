@@ -1,4 +1,15 @@
 #pragma once
+#include <stdio.h>
+#include <stdint.h>
+#include <stddef.h>
+
+// Render the queue-position badge for the buddy prompt eyebrow: " (1 of N)" when queue_len>1, else "".
+static inline void buddy_queue_badge(uint8_t queue_len, char* out, size_t cap) {
+  if (queue_len > 1) snprintf(out, cap, " (1 of %u)", (unsigned)queue_len);
+  else if (cap) out[0] = '\0';
+}
+
+#if !BEACON_NATIVE
 #include <lvgl.h>
 #include <Arduino.h>
 #include <string.h>
@@ -101,3 +112,5 @@ static inline lv_obj_t* build_header(lv_obj_t* page, const char* id) {
   lv_obj_align(slot, LV_ALIGN_TOP_RIGHT, -SAFE_INSET, SAFE_INSET);
   return slot;
 }
+
+#endif // !BEACON_NATIVE
