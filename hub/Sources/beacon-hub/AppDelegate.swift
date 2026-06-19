@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let forgetWindow = ForgetWindowController()
     private let location = LocationProvider()
     private let tickerStore = TickerConfigStore()   // desired ticker list + monotonic rev (issue #92)
+    private var reportAssembler = ReportAssembler()   // reassembles device->hub ticker report chunks (#105)
     private let tickerSearch = TickerSearch()        // Binance(cached) + Yahoo(live) discovery (issue #92 B4)
     private lazy var tickerEditor = TickerEditorWindowController(model: menubar.viewModel)
     private var binanceCandidates: [TickerCandidate] = []   // warmed-once cache for local Binance filtering
@@ -190,6 +191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // (re)connect frame carries the cached location fix (issue #54). Push the ticker config after
             // the full frame so a rebooted/re-bonded device re-syncs its list (issue #92).
             Task { @MainActor in
+                self?.reportAssembler.reset()   // discard any partial device report from a prior connection (#105)
                 self?.sendFullFrame(includeLocation: true)
                 self?.pushTickerConfig()
             }
@@ -251,9 +253,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard rev == tickerStore.current.rev else { break }
             menubar.setTickerSync(ok ? .synced(count ?? tickerStore.current.rows.count)
                                      : .error(err ?? "rejected"))
-        case .report:
-            // Reassembly handled in a later task (issue #105); parsed frame is dropped here for now.
-            break
+        case .report(_, _, _, _, _):
+            switch reportAssembler.feed(cmd) {
+            case .assembled(let rows): adoptDeviceReport(rows)
+            case .pending, .dropped:   break
+            }
         }
     }
 
@@ -371,6 +375,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tickerStore.save(rows: rows)
         menubar.setTickerRows(tickerStore.current.rows)
         pushTickerConfig()
+    }
+
+    // Adopt the device's reported ticker list on a fresh pairing (issue #105): only when our store is
+    // pristine (rev 0, no rows) -- otherwise the hub stays the source of truth and its onReady push
+    // reconciles the device. Persist (rev 0 -> 1) + refresh the panel; do NOT push back (the device
+    // already has this list -- pushing would be a pointless echo).
+    private func adoptDeviceReport(_ rows: [TickerRow]) {
+        guard tickerStore.current.isPristine else { return }
+        tickerStore.save(rows: rows)
+        menubar.setTickerRows(tickerStore.current.rows)
+        menubar.setTickerSync(.synced(tickerStore.current.rows.count))
     }
 
     // Push the current desired list as ordered chunk frames. Skip when not connected or the list is empty
