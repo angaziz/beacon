@@ -1,7 +1,7 @@
 import XCTest
 @testable import BeaconHubKit
 
-final class UsageNormalizerTests: XCTestCase {
+final class UsageNormalizerEdgeCaseTests: XCTestCase {
 
     // MARK: - Claude
 
