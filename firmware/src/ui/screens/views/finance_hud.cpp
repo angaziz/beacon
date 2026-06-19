@@ -3,6 +3,7 @@
 #include "ui/state_view.h"
 #include "ui/theme.h"
 #include "ui/fmt.h"
+#include "ui/screens/views/view_common.h"
 #include "config/layout.h"
 #include "ui/screens/screen_common.h"
 #include "core/datastore.h"

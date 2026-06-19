@@ -1,21 +1,9 @@
 #include "ui/screen.h"
 #include "ui/screens/screen_common.h"
+#include "ui/screens/views/view_common.h"
 #include "core/datastore.h"
-#include "core/timekeep.h"
-#include <time.h>
-#include <ctype.h>
 
 static lv_obj_t *s_slot, *s_clock, *s_date, *s_temp, *s_hum;
-
-// Clock + date from the time service. RTC time is always "live" (FR-HOME-3); show "--" until known.
-static void render_clock(lv_obj_t* clock, lv_obj_t* date) {
-  if (!timekeep_has_time()) { txt_set(clock, "--:--"); txt_set(date, "--"); return; }
-  struct tm lt; timekeep_localtime(&lt);
-  char hm[8];  strftime(hm, sizeof(hm), "%H:%M", &lt);            txt_set(clock, hm);
-  char dt[24]; strftime(dt, sizeof(dt), "%a %d %b", &lt);
-  for (char* p = dt; *p; ++p) *p = (char)toupper((unsigned char)*p);
-  txt_set(date, dt);
-}
 
 static void build(lv_obj_t* page) {
   s_slot = build_header(page, "HOME");
@@ -37,7 +25,7 @@ static void build(lv_obj_t* page) {
 }
 
 static void update(void) {
-  render_clock(s_clock, s_date);
+  render_clock_ex(s_clock, s_date, "%a %d %b", txt_set);
   weather_rec_t w = ds_get_weather(); uint32_t now = now_s();
   slot_set(s_slot, "Wnn . --", &w.hdr, now);
   if (sv_placeholder(w.hdr.state)) { txt_set(s_temp, "--"); txt_set(s_hum, "--"); }

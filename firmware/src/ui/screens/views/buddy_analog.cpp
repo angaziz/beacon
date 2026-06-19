@@ -2,6 +2,7 @@
 #include "ui/styles.h"
 #include "ui/state_view.h"
 #include "ui/theme.h"
+#include "ui/screens/views/view_common.h"
 #include "config/layout.h"
 #include "core/datastore.h"
 #include "core/hub_task.h"
@@ -138,9 +139,7 @@ static void update(void) {
   bool ph = sv_placeholder(r.hdr.state);
   char sb[64];
   if (ph) snprintf(sb, sizeof(sb), "- run . - wait . --k tok . ctx --%%");
-  else snprintf(sb, sizeof(sb), "%u run . %u wait . %uk tok . ctx %u%%",
-                (unsigned)r.running, (unsigned)r.waiting,
-                (unsigned)(r.tokens / 1000), (unsigned)r.context_pct);
+  else buddy_stats_fmt(sb, sizeof(sb), &r, false);
   lv_label_set_text(s_stat, sb);
 
   show_prompt(r.prompt.present);
