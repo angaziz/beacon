@@ -147,6 +147,13 @@ static void test_parse_new_prompt_resets_decision(void) {
   b.prompt.present = true; strcpy(b.prompt.id, "p7"); b.prompt.decision_state = PROMPT_PENDING;
   TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
   TEST_ASSERT_EQUAL_UINT8(PROMPT_IDLE_DECISION, b.prompt.decision_state);
+
+  // queue advance: front p1 (qlen 2) -> next p2 (lone) resets decision_state and drops the badge
+  const char* nxt = "{\"v\":1,\"buddy\":{\"prompt\":{\"id\":\"p2\",\"tool\":\"Write\",\"hint\":\"b\"}}}";
+  hub_parse_status(nxt, strlen(nxt), &u, &hu, &b, &hb);
+  TEST_ASSERT_EQUAL_STRING("p2", b.prompt.id);
+  TEST_ASSERT_EQUAL_UINT8(PROMPT_IDLE_DECISION, b.prompt.decision_state);
+  TEST_ASSERT_EQUAL_UINT8(1, b.prompt.queue_len);
 }
 
 static void test_parse_truncates_long_strings(void) {
