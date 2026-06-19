@@ -80,6 +80,39 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil(DeviceCommand.parse(Data("garbage".utf8)))
     }
 
+    func testParseReportChunk() {
+        let json = #"""
+        {"v":1,"cmd":"report","what":"tickers","rev":0,"part":0,"parts":2,"tickers":[\#
+        {"id":"bz_btcusdt","src":"binance","sym":"BTCUSDT","name":"BTC","kind":"crypto","cadence":60,"stale":600,"basis":"24h"}]}
+        """#
+        guard case let .report(what, rev, part, parts, rows) = DeviceCommand.parse(Data(json.utf8)) else {
+            return XCTFail("expected .report")
+        }
+        XCTAssertEqual(what, "tickers")
+        XCTAssertEqual(rev, 0)
+        XCTAssertEqual(part, 0)
+        XCTAssertEqual(parts, 2)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0], TickerRow(id: "bz_btcusdt", src: .binance, sym: "BTCUSDT", name: "BTC",
+                                          kind: .crypto, cadence: 60, stale: 600, basis: .h24))
+    }
+
+    func testParseReportRejectsBadWhatOrParts() {
+        // unknown `what`
+        XCTAssertNil(DeviceCommand.parse(Data(#"{"v":1,"cmd":"report","what":"weather","rev":0,"part":0,"parts":1,"tickers":[]}"#.utf8)))
+        // part out of range
+        XCTAssertNil(DeviceCommand.parse(Data(#"{"v":1,"cmd":"report","what":"tickers","rev":0,"part":2,"parts":2,"tickers":[]}"#.utf8)))
+        // parts <= 0
+        XCTAssertNil(DeviceCommand.parse(Data(#"{"v":1,"cmd":"report","what":"tickers","rev":0,"part":0,"parts":0,"tickers":[]}"#.utf8)))
+        // malformed row (bad enum)
+        XCTAssertNil(DeviceCommand.parse(Data(#"{"v":1,"cmd":"report","what":"tickers","rev":0,"part":0,"parts":1,"tickers":[{"id":"x","src":"nope","sym":"X","name":"X","kind":"fx","cadence":1,"stale":1,"basis":"24h"}]}"#.utf8)))
+        // empty id
+        XCTAssertNil(DeviceCommand.parse(Data(#"{"v":1,"cmd":"report","what":"tickers","rev":0,"part":0,"parts":1,"tickers":[{"id":"","src":"yahoo","sym":"X","name":"X","kind":"fx","cadence":1,"stale":1,"basis":"24h"}]}"#.utf8)))
+        // id over 15-byte cap
+        let longId = String(repeating: "z", count: 16)
+        XCTAssertNil(DeviceCommand.parse(Data(#"{"v":1,"cmd":"report","what":"tickers","rev":0,"part":0,"parts":1,"tickers":[{"id":"\#(longId)","src":"yahoo","sym":"X","name":"X","kind":"fx","cadence":1,"stale":1,"basis":"24h"}]}"#.utf8)))
+    }
+
     func testPermissionHookResponseShapePerEvent() throws {
         // PreToolUse uses permissionDecision; PermissionRequest uses decision.behavior. A wrong shape
         // means CC ignores the decision and the device's approve/deny never gates the tool.

@@ -251,6 +251,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard rev == tickerStore.current.rev else { break }
             menubar.setTickerSync(ok ? .synced(count ?? tickerStore.current.rows.count)
                                      : .error(err ?? "rejected"))
+        case .report:
+            // Reassembly handled in a later task (issue #105); parsed frame is dropped here for now.
+            break
         }
     }
 
