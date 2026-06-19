@@ -17,4 +17,8 @@ public struct TickerConfigState: Codable, Equatable {
     public func updating(rows: [TickerRow]) -> TickerConfigState {
         TickerConfigState(rows: rows, rev: rev == .max ? .max : rev + 1)
     }
+
+    // A never-configured store: still at the seed rev with no rows. A fresh hub adopts a device report
+    // only when pristine; once the user has edited (rev > 0) the hub stays the source of truth (#105).
+    public var isPristine: Bool { rev == 0 && rows.isEmpty }
 }
