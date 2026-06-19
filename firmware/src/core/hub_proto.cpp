@@ -278,3 +278,76 @@ size_t hub_build_config_ack(char* buf, size_t cap, uint32_t rev, bool ok, const 
   else    doc["err"] = err ? err : "malformed";
   return finish_frame(doc, buf, cap);
 }
+
+// --- device -> hub ticker report (issue #105) ---
+#define REPORT_CHUNK_MAX 900   // mirror ConfigFrame maxBytes; margin under HUB_FRAME_MAX
+
+static const char* src_to_wire(ticker_source_t s) {
+  switch (s) { case SRC_BINANCE: return "binance"; case SRC_YAHOO: return "yahoo"; }
+  return NULL;
+}
+static const char* kind_to_wire(ticker_kind_t k) {
+  switch (k) {
+    case KIND_FX: return "fx"; case KIND_CRYPTO: return "crypto";
+    case KIND_INDEX: return "index"; case KIND_ETF: return "etf";
+  }
+  return NULL;
+}
+static const char* basis_to_wire(change_basis_t b) {
+  switch (b) { case CHG_PREV_CLOSE: return "prev_close"; case CHG_24H: return "24h"; }
+  return NULL;
+}
+
+size_t hub_build_report_frame(const ticker_runtime_t* rows, int lo, int hi,
+                              int part, int parts, char* buf, size_t cap) {
+  if (!rows || !buf || cap == 0) return 0;
+  if (parts <= 0 || part < 0 || part >= parts) return 0;            // bad chunk coordinates
+  if (lo < 0 || hi <= lo || hi > MAX_TICKERS) return 0;             // bad / out-of-bounds range
+  JsonDocument doc;
+  doc["v"]    = 1;
+  doc["cmd"]  = "report";
+  doc["what"] = "tickers";
+  doc["rev"]  = 0;
+  doc["part"] = part;
+  doc["parts"] = parts;
+  JsonArray arr = doc["tickers"].to<JsonArray>();
+  for (int i = lo; i < hi; i++) {
+    const char* src   = src_to_wire(rows[i].source);
+    const char* kind  = kind_to_wire(rows[i].kind);
+    const char* basis = basis_to_wire(rows[i].change_basis);
+    if (!src || !kind || !basis) return 0;          // unmappable enum => fail closed (all-or-zero)
+    JsonObject o = arr.add<JsonObject>();
+    o["id"]      = rows[i].id;
+    o["src"]     = src;
+    o["sym"]     = rows[i].symbol;
+    o["name"]    = rows[i].name;
+    o["kind"]    = kind;
+    o["cadence"] = rows[i].cadence_s;
+    o["stale"]   = rows[i].stale_s;
+    o["basis"]   = basis;
+  }
+  return finish_frame(doc, buf, cap);
+}
+
+int hub_report_plan(const ticker_runtime_t* rows, int count, int group_start[MAX_TICKERS]) {
+  if (!rows || !group_start || count < 1 || count > MAX_TICKERS) return 0;
+  // Measure with worst-case header digits: parts=count AND part=count-1 (the real part/parts are both
+  // <= these, so a group that fits the measurement still fits when re-serialized with the real values).
+  const int wp = count - 1;
+  int groups = 0, lo = 0;
+  for (int i = 0; i < count; i++) {
+    char tmp[HUB_FRAME_MAX];
+    size_t n = hub_build_report_frame(rows, lo, i + 1, wp, count, tmp, sizeof(tmp));
+    // n==0 when the probe overflowed HUB_FRAME_MAX (definitely >REPORT_CHUNK_MAX) or an enum error.
+    // Both are treated as "over budget" — the split logic below disambiguates the i==lo failure.
+    bool over = (n == 0 || n > REPORT_CHUNK_MAX);
+    if (!over) continue;                             // row i still fits the current group
+    if (i == lo) return 0;                          // a single row alone exceeds the budget (or enum error)
+    group_start[groups++] = lo;                     // close [lo..i)
+    lo = i;                                          // row i opens a new group
+    size_t n2 = hub_build_report_frame(rows, lo, i + 1, wp, count, tmp, sizeof(tmp));
+    if (n2 == 0 || n2 > REPORT_CHUNK_MAX) return 0; // row i alone over budget
+  }
+  group_start[groups++] = lo;                       // final open group
+  return groups;
+}
