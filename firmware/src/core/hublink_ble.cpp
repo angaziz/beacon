@@ -142,6 +142,23 @@ bool HubLinkBle::send(const char* json, size_t len) {
   return xStreamBufferSend(s_out, json, len, 0) == len;
 }
 
+// Drain the outbound buffer over notify, chunked to the negotiated ATT payload (MTU - 3) so a multi-
+// chunk frame needs far fewer notify() calls (see HUB_TX_CHUNK_* above); falls back to the ATT-default
+// payload until the central upgrades the MTU. Runs on the Core-0 pump task (loop() and on_frame both do),
+// so a frame handler may call it between sends to keep s_out from overflowing (#106). Not for Core-1.
+void HubLinkBle::flush() {
+  if (!s_connected || !s_tx) return;
+  uint16_t mtu = s_server ? s_server->getPeerMTU(s_server->getConnId()) : 0;
+  size_t cap = (mtu > 23) ? (size_t)(mtu - 3) : HUB_TX_CHUNK_MIN;
+  if (cap > HUB_TX_CHUNK_MAX) cap = HUB_TX_CHUNK_MAX;
+  uint8_t chunk[HUB_TX_CHUNK_MAX];
+  size_t n;
+  while ((n = xStreamBufferReceive(s_out, chunk, cap, 0)) > 0) {
+    s_tx->setValue(chunk, n);
+    s_tx->notify();
+  }
+}
+
 void HubLinkBle::loop() {
   if (!s_inited) return;
 
@@ -151,17 +168,5 @@ void HubLinkBle::loop() {
   while ((n = xStreamBufferReceive(s_in, tmp, sizeof(tmp), 0)) > 0)
     hub_reassembler_feed(&s_reasm, (const char*)tmp, n, reasm_emit, nullptr);
 
-  // Outbound: notify queued command/frame bytes while connected, chunked to the negotiated ATT payload
-  // (MTU - 3) so a multi-chunk frame needs far fewer notify() calls (see HUB_TX_CHUNK_* above). Falls
-  // back to the ATT-default payload until the central upgrades the MTU.
-  if (s_connected && s_tx) {
-    uint16_t mtu = s_server ? s_server->getPeerMTU(s_server->getConnId()) : 0;
-    size_t cap = (mtu > 23) ? (size_t)(mtu - 3) : HUB_TX_CHUNK_MIN;
-    if (cap > HUB_TX_CHUNK_MAX) cap = HUB_TX_CHUNK_MAX;
-    uint8_t chunk[HUB_TX_CHUNK_MAX];
-    while ((n = xStreamBufferReceive(s_out, chunk, cap, 0)) > 0) {
-      s_tx->setValue(chunk, n);
-      s_tx->notify();
-    }
-  }
+  flush();   // Outbound: notify queued command/frame bytes while connected.
 }

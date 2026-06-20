@@ -1,6 +1,7 @@
 #include "core/hub_task.h"
 #include "core/hublink_ble.h"
 #include "core/hub_proto.h"
+#include "core/hub_report.h"
 #include "core/datastore.h"
 #include "core/location.h"
 #include "core/timekeep.h"
@@ -40,11 +41,11 @@ static void send_config_ack(uint32_t rev, bool ok, const char* err, int count) {
   LOGI("hub: config_ack rev=%u ok=%d err=%s count=%d", (unsigned)rev, ok, err ? err : "", count);
 }
 
-// Emit the device's current ticker table to the hub as chunked cmd:"report" frames (issue #105), so a
-// fresh hub can adopt the list it already holds. One-way (no ack). Plans once, then serializes+sends one
-// HUB_FRAME_MAX frame at a time. Returns true only if EVERY chunk was accepted by the link: a mid-stream
-// send failure (queue full) returns false so the caller does NOT latch s_reported and retries on the next
-// inbound frame this connection -- a retry re-sends part 0, which restarts the hub accumulator (the hub
+// Snapshot the device's current ticker table and emit it to the hub as chunked cmd:"report" frames so a
+// fresh hub can adopt the list it already holds (issue #105). The chunk serialize/flush/send loop lives in
+// hub_emit_report (host-tested, issue #106). Returns true only if EVERY chunk was accepted: a mid-stream
+// failure returns false so the caller does NOT latch s_reported and retries the whole report on the next
+// inbound frame this connection -- a retry restarts at part 0, which restarts the hub accumulator (the hub
 // adopts only on the final part, so a partial delivery never half-adopts). g_link null (native) => true.
 static bool send_ticker_report(void) {
   if (!g_link) return true;
@@ -54,16 +55,8 @@ static bool send_ticker_report(void) {
   for (int i = 0; i < count; i++) {
     if (!ticker_table_get(i, &rows[i])) return false;  // table shrank under us => retry next frame
   }
-  int gs[MAX_TICKERS];
-  int parts = hub_report_plan(rows, count, gs);
-  if (parts < 1) return true;                          // nothing emittable (e.g. unmappable enum) => don't spin
-  char buf[HUB_FRAME_MAX];
-  for (int p = 0; p < parts; p++) {
-    int lo = gs[p];
-    int hi = (p + 1 < parts) ? gs[p + 1] : count;
-    size_t n = hub_build_report_frame(rows, lo, hi, p, parts, buf, sizeof(buf));
-    if (!n || !g_link->send(buf, n)) return false;     // serialize/send failed => retry whole report later
-  }
+  int parts = hub_emit_report(g_link, rows, count);
+  if (parts < 0) return false;                         // serialize/enqueue failed => retry whole report later
   LOGI("hub: ticker report sent (%d rows, %d parts)", count, parts);
   return true;
 }

@@ -15,6 +15,7 @@ public:
   bool isConnected() override;
   void onFrame(hub_frame_cb cb) override; // status-frame handler (called from loop())
   bool send(const char* json, size_t len) override; // enqueue a device->hub command (copies)
+  void flush() override;                   // drain the outbound buffer over notify now; Core-0 only (#106)
   void loop() override;                   // pump from a Core-0 task
 };
 

@@ -21,5 +21,10 @@ public:
   // (the hub acks separately, tech.md §7.1) — only reports local enqueue. The
   // implementation MUST copy `json` before returning; the caller may reuse/free it after.
   virtual bool send(const char* json, size_t len) = 0;
+  // Drain already-queued send() bytes to the transport NOW, rather than waiting for the next loop().
+  // A caller that enqueues several frames in one pass (e.g. the chunked ticker report, issue #106) calls
+  // this between frames so the bounded send buffer cannot overflow. No-op by default; only a buffering
+  // transport overrides it. Like loop()/the drain, this must run on the Core-0 pump task.
+  virtual void flush() {}
   virtual void loop() = 0;                    // pumped from a Core-0 task
 };
