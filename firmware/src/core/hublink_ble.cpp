@@ -21,9 +21,14 @@
 #define NUS_RX  "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 #define NUS_TX  "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
-// Outbound notify chunk. ATT default MTU is 23 => 20 payload bytes; correct for any negotiated MTU
-// (the hub reassembles on '\n' regardless). Raise once MTU 247 is confirmed on hardware (P2-A).
-#define HUB_TX_CHUNK 20
+// Outbound notify chunking. We size each notify to the negotiated ATT payload (MTU - 3) at send time,
+// not a fixed 20 B: a fixed 20 B forces ~65 back-to-back notify() calls for a large frame (e.g. the
+// #105 ticker report), which overruns the controller's notify buffer under WiFi+BLE coexistence and
+// silently drops/corrupts chunks. MTU-sized chunks cut that to a handful. HUB_TX_CHUNK_MIN is the safe
+// ATT-default payload used until the central upgrades the MTU; HUB_TX_CHUNK_MAX bounds the on-stack
+// chunk buffer (247 MTU - 3). The hub reassembles on '\n' regardless of chunk size.
+#define HUB_TX_CHUNK_MIN 20
+#define HUB_TX_CHUNK_MAX 244
 #define HUB_SB_BYTES 2048   // inbound + outbound stream buffers
 
 static BLEServer*         s_server  = nullptr;
@@ -86,7 +91,7 @@ bool HubLinkBle::begin() {
   uint64_t mac = ESP.getEfuseMac();
   snprintf(name, sizeof(name), "Beacon-%04X", (unsigned)(mac & 0xFFFF));
   BLEDevice::init(name);
-  BLEDevice::setMTU(247);                       // request larger MTU (still chunk safely, HUB_TX_CHUNK)
+  BLEDevice::setMTU(247);                       // request larger MTU; loop() sizes notifies to the negotiated value
 
   // Security: LE Secure Connections + bonding. Default = MITM passkey (IO cap DisplayOnly); build with
   // -DHUBLINK_JUSTWORKS for the Just-Works fallback (still bonded + encrypted, no MITM) per D3.
@@ -146,10 +151,15 @@ void HubLinkBle::loop() {
   while ((n = xStreamBufferReceive(s_in, tmp, sizeof(tmp), 0)) > 0)
     hub_reassembler_feed(&s_reasm, (const char*)tmp, n, reasm_emit, nullptr);
 
-  // Outbound: notify queued command/frame bytes in safe chunks while connected.
+  // Outbound: notify queued command/frame bytes while connected, chunked to the negotiated ATT payload
+  // (MTU - 3) so a multi-chunk frame needs far fewer notify() calls (see HUB_TX_CHUNK_* above). Falls
+  // back to the ATT-default payload until the central upgrades the MTU.
   if (s_connected && s_tx) {
-    uint8_t chunk[HUB_TX_CHUNK];
-    while ((n = xStreamBufferReceive(s_out, chunk, sizeof(chunk), 0)) > 0) {
+    uint16_t mtu = s_server ? s_server->getPeerMTU(s_server->getConnId()) : 0;
+    size_t cap = (mtu > 23) ? (size_t)(mtu - 3) : HUB_TX_CHUNK_MIN;
+    if (cap > HUB_TX_CHUNK_MAX) cap = HUB_TX_CHUNK_MAX;
+    uint8_t chunk[HUB_TX_CHUNK_MAX];
+    while ((n = xStreamBufferReceive(s_out, chunk, cap, 0)) > 0) {
       s_tx->setValue(chunk, n);
       s_tx->notify();
     }
