@@ -1,4 +1,15 @@
 #pragma once
+#include <stdio.h>
+#include <stdint.h>
+#include <stddef.h>
+
+// Render the queue-position badge for the buddy prompt eyebrow: " (1 of N)" when queue_len>1, else "".
+static inline void buddy_queue_badge(uint8_t queue_len, char* out, size_t cap) {
+  if (queue_len > 1) snprintf(out, cap, " (1 of %u)", (unsigned)queue_len);
+  else if (cap) out[0] = '\0';
+}
+
+#if !BEACON_NATIVE
 #include <lvgl.h>
 #include <Arduino.h>
 #include <string.h>
@@ -9,6 +20,15 @@
 #include "ui/screen.h"
 #include "ui/theme.h"
 #include "core/nvs.h"
+#include "config/ticker_table.h"
+
+// Human-readable ticker name for slot i. Result points into a function-local static and is
+// valid only until the next call — callers must consume it immediately (lv_label_set_text
+// copies). Core-1 render thread only; never store the returned pointer.
+static inline const char* fin_name(int i, const finance_rec_t& r) {
+  static ticker_runtime_t t;
+  return ticker_table_get(i, &t) ? t.name : r.id;
+}
 
 // Diff-aware setters (#60). LVGL 8 reallocs+invalidates on every lv_label_set_text and refreshes+
 // invalidates on every lv_obj_set_style_* / lv_bar_set_value regardless of whether the value changed,
@@ -92,3 +112,5 @@ static inline lv_obj_t* build_header(lv_obj_t* page, const char* id) {
   lv_obj_align(slot, LV_ALIGN_TOP_RIGHT, -SAFE_INSET, SAFE_INSET);
   return slot;
 }
+
+#endif // !BEACON_NATIVE

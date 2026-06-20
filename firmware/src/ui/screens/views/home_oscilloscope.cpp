@@ -4,13 +4,11 @@
 #include "ui/state_view.h"
 #include "ui/theme.h"
 #include "ui/batt_chip.h"
+#include "ui/screens/views/view_common.h"
 #include "config/layout.h"
 #include "core/datastore.h"
-#include "core/timekeep.h"
 #include <Arduino.h>
 #include <math.h>
-#include <time.h>
-#include <ctype.h>
 
 // Oscilloscope / Signal HOME. Chrome (graticule + center axis) is drawn by the carousel.
 // Scope header (CH1 . 50ms/DIV | BAT chip), big phosphor clock, a glowing sine WAVEFORM
@@ -23,16 +21,6 @@ static lv_obj_t *s_wave;
 static lv_obj_t *s_temp, *s_humid, *s_sky;
 
 static void update(void);
-
-// Clock + date from the time service. RTC time is always "live" (FR-HOME-3); show "--" until known.
-static void render_clock(lv_obj_t* clock, lv_obj_t* date) {
-  if (!timekeep_has_time()) { txt_set(clock, "--:--"); txt_set(date, "--"); return; }
-  struct tm lt; timekeep_localtime(&lt);
-  char hm[8];  strftime(hm, sizeof(hm), "%H:%M", &lt);            txt_set(clock, hm);
-  char dt[24]; strftime(dt, sizeof(dt), "%a %d %b", &lt);
-  for (char* p = dt; *p; ++p) *p = (char)toupper((unsigned char)*p);
-  txt_set(date, dt);
-}
 
 static void wave_cb(lv_event_t* e) {
   lv_obj_t* o = lv_event_get_target(e);
@@ -133,20 +121,11 @@ static void build(lv_obj_t* page) {
 
 static void update(void) {
   const beacon_theme_t* t = theme_active(); if (!t) return;
-  render_clock(s_clock, s_date);
+  render_clock_ex(s_clock, s_date, "%a %d %b", txt_set);
   weather_rec_t w = ds_get_weather();
   uint32_t now = now_s();
 
-  char chip[24];
-  if (sv_status(chip, sizeof(chip), &w.hdr, now)) {
-    txt_set(s_trig, chip);
-    txt_color(s_trig, sv_severe(w.hdr.state) ? t->down : t->ink_dim);
-  } else {
-    char bv[12]; lv_color_t bc = batt_chip(bv, sizeof(bv), true, t);
-    char out[20]; snprintf(out, sizeof(out), "BAT . %s", bv);
-    txt_set(s_trig, out);
-    txt_color(s_trig, bc);
-  }
+  status_chip_update(s_trig, &w.hdr, now, t, true, "BAT . ", txt_set);
 
   bool ph = sv_placeholder(w.hdr.state);
   lv_color_t vc = sv_dim(w.hdr.state) ? t->ink_dim : t->ink;

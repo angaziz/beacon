@@ -1,5 +1,6 @@
 #include "core/nvs.h"
 #include "core/ds_lock.h"
+#include "util/log.h"
 #include <Preferences.h>
 #include <string.h>
 
@@ -13,7 +14,11 @@ static ds_lock_t   s_wifi_lock;
 static volatile bool s_wifi_dirty = false;
 static bool        s_wifi_open = false;
 
-void nvs_begin(void) { s_open = s_prefs.begin("beacon", false); nvs_wifi_begin(); }
+void nvs_begin(void) {
+  s_open = s_prefs.begin("beacon", false);
+  if (!s_open) LOGE("nvs begin failed (Preferences)");
+  nvs_wifi_begin();
+}
 
 static void wifi_save_locked(void) { s_prefs.putBytes("wnets", &s_wifi, sizeof(s_wifi)); }
 

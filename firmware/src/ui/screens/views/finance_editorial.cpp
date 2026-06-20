@@ -1,15 +1,8 @@
 #include "ui/screen.h"
 #include "ui/screens/screen_common.h"
+#include "ui/screens/views/view_common.h"
 #include "ui/fmt.h"
-#include "config/ticker_table.h"
 #include "core/datastore.h"
-
-// Human-readable ticker name for slot i. Result is consumed immediately by txt_set (it copies).
-// Core-1 render thread only.
-static const char* fin_name(int i, const finance_rec_t& r) {
-  static ticker_runtime_t t;
-  return ticker_table_get(i, &t) ? t.name : r.id;
-}
 
 #define MAX_ROWS 16
 static lv_obj_t* s_slot;

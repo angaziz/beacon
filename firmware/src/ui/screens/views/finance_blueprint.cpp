@@ -6,17 +6,11 @@
 #include "ui/state_view.h"
 #include "ui/theme.h"
 #include "ui/fmt.h"
+#include "ui/screens/views/view_common.h"
 #include "config/layout.h"
-#include "config/ticker_table.h"
+#include "ui/screens/screen_common.h"
 #include "core/datastore.h"
 #include <Arduino.h>
-
-// Human-readable ticker name for slot i. Result is consumed immediately by lv_label_set_text
-// (it copies). Core-1 render thread only.
-static const char* fin_name(int i, const finance_rec_t& r) {
-  static ticker_runtime_t t;
-  return ticker_table_get(i, &t) ? t.name : r.id;
-}
 
 #define MAX_ROWS 16
 

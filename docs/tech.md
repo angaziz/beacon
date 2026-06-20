@@ -164,7 +164,7 @@ Hub → device (status frame):
                 "codex": {"h5":{"pct":1,"reset":1717590000},"d7":{"pct":29,"reset":1717800000}}},
  "buddy":{"running":2,"waiting":1,"tokens":184502,"context_pct":42,
           "entries":["10:42 git push","10:41 yarn test"],
-          "prompt":{"id":"req_abc","tool":"Bash","hint":"rm -rf /tmp/build"}},
+          "prompt":{"id":"req_abc","tool":"Bash","hint":"rm -rf /tmp/build","qlen":2}},
  "loc":{"lat":-6.91,"lon":107.61,"tz":"Asia/Jakarta","name":"Sukajadi, Bandung"}}
 ```
 Optional `loc` block (additive `v:1` extension, issue #54): hub-sourced place name from macOS CoreLocation/CLGeocoder + tz from `TimeZone.current`. Independently optional (like `usage`/`buddy`); sent ONLY in the (re)connect full frame and a loc-only frame on meaningful (> ~0.01 deg) change — never on the 30s heartbeat. Device precedence: hub `loc` > cached NVS > IP geolocation; a hub fix is never overwritten by the IP path (`core/location`). Permission denied / no fix => `loc` is omitted and the device keeps the IP-based name.

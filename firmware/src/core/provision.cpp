@@ -65,24 +65,37 @@ static String page_html(void) {
     "<button type=submit>") + (s_runtime ? "Save" : "Save &amp; reboot") + String("</button></form>");
 }
 
-static void handle_root(void) { s_server.send(200, "text/html", page_html()); }
+// Add security headers before every HTML response: Cache-Control prevents the
+// browser from caching a page that carries the password field; nosniff blocks
+// MIME-type confusion. Minimal overhead for an embedded captive portal.
+static void send_html(int code, const String& body) {
+  s_server.sendHeader("Cache-Control", "no-store");
+  s_server.sendHeader("X-Content-Type-Options", "nosniff");
+  s_server.send(code, "text/html", body);
+}
+
+static void handle_root(void) { send_html(200, page_html()); }
 
 static void handle_save(void) {
   String ssid = s_server.arg("ssid");
   String pass = s_server.arg("pass");
-  if (ssid.length() == 0) { s_server.send(400, "text/html", "<h2>SSID required</h2>"); return; }
+  if (ssid.length() == 0) { send_html(400, "<h2>SSID required</h2>"); return; }
+  // IEEE 802.11 SSID max is 32 bytes; WPA2 credentials are either a passphrase
+  // (8-63 ASCII chars) or a 64-hex-char raw PSK. WIFI_PASS_CAP is 65 (64 + NUL).
+  if (ssid.length() > 32) { send_html(400, "<h2>SSID too long (32 char max)</h2>"); return; }
+  if (pass.length() > 64) { send_html(400, "<h2>Password too long (64 char max)</h2>"); return; }
   if (!nvs_wifi_add(ssid.c_str(), pass.c_str())) {   // append (dedup); creds never logged
-    s_server.send(200, "text/html", "<h2>Saved networks full</h2><p>Forget one on the device first.</p>");
+    send_html(200, "<h2>Saved networks full</h2><p>Forget one on the device first.</p>");
     return;
   }
   if (s_runtime) {   // on-demand add: NVS dirty flag is set; net applies it on teardown — no reboot
     LOGI("provision(runtime) saved ssid=%s; no reboot", ssid.c_str());
-    s_server.send(200, "text/html", "<h2>Saved.</h2><p>You can leave Beacon-setup now.</p>");
+    send_html(200, "<h2>Saved.</h2><p>You can leave Beacon-setup now.</p>");
     s_runtime_saved = true;   // UI polls this and tears the portal down via net_request_provision(false)
     return;
   }
   LOGI("provision saved ssid=%s; rebooting to STA", ssid.c_str());
-  s_server.send(200, "text/html", "<h2>Saved. Rebooting...</h2>");
+  send_html(200, "<h2>Saved. Rebooting...</h2>");
   s_restart_pending = true;
   s_restart_at = millis() + 1500;
 }
@@ -90,7 +103,7 @@ static void handle_save(void) {
 // Captive-portal catch-all: serve the form (200) for EVERY unhandled path. The OS connectivity probe
 // (captive.apple.com, generate_204, connecttest.txt) thus gets the portal instead of the expected
 // success page, so macOS/iOS/Android/Windows auto-open their captive login window.
-static void handle_notfound(void) { s_server.send(200, "text/html", page_html()); }
+static void handle_notfound(void) { send_html(200, page_html()); }
 
 // Register HTTP routes once: WebServer.on() appends a handler per call, so doing this on every runtime
 // open/close cycle would leak. Guarded so boot and runtime share one registration.

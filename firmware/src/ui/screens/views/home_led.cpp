@@ -3,28 +3,15 @@
 #include "ui/state_view.h"
 #include "ui/theme.h"
 #include "ui/batt_chip.h"
+#include "ui/screens/views/view_common.h"
 #include "config/layout.h"
 #include "core/datastore.h"
-#include "core/timekeep.h"
 #include <Arduino.h>
-#include <time.h>
-#include <ctype.h>
 
 // LED Matrix / HOME: lit amber dot-panel. Caps BEACON / BAT header, big lit clock,
 // weather temp + humidity centered. The amber dot grid bg is drawn by the carousel chrome.
 
 static lv_obj_t *s_status, *s_clock, *s_date, *s_temp, *s_humid;
-
-
-// Clock + date from the time service. RTC time is always "live" (FR-HOME-3); show "--" until known.
-static void render_clock(lv_obj_t* clock, lv_obj_t* date) {
-  if (!timekeep_has_time()) { lv_label_set_text(clock, "--:--"); lv_label_set_text(date, "--"); return; }
-  struct tm lt; timekeep_localtime(&lt);
-  char hm[8];  strftime(hm, sizeof(hm), "%H:%M", &lt);            lv_label_set_text(clock, hm);
-  char dt[24]; strftime(dt, sizeof(dt), "%a %d %b", &lt);
-  for (char* p = dt; *p; ++p) *p = (char)toupper((unsigned char)*p);
-  lv_label_set_text(date, dt);
-}
 
 static void build(lv_obj_t* page) {
   const beacon_theme_t* t = theme_active();
@@ -94,20 +81,11 @@ static void build(lv_obj_t* page) {
 static void update(void) {
   const beacon_theme_t* t = theme_active();
   if (!t) return;
-  render_clock(s_clock, s_date);
+  render_clock_ex(s_clock, s_date, "%a %d %b", lv_set);
   weather_rec_t w = ds_get_weather();
   uint32_t now = now_s();
 
-  char st[24];
-  if (sv_status(st, sizeof(st), &w.hdr, now)) {
-    lv_label_set_text(s_status, st);
-    lv_obj_set_style_text_color(s_status, sv_severe(w.hdr.state) ? t->down : t->ink_dim, 0);
-  } else {
-    char bv[12]; lv_color_t bc = batt_chip(bv, sizeof(bv), true, t);
-    char out[20]; snprintf(out, sizeof(out), "BAT %s", bv);
-    lv_label_set_text(s_status, out);
-    lv_obj_set_style_text_color(s_status, bc, 0);
-  }
+  status_chip_update(s_status, &w.hdr, now, t, true, "BAT ", lv_set);
 
   lv_color_t vc = sv_dim(w.hdr.state) ? t->ink_dim : t->accent;
   if (sv_placeholder(w.hdr.state)) {

@@ -50,21 +50,26 @@ final class ClaudeCodeBridge {
     private var lastClaudeUsage: ProviderUsage?
 
     // Pending permission holds, keyed by the short BLE-safe id we mint. Resolving fulfills the held
-    // HTTP response. Only ONE may be active (device holds a single prompt, records.h); a second hook
-    // is auto-denied + labeled (chosen policy: never stack two long holds).
+    // HTTP response. Concurrent prompts queue (promptQueue, FIFO): the front is shown on the device and
+    // deciding it advances to the next (issue #98).
     private final class Pending {
         // (allow, optional deny message, optional onSent fired once the deny bytes flush). Idempotent
         // (guarded by `done`). onSent is the seam the quit drain uses to wait for the socket write.
         let respond: (Bool, String?, (() -> Void)?) -> Void
         var done = false
+        var resolvedAt: Date?   // set when done; lets the reaper bound the late-ack tombstone (see Task 3)
         let timeout: DispatchSourceTimer
-        let sessionId: String         // the prompt's CC session_id, so finish() can clear waitingSessions.
-        init(respond: @escaping (Bool, String?, (() -> Void)?) -> Void, timeout: DispatchSourceTimer, sessionId: String) {
+        let sessionId: String         // the prompt's CC session_id, so finish() can decrement waitingSessionCounts.
+        let tool: String
+        let hint: String
+        init(respond: @escaping (Bool, String?, (() -> Void)?) -> Void, timeout: DispatchSourceTimer,
+             sessionId: String, tool: String, hint: String) {
             self.respond = respond; self.timeout = timeout; self.sessionId = sessionId
+            self.tool = tool; self.hint = hint
         }
     }
     private var pending: [String: Pending] = [:]
-    private var activeId: String?
+    private var promptQueue: [String] = []   // FIFO of minted ids; promptQueue.first = the prompt shown on the device.
     private var idCounter: UInt32 = 0
     private var deviceConnected = false   // mirrored from BeaconCentral; mutated only on `queue`.
     private var terminating = false       // quit drain in progress (issue #16); queue-confined.
@@ -74,10 +79,11 @@ final class ClaudeCodeBridge {
     // not fire on SIGKILL/crash. So we count any session we've SEEN recently (touch() on every event)
     // and reap stale ones on a TTL backstop -- robust to both missed-start and missed-end.
     private var sessions: [String: Date] = [:]            // session_id => lastSeen (queue-confined).
-    private var waitingSessions: Set<String> = []         // sessions blocked on a user decision (queue-confined).
+    private var waitingSessionCounts: [String: Int] = [:]   // sessionId => # of its prompts blocked on a user decision (queue-confined).
     private var sessionStats: [String: (tokens: Int, ctxPct: Int)] = [:]   // per-session statusline (queue-confined).
     private var reaper: DispatchSourceTimer?
     private static let sessionTTL: TimeInterval = 600      // 10 min: bounds a missed-SessionEnd leak.
+    private static let tombstoneTTL: TimeInterval = 30   // keep a resolved id long enough for a racing late device decision -> .late
 
     init() {}
 
@@ -174,7 +180,12 @@ final class ClaudeCodeBridge {
     // (issue #8). Deadlock-safe on the real path: the BLE callback hops to @MainActor before calling
     // here, and finish only posts main callbacks / HTTP asynchronously (never blocks back on main).
     func resolve(id: String, approve: Bool) -> ResolveOutcome {
-        queue.sync { finish(id: id, approve: approve, capped: false) }
+        queue.sync {
+            // Device shows only the front; a decision for a live non-front id is out-of-order -> reject as
+            // unknown (never advance the queue). A done id still falls through to finish -> .late tombstone.
+            if let p = pending[id], !p.done, promptQueue.first != id { return .unknown }
+            return finish(id: id, approve: approve, capped: false)
+        }
     }
 
     // Mirror the BLE link state so an arriving prompt can be denied as "offline" instead of held
@@ -187,9 +198,18 @@ final class ClaudeCodeBridge {
 
     private func writePortFile(_ p: UInt16) {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".beacon-hub")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            FileHandle.standardError.write(Data("[beacon-hub] failed to create ~/.beacon-hub: \(error.localizedDescription)\n".utf8))
+            return
+        }
         let file = dir.appendingPathComponent("port")
-        try? "\(p)\n".data(using: .utf8)?.write(to: file)
+        do {
+            try "\(p)\n".data(using: .utf8)?.write(to: file)
+        } catch {
+            FileHandle.standardError.write(Data("[beacon-hub] failed to write port file: \(error.localizedDescription)\n".utf8))
+        }
     }
 
     // --- connection handling ---
@@ -203,7 +223,10 @@ final class ClaudeCodeBridge {
     private func readRequest(_ conn: NWConnection, buffer: Data) {
         conn.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
             guard let self else { return }
-            if let error = error { _ = error; conn.cancel(); return }
+            if let error = error {
+                FileHandle.standardError.write(Data("[beacon-hub] connection read error: \(error.localizedDescription)\n".utf8))
+                conn.cancel(); return
+            }
             var buf = buffer
             if let data = data { buf.append(data) }
 
@@ -304,54 +327,73 @@ final class ClaudeCodeBridge {
             return
         }
 
-        // One active prompt at a time: auto-deny a second concurrent permission (labeled).
-        if activeId != nil {
-            log(id: "-", decision: "auto-deny-busy")
-            respondDecision(conn, allow: false, event: event, message: "another prompt is pending")
-            return
-        }
-
-        // Only a genuinely-held prompt (past the offline/busy returns) marks the session waiting.
-        if let sid { waitingSessions.insert(sid); buddy.waiting = waitingSessions.count }
-
-        let shortId = mintId()
-        let cappedTimer = DispatchSource.makeTimerSource(queue: queue)
-        cappedTimer.schedule(deadline: .now() + 180)   // 3 min fail-closed cap, under the hook's 190s timeout (CC PermissionRequest default 600s).
-        cappedTimer.setEventHandler { [weak self] in self?.finish(id: shortId, approve: false, capped: true) }
-
-        let p = Pending(respond: { [weak self] allow, msg, onSent in
-                            self?.respondDecision(conn, allow: allow, event: event, message: msg, onSent: onSent)
-                        },
-                        timeout: cappedTimer, sessionId: sid ?? "")
-        pending = pending.filter { !$0.value.done }   // drop prior resolved prompts (see finish)
-        pending[shortId] = p
-        activeId = shortId
-        cappedTimer.resume()
-        watchForClose(conn, id: shortId)   // peer closes => answered on the Mac => withdraw, not "too late" (issue #17)
-
-        buddy.prompt = BuddyPrompt(id: shortId, tool: tool, hint: hint)
-        publishBuddy()
-        log(id: shortId, decision: "prompt")
-        onPromptArrived?()   // audible Mac cue: a prompt is now waiting on the device (a 2.16" screen is easy to miss).
+        // Concurrent prompts queue (FIFO) instead of auto-denying: the front is shown on the device,
+        // deciding it advances to the next (issue #98).
+        enqueuePrompt(respond: { [weak self] allow, msg, onSent in
+                          self?.respondDecision(conn, allow: allow, event: event, message: msg, onSent: onSent)
+                      },
+                      sessionId: sid ?? "", tool: tool, hint: hint)
+        watchForClose(conn, id: promptQueue.last!)   // peer closes => answered on the Mac => withdraw (issue #17)
     }
 
+    // Test seam: run the held-prompt path without the Network/HTTP stack. respond is a no-op sink.
+    func injectPermissionForTest(toolUseId: String, tool: String, hint: String) {
+        queue.sync {
+            self.enqueuePrompt(respond: { _, _, onSent in onSent?() },
+                               sessionId: toolUseId, tool: tool, hint: hint)
+        }
+    }
+
+    // Test seams: inspect the FIFO, and drive the hub-internal cap-expiry path (finish(capped:)) that
+    // a prompt's 590s timer would fire -- NOT the device resolve path.
+    func queuedIdsForTest() -> [String] { queue.sync { self.promptQueue } }
+    func expirePromptForTest(id: String) { queue.sync { _ = self.finish(id: id, approve: false, capped: true) } }
+
+    // Append a held prompt to the FIFO and publish the (possibly unchanged) front with the new depth.
+    // Each prompt races its own 590s cap (under the 600s hook timeout); see finish/timeout handling.
+    private func enqueuePrompt(respond: @escaping (Bool, String?, (() -> Void)?) -> Void,
+                               sessionId: String, tool: String, hint: String) {
+        if !sessionId.isEmpty {
+            waitingSessionCounts[sessionId, default: 0] += 1
+            buddy.waiting = waitingSessionCounts.count
+        }
+        let shortId = mintId()
+        let cap = DispatchSource.makeTimerSource(queue: queue)
+        cap.schedule(deadline: .now() + 590)   // fail-closed, just under the 600s hook timeout (Task 3)
+        cap.setEventHandler { [weak self] in self?.finish(id: shortId, approve: false, capped: true) }
+        // Do NOT blanket-prune done tombstones here: with queuing, enqueues are frequent and would erase a
+        // just-resolved id's tombstone, degrading a racing late device decision from .late to .unknown. The
+        // reaper (Task 3) drops tombstones on a TTL instead.
+        pending[shortId] = Pending(respond: respond, timeout: cap, sessionId: sessionId, tool: tool, hint: hint)
+        promptQueue.append(shortId)
+        cap.resume()
+        publishFront()
+        log(id: shortId, decision: "prompt")
+        onPromptArrived?()
+    }
+
+    // A non-front (queued) prompt resolving -- including its own 590s cap firing -- removes just that id
+    // and republishes the unchanged front with a lower qlen: the device never shows a "too late" for a
+    // prompt it never displayed (design decision 5, issue #98). The front keeps today's on-screen UX.
     @discardableResult
     private func finish(id: String, approve: Bool, capped: Bool, message: String? = nil,
                         onSent: (() -> Void)? = nil) -> ResolveOutcome {
         guard let p = pending[id] else { return .unknown }
         guard !p.done else { return .late }   // already resolved (e.g. the cap fired first).
         p.done = true
+        p.resolvedAt = Date()   // tombstone stamp; the reaper (Task 3) drops it after the late-ack TTL
         p.timeout.cancel()
         // Keep the resolved entry (done=true) so a later device decision for this same id reports
-        // .late (=> ack ok:false) instead of .unknown (=> err) -- the core timeout-race case. Pruned
-        // when the next prompt is minted. ids never repeat (mintId), so no stale-collision risk.
-        if activeId == id { activeId = nil }
-        // The prompt is resolved => the session is no longer blocked on the user.
-        if !p.sessionId.isEmpty, waitingSessions.remove(p.sessionId) != nil {
-            buddy.waiting = waitingSessions.count
+        // .late (=> ack ok:false) instead of .unknown (=> err) -- the core timeout-race case. The
+        // reaper (Task 3) drops tombstones on a TTL. ids never repeat (mintId), so no stale-collision risk.
+        promptQueue.removeAll { $0 == id }
+        // The prompt is resolved => the session is one fewer blocked on the user.
+        if !p.sessionId.isEmpty, let n = waitingSessionCounts[p.sessionId] {
+            if n <= 1 { waitingSessionCounts.removeValue(forKey: p.sessionId) }
+            else { waitingSessionCounts[p.sessionId] = n - 1 }
+            buddy.waiting = waitingSessionCounts.count
         }
-        if buddy.prompt?.id == id { buddy.prompt = nil }
-        publishBuddy()   // waiting and/or prompt may have changed.
+        publishFront()   // advances to the next front, or clears to idle when the FIFO is empty
         log(id: id, decision: capped ? "deny-timeout" : (approve ? "allow" : "deny"))
         p.respond(approve, message, onSent)
         return .applied
@@ -377,13 +419,15 @@ final class ClaudeCodeBridge {
     private func withdraw(id: String) {
         guard let p = pending[id], !p.done else { return }
         p.done = true
+        p.resolvedAt = Date()   // tombstone stamp; the reaper (Task 3) drops it after the late-ack TTL
         p.timeout.cancel()
-        if activeId == id { activeId = nil }
-        if !p.sessionId.isEmpty, waitingSessions.remove(p.sessionId) != nil {
-            buddy.waiting = waitingSessions.count
+        promptQueue.removeAll { $0 == id }
+        if !p.sessionId.isEmpty, let n = waitingSessionCounts[p.sessionId] {
+            if n <= 1 { waitingSessionCounts.removeValue(forKey: p.sessionId) }
+            else { waitingSessionCounts[p.sessionId] = n - 1 }
+            buddy.waiting = waitingSessionCounts.count
         }
-        if buddy.prompt?.id == id { buddy.prompt = nil }
-        publishBuddy()
+        publishFront()
         log(id: id, decision: "withdrawn-resolved-elsewhere")
     }
 
@@ -414,26 +458,27 @@ final class ClaudeCodeBridge {
         switch event {
         case "Stop":
             // Turn finished (session still alive) => no longer blocked on the user; running unchanged.
-            if let sid { waitingSessions.remove(sid) }
+            if let sid { waitingSessionCounts.removeValue(forKey: sid) }
         case "Notification":
             // CC's Notification matcher is "*", so it also fires for non-waiting types (auth_success,
             // elicitation_*). The waiting type is not reliably machine-readable from this body yet
             // (confirm the field -- likely a `message`/type marker -- against a live payload), so we
             // mark waiting for ALL Notifications and let the next Stop/SessionEnd/TTL clear a false
             // wait (e.g. auth_success self-clears on the next Stop). Conservative: better a brief
-            // false-wait than a missed permission_prompt/idle_prompt.
-            if let sid { waitingSessions.insert(sid) }
+            // false-wait than a missed permission_prompt/idle_prompt. Only ensure >=1 so it never
+            // clobbers a live per-prompt refcount from enqueuePrompt.
+            if let sid { waitingSessionCounts[sid] = max(waitingSessionCounts[sid] ?? 0, 1) }
         case "SessionEnd":
             // Clean exit (does NOT fire on SIGKILL -- the TTL reaper backstops that). Remove all trace.
             if let sid {
                 sessions.removeValue(forKey: sid)
-                waitingSessions.remove(sid)
+                waitingSessionCounts.removeValue(forKey: sid)
                 sessionStats.removeValue(forKey: sid)
             }
         default: break   // SessionStart: first-seen via touch() already counted it.
         }
         buddy.running = sessions.count
-        buddy.waiting = waitingSessions.count
+        buddy.waiting = waitingSessionCounts.count
         buddy.tokens = sessionStats.values.reduce(0) { $0 + $1.tokens }
         buddy.contextPct = sessionStats.values.map(\.ctxPct).max() ?? 0   // no reporters => 0, matching tokens (not stale).
         if let entry = Self.entryLine(event: event, body: body) {
@@ -502,19 +547,34 @@ final class ClaudeCodeBridge {
     // explicit `now` so it is unit-testable. internal so a future test can drive it directly.
     func reap(now: Date) {
         let cutoff = now.addingTimeInterval(-Self.sessionTTL)
-        let before = (sessions.count, waitingSessions.count, buddy.tokens, buddy.contextPct)
+        let before = (sessions.count, waitingSessionCounts.count, buddy.tokens, buddy.contextPct)
         for (sid, seen) in sessions where seen < cutoff { sessions.removeValue(forKey: sid) }
-        waitingSessions = waitingSessions.filter { sessions[$0] != nil }   // a wait for a dead session is stuck.
+        waitingSessionCounts = waitingSessionCounts.filter { sessions[$0.key] != nil }   // a wait for a dead session is stuck.
         for sid in sessionStats.keys where sid != "_" && sessions[sid] == nil {
             sessionStats.removeValue(forKey: sid)   // a dead session must stop inflating the token sum.
         }
+        let tombCutoff = now.addingTimeInterval(-Self.tombstoneTTL)
+        for (pid, p) in pending where p.done && (p.resolvedAt ?? now) < tombCutoff {
+            pending.removeValue(forKey: pid)   // bounded tombstone GC (replaces prune-on-enqueue)
+        }
         buddy.running = sessions.count
-        buddy.waiting = waitingSessions.count
+        buddy.waiting = waitingSessionCounts.count
         buddy.tokens = sessionStats.values.reduce(0) { $0 + $1.tokens }
         buddy.contextPct = sessionStats.values.map(\.ctxPct).max() ?? 0   // no reporters => 0, matching tokens (not stale).
-        if before != (sessions.count, waitingSessions.count, buddy.tokens, buddy.contextPct) {
+        if before != (sessions.count, waitingSessionCounts.count, buddy.tokens, buddy.contextPct) {
             publishBuddy()
         }
+    }
+
+    // Re-derive the device-visible prompt from the front of the FIFO + current depth, then publish.
+    private func publishFront() {
+        if let frontId = promptQueue.first, let p = pending[frontId], !p.done {
+            let n = promptQueue.count
+            buddy.prompt = BuddyPrompt(id: frontId, tool: p.tool, hint: p.hint, qlen: n > 1 ? n : nil)
+        } else {
+            buddy.prompt = nil
+        }
+        publishBuddy()
     }
 
     private func publishBuddy() {

@@ -1,7 +1,9 @@
 #include "ui/screen.h"
+#include "ui/screens/screen_common.h"
 #include "ui/styles.h"
 #include "ui/state_view.h"
 #include "ui/theme.h"
+#include "ui/screens/views/view_common.h"
 #include "config/layout.h"
 #include "core/datastore.h"
 #include "core/hub_task.h"
@@ -116,9 +118,7 @@ static void update(void) {
     lv_label_set_text(s_telem, chip);
   } else {
     char tl[64];
-    snprintf(tl, sizeof(tl), "%u RUN . %u WAIT . %uK TOK . CTX %u%%",
-             (unsigned)b.running, (unsigned)b.waiting,
-             (unsigned)(b.tokens / 1000), (unsigned)b.context_pct);
+    buddy_stats_fmt(tl, sizeof(tl), &b, true);
     lv_label_set_text(s_telem, tl);
   }
 
@@ -149,8 +149,10 @@ static void update(void) {
       lv_obj_set_style_text_color(s_deny, t->ink, 0);
       break;
     default: {
-      char eb[32];
-      snprintf(eb, sizeof(eb), "PERMISSION - APPROVE? %us", (unsigned)buddy_prompt_secs_left(&b, uptime_s()));
+      char badge[16]; buddy_queue_badge(b.prompt.queue_len, badge, sizeof(badge));
+      char eb[48];
+      snprintf(eb, sizeof(eb), "PERMISSION - APPROVE?%s %us",
+               badge, (unsigned)buddy_prompt_secs_left(&b, uptime_s()));
       lv_label_set_text(s_eyebrow, eb);
       lv_obj_set_style_text_color(s_eyebrow, t->accent, 0);
       lv_label_set_text(s_deny, "< DENY");

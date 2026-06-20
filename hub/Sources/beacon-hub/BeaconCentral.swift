@@ -272,8 +272,7 @@ extension BeaconCentral: CBPeripheralDelegate {
         guard peripheral == self.peripheral else { return }   // ignore a late callback for a forgotten/old peripheral.
         guard characteristic.uuid == Self.txChar else { return }
         if let error = error {
-            // Pairing/encryption likely failed -> drop and let auto-reconnect retry.
-            _ = error
+            FileHandle.standardError.write(Data("[beacon-hub] BLE notify error (pairing/encryption failed?): \(error.localizedDescription)\n".utf8))
             handleDisconnect()
             return
         }

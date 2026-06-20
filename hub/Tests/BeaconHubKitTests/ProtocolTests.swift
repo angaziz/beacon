@@ -180,6 +180,18 @@ final class ProtocolTests: XCTestCase {
         }
     }
 
+    func testBuddyPromptOmitsQlenWhenSingle() throws {
+        let frame = StatusFrame(buddy: BuddyState(prompt: BuddyPrompt(id: "p1", tool: "Bash", hint: "ls", qlen: nil)))
+        let json = String(data: try frame.encoded(), encoding: .utf8)!
+        XCTAssertFalse(json.contains("qlen"), "lone prompt must not emit qlen (back-compat)")
+    }
+
+    func testBuddyPromptEmitsQlenWhenQueued() throws {
+        let frame = StatusFrame(buddy: BuddyState(prompt: BuddyPrompt(id: "p1", tool: "Bash", hint: "ls", qlen: 3)))
+        let json = String(data: try frame.encoded(), encoding: .utf8)!
+        XCTAssertTrue(json.contains("\"qlen\":3"), "queued prompt must emit qlen")
+    }
+
     func testAckAndErr() throws {
         let ack = try JSONSerialization.jsonObject(with: HubAck.ack(id: "req_abc", ok: true)) as! [String: Any]
         XCTAssertEqual(ack["v"] as? Int, 1)

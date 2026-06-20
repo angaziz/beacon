@@ -19,10 +19,13 @@ the device keeps an absent block's last values). A null/omitted window `pct` => 
                 "codex":{"h5":{"pct":1,"reset":1717590000},"d7":{"pct":29,"reset":1717800000}}},
  "buddy":{"running":2,"waiting":1,"tokens":184502,"context_pct":42,
           "entries":["10:42 git push","10:41 yarn test"],
-          "prompt":{"id":"p07","tool":"Bash","hint":"rm -rf /tmp/build"}}}
+          "prompt":{"id":"p07","tool":"Bash","hint":"rm -rf /tmp/build","qlen":2}}}
 ```
 - Absent `buddy.prompt` => idle. `pct` is an integer 0..100 or JSON null (device reads null/absent as -1).
 - The device codec (`hub_parse_status`) + `test_hub_proto` assert exactly this shape.
+- `buddy.prompt.qlen` (additive `v:1` ext, issue #98) -- total pending prompts incl. the shown front.
+  Omitted or `<=1` => a single prompt (no `(1 of N)` badge). The device always shows the front;
+  position is implicitly 1, so there is no `qpos`.
 
 Optional `loc` block (additive `v:1` extension, issue #54). The hub sources lat/lon + `name` from
 macOS CoreLocation/CLGeocoder and `tz` from `TimeZone.current`. Independently optional, like
@@ -166,7 +169,7 @@ normalizer, not `UsageNormalizer.codex`.
 ### C.3 Claude Code permission hook (`PermissionRequest`, primary; `PreToolUse`, back-compat) — CONFIRMED (CC v2.1.x docs)
 Claude Code supports native **`"type":"http"`** hooks (no curl forwarder needed). `PreToolUse` and
 `PermissionRequest` are **distinct** events, and **`PermissionRequest` is the one Beacon hooks**:
-`PreToolUse` fires on **every** tool call, so holding it open ~25 s would block routine `Read`/`Grep`
+`PreToolUse` fires on **every** tool call, so holding it open ~590 s would block routine `Read`/`Grep`
 (and a narrow matcher like `Bash` misses `Write`/`Edit`); `PermissionRequest` fires **only when a tool
 actually needs permission**, so `matcher:"*"` is safe and covers all tools. The bridge still accepts
 `PreToolUse` for back-compat. Request body (same fields both events):
@@ -191,9 +194,9 @@ one silently fails to gate the tool:
 // an empty body CC reads as "no gate", falling through to its own interactive prompt.
 {}
 ```
-HTTP 2xx + body, no outer envelope. Hook `timeout` is in **seconds** (config: 35 to cover the device's
-~25 s window). Non-2xx/timeout = **non-blocking (CC proceeds, fail-OPEN)** -- so the hub MUST return
-`deny` within the window; never let it hang.
+HTTP 2xx + body, no outer envelope. Hook `timeout` is in **seconds** (config: 600 to cover the
+~590 s hold). Non-2xx/timeout = **non-blocking (CC proceeds, fail-OPEN)** -- so the hub MUST return
+`deny` within the hold window; never let it hang.
 
 ### C.4 Session / statusline — CONFIRMED (CC v2.1.x docs)
 `SessionStart`(matcher startup/resume/clear/compact)/`Stop`/`Notification`/`SessionEnd` http hooks =>
@@ -211,16 +214,17 @@ command passed as args), so the user's status bar is unchanged. Bind port is the
 - **Short id mapping (`records.h` `BUDDY_ID_LEN`=24 => <=23 chars):** the hub mints a short id per
   permission prompt and maps it to the full Claude Code hook request id. The device only ever sees +
   echoes the short id.
-- **One prompt at a time:** `buddy_prompt_t` holds a single prompt. A second concurrent permission
-  hook is queued FIFO (or auto-denied+labeled to avoid stacking two ~25 s holds) — see
-  `ClaudeCodeBridge`. (`AskUserQuestion` is exempt: it is never held, so a question can't squat the
-  slot and auto-deny a real permission behind it.)
-- **Silent withdraw (resolved on the Mac):** if CC closes the held hook connection — because the user
-  answered the permission in the Mac terminal instead of on the device — the hub clears the device
-  prompt and frees the slot with NO deny and NO "too late" (`watchForClose`/`withdraw`,
+- **Prompt queue (FIFO, one shown at a time):** `buddy_prompt_t` holds the front prompt; additional
+  concurrent permission hooks queue FIFO behind it. `qlen` on the BLE frame carries the total pending
+  count (incl. the front) so the device can show a `(1 of N)` badge. (`AskUserQuestion` is exempt:
+  it is never held, so a question can't squat the queue and block a real permission behind it.)
+- **Silent withdraw (resolved on the Mac):** if CC closes the held hook connection -- because the user
+  answered the permission in the Mac terminal instead of on the device -- the hub clears the device
+  prompt and advances the queue with NO deny and NO "too late" (`watchForClose`/`withdraw`,
   `ClaudeCodeBridge`). The answer applied on the Mac; the device must not claim otherwise.
-- **Timing:** design target < 5 s round-trip; ~25 s fail-closed cap (below Claude Code's ~30 s hook
-  timeout); cap => `deny` + label (`tech.md` §8, FR-BUDDY-3).
+- **Timing:** design target < 5 s round-trip; ~590 s hold (below Claude Code's ~600 s hook timeout);
+  only a queued prompt's own cap expiry denies it (silently); `deny` + label on cap (`tech.md` §8,
+  FR-BUDDY-3).
 - **Logging:** id + decision + timestamp only. NEVER the command `hint` or any token (`tech.md` §9).
 
 ### D.1 Onboarding, lifecycle & error recovery (epic #20 — `docs/research/2026-06-08-hub-ux-audit.md`)

@@ -18,10 +18,10 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 
-// ============ EDIT THESE ============
-const char* WIFI_SSID = "secret";
-const char* WIFI_PASS = "secret";
-// ====================================
+// ============ EDIT THESE before uploading ============
+const char* WIFI_SSID = "YOUR_SSID_HERE";
+const char* WIFI_PASS = "YOUR_PASSWORD_HERE";
+// =====================================================
 
 // pins (Waveshare ESP32-S3-Touch-AMOLED-2.16)
 #define LCD_SDIO0 4
@@ -56,6 +56,7 @@ uint32_t minHeap = 0xFFFFFFFF;
 
 void fetchWeather() {
   WiFiClientSecure client;
+#pragma message("SPIKE: setInsecure() disables TLS cert validation -- production uses setCACert()")
   client.setInsecure();  // SPIKE ONLY — production validates certs (see DESIGN.md)
   HTTPClient https;
   uint32_t t0 = millis();

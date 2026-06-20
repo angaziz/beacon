@@ -398,6 +398,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menubar.setTickerSync(.pending)
         } catch {
             FileHandle.standardError.write(Data("[beacon-hub] ticker config encode failed: \(error.localizedDescription)\n".utf8))
+            menubar.setTickerSync(.error("encode failed"))
         }
     }
 
