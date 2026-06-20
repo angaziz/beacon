@@ -103,6 +103,32 @@ list (fail closed) and reports the first `err`:
 
 **Field caps (UTF-8 bytes, enforced by the device — the hub MUST emit within these or the row is `malformed`):** `id` ≤15, `sym` ≤23, `name` ≤23. The hub clamps `name` to fit (display-only) and drops a candidate whose `sym` exceeds the cap.
 
+## B3. Device -> hub ticker report (additive, issue #105, design `docs/specs/2026-06-19-device-ticker-report-design.md`)
+
+So a fresh (never-configured) hub adopts the list the device already holds, the device emits a one-way
+`report` on the device->hub `cmd` channel, **once per connection** after the first inbound hub frame.
+Full rows, chunked exactly like §B2 `config` (same row schema/caps), but the envelope is flat `cmd`
+fields (not a nested `config` object). The hub adopts only when its store is pristine
+(`rev == 0 && rows.isEmpty`); otherwise it ignores the report and stays the source of truth. Mirror of
+`firmware/.../hub_proto.cpp` (`hub_report_plan` / `hub_build_report_frame`) and
+`BeaconHubKit/Protocol.swift` (`DeviceCommand.report`) + `ReportAssembler`.
+
+```json
+{"v":1,"cmd":"report","what":"tickers","rev":0,"part":0,"parts":2,"tickers":[
+  {"id":"ygspc","src":"yahoo","sym":"%5EGSPC","name":"S&P 500","kind":"index","cadence":300,"stale":600,"basis":"prev_close"}]}
+{"v":1,"cmd":"report","what":"tickers","rev":0,"part":1,"parts":2,"tickers":[
+  {"id":"bbtcusdt","src":"binance","sym":"BTCUSDT","name":"BTC","kind":"crypto","cadence":60,"stale":600,"basis":"24h"}]}
+```
+
+- `cmd` = `"report"`; `what` = `"tickers"` (namespaces the verb; the hub ignores any other `what`).
+- `rev` is **always `0`** -- the device does not persist the hub's rev, and the hub never uses the
+  reported value (it adopts its own pristine `rev 0 -> 1`). Carried for structural symmetry + chunk
+  continuity only.
+- `part` / `parts`, chunking budget, and row keys/caps are **identical to §B2** (rows concatenated in
+  `part` order == display order; line <= ~900 B; row never split; <= 16 rows; trailing `0x0A`).
+- **No ack.** One-way and informational. An older hub that does not know `cmd:"report"` drops it
+  (`DeviceCommand.parse` returns `nil` on an unknown `cmd`).
+
 ## C. Upstream shapes (RECORDED — real token-redacted captures, 2026-06-11)
 
 ### C.1 Claude usage — statusline `rate_limits` (PRIMARY); `oauth/usage` (FALLBACK)

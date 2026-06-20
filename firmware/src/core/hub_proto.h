@@ -118,6 +118,23 @@ config_status_t hub_config_accum_step(config_accum_t* acc, const config_chunk_t*
 // Returns bytes written (incl. '\n', excl. NUL), or 0 on overflow / invalid args (cf. hub_build_permission).
 size_t hub_build_config_ack(char* buf, size_t cap, uint32_t rev, bool ok, const char* err, int count);
 
+// --- Outbound: device -> hub ticker report (chunked running-table snapshot, issue #105) ---
+// Pure, host-testable. The report mirrors the config ROW schema but rides the cmd channel:
+// {"v":1,"cmd":"report","what":"tickers","rev":0,"part":P,"parts":N,"tickers":[{...row...}]}.
+// rev is always 0 (the device does not persist the hub's rev). Split plan/frame so the caller
+// serializes+sends one HUB_FRAME_MAX frame at a time (materializing all chunks would blow the
+// hub task's 8 KB stack).
+
+// Greedy whole-row chunk planner. Fills group_start[g] with the first-row index of chunk g and
+// returns the chunk count (== parts), 1..MAX_TICKERS. Returns 0 on failure: count < 1 or
+// > MAX_TICKERS, a null arg, an unmappable enum, or a single row that alone exceeds the ~900 B budget.
+int hub_report_plan(const ticker_runtime_t* rows, int count, int group_start[MAX_TICKERS]);
+
+// Serialize rows[lo..hi) as one newline-terminated cmd:"report" frame (part `part` of `parts`) into
+// buf. Returns bytes (incl. '\n', excl. NUL), or 0 on overflow / unmappable enum / bad range.
+size_t hub_build_report_frame(const ticker_runtime_t* rows, int lo, int hi,
+                              int part, int parts, char* buf, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

@@ -93,6 +93,10 @@ public enum DeviceCommand: Equatable {
     // One ack per completed config snapshot (issue #92). Echoes the pushed `rev`; on ok carries the
     // applied ticker count, on reject the first `err` (see TickerConfig / CONTRACT.md §C for the enum).
     case configAck(rev: UInt32, ok: Bool, count: Int?, err: String?)
+    // Per-chunk snapshot of its running ticker list (issue #105). Per-chunk; the caller
+    // reassembles. rev is always 0 (the device does not persist the hub's rev). Used so a fresh hub
+    // can adopt the list the device already holds.
+    case report(what: String, rev: UInt32, part: Int, parts: Int, rows: [TickerRow])
 
     public static func parse(_ data: Data) -> DeviceCommand? {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -104,6 +108,27 @@ public enum DeviceCommand: Equatable {
         case "config_ack":
             guard let rev = obj["rev"] as? Int, rev >= 0, let ok = obj["ok"] as? Bool else { return nil }
             return .configAck(rev: UInt32(rev), ok: ok, count: obj["count"] as? Int, err: obj["err"] as? String)
+        case "report":
+            guard (obj["what"] as? String) == "tickers",
+                  let rev = obj["rev"] as? Int, rev >= 0,
+                  let part = obj["part"] as? Int, let parts = obj["parts"] as? Int,
+                  parts > 0, part >= 0, part < parts,
+                  let arr = obj["tickers"] as? [[String: Any]] else { return nil }
+            var rows = [TickerRow]()
+            for r in arr {
+                guard let id = r["id"] as? String, !id.isEmpty,
+                      id.utf8.count <= TickerLimits.idMaxBytes,
+                      let src = (r["src"] as? String).flatMap(TickerSource.init(rawValue:)),
+                      let sym = r["sym"] as? String, sym.utf8.count <= TickerLimits.symMaxBytes,
+                      let name = r["name"] as? String, name.utf8.count <= TickerLimits.nameMaxBytes,
+                      let kind = (r["kind"] as? String).flatMap(TickerKind.init(rawValue:)),
+                      let cadence = r["cadence"] as? Int, let stale = r["stale"] as? Int,
+                      let basis = (r["basis"] as? String).flatMap(ChangeBasis.init(rawValue:))
+                else { return nil }   // any malformed / over-cap row drops the whole chunk (parity with config)
+                rows.append(TickerRow(id: id, src: src, sym: sym, name: name,
+                                      kind: kind, cadence: cadence, stale: stale, basis: basis))
+            }
+            return .report(what: "tickers", rev: UInt32(rev), part: part, parts: parts, rows: rows)
         default:
             return nil
         }

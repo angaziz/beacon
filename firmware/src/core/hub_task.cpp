@@ -1,6 +1,7 @@
 #include "core/hub_task.h"
 #include "core/hublink_ble.h"
 #include "core/hub_proto.h"
+#include "core/hub_report.h"
 #include "core/datastore.h"
 #include "core/location.h"
 #include "core/timekeep.h"
@@ -24,6 +25,7 @@ static bool frame_has(const char* j, size_t n, const char* key) {
 static HubLinkBle s_link;
 static HubLink*   g_link = nullptr;   // null until the task starts (BEACON_DEV leaves it null)
 static bool       s_was_connected = false;
+static bool       s_reported = false;   // emitted the once-per-connection ticker report? (issue #105)
 static uint32_t   s_min_int_free  = UINT32_MAX;
 
 // Reassembled-across-parts config snapshot (design §2). Single-threaded: on_frame runs only on Core-0.
@@ -37,6 +39,26 @@ static void send_config_ack(uint32_t rev, bool ok, const char* err, int count) {
   size_t n = hub_build_config_ack(buf, sizeof(buf), rev, ok, err, count);
   if (n) g_link->send(buf, n);
   LOGI("hub: config_ack rev=%u ok=%d err=%s count=%d", (unsigned)rev, ok, err ? err : "", count);
+}
+
+// Snapshot the device's current ticker table and emit it to the hub as chunked cmd:"report" frames so a
+// fresh hub can adopt the list it already holds (issue #105). The chunk serialize/flush/send loop lives in
+// hub_emit_report (host-tested, issue #106). Returns true only if EVERY chunk was accepted: a mid-stream
+// failure returns false so the caller does NOT latch s_reported and retries the whole report on the next
+// inbound frame this connection -- a retry restarts at part 0, which restarts the hub accumulator (the hub
+// adopts only on the final part, so a partial delivery never half-adopts). g_link null (native) => true.
+static bool send_ticker_report(void) {
+  if (!g_link) return true;
+  int count = ticker_table_count();
+  if (count > MAX_TICKERS) count = MAX_TICKERS;
+  ticker_runtime_t rows[MAX_TICKERS];
+  for (int i = 0; i < count; i++) {
+    if (!ticker_table_get(i, &rows[i])) return false;  // table shrank under us => retry next frame
+  }
+  int parts = hub_emit_report(g_link, rows, count);
+  if (parts < 0) return false;                         // serialize/enqueue failed => retry whole report later
+  LOGI("hub: ticker report sent (%d rows, %d parts)", count, parts);
+  return true;
 }
 
 // A config frame (chunked ticker snapshot, design §3.3). Parse => accumulate => on the last part
@@ -87,6 +109,10 @@ static void apply_ack(const hub_ack_t& ack) {
 // Status: fill from current records so an absent block keeps its values; stamp last_updated = now so
 // staleness ages hub data on the same epoch as P1 (one epoch).
 static void on_frame(const char* json, size_t len) {
+  if (!s_reported) {                 // first inbound frame this connection proves the central is listening
+    s_reported = send_ticker_report();   // latch only on full success; emit BEFORE dispatch (on_frame has
+                                         // early returns for ack/config below). A failed send retries next frame.
+  }
   if (frame_has(json, len, "\"ack\"") || frame_has(json, len, "\"err\"")) {
     hub_ack_t ack;
     if (hub_parse_ack(json, len, &ack)) { apply_ack(ack); return; }
@@ -132,7 +158,7 @@ static void hub_task(void*) {
     ds_tick_buddy_prompt(uptime_s());   // prompt expiry + confirm-hold (monotonic; runs every screen)
 
     bool c = s_link.isConnected();
-    if (s_was_connected && !c) ds_set_hub_offline();   // edge-triggered: flip both hub records once
+    if (s_was_connected && !c) { ds_set_hub_offline(); s_reported = false; }   // re-report next connection
     s_was_connected = c;
 
     uint32_t f = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
