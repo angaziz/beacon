@@ -15,7 +15,7 @@ final class HubViewModel: ObservableObject {
     @Published var link: MenubarController.Link = .searching
     @Published var lastSync: Date?
     @Published var usage = Usage(claude: .unavailable, codex: .unavailable)
-    @Published var errors: [String] = []
+    @Published var notes: [UsageNote] = []   // #108: typed usage notes (info = rate-limited; error = banner)
     @Published var alert: String?          // undeliverable-prompt surface
     @Published var bridgeAlert: String?    // bridge bind failure; priority over alert
     @Published var loginItem: MenubarController.LoginItemStatus = .disabled

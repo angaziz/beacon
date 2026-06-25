@@ -45,7 +45,9 @@ typedef struct {
   int16_t  pct;                // 0..100; -1 = null/unavailable (JSON null)
   uint32_t reset;              // epoch seconds; 0 = unknown
 } usage_window_t;
-typedef struct { usage_window_t h5, d7; } usage_provider_t;
+// `stale` (#108): the windows carry last-known-good held by the hub through a transient failure (e.g.
+// Claude oauth 429). Views dim the provider's windows; the shared hdr stays for hub-link state.
+typedef struct { usage_window_t h5, d7; bool stale; } usage_provider_t;
 typedef struct {
   record_hdr_t     hdr;        // ST_HUB_OFFLINE when the hub link drops
   usage_provider_t claude, codex;

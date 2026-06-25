@@ -93,10 +93,11 @@ static void update(void) {
   usage_rec_t u = ds_get_usage();
   uint32_t now = now_s();
   bool ph = sv_placeholder(u.hdr.state), dim = sv_dim(u.hdr.state);
-  set_window(0, &u.claude.h5, ph, dim, t, now);
-  set_window(1, &u.claude.d7, ph, dim, t, now);
-  set_window(2, &u.codex.h5,  ph, dim, t, now);
-  set_window(3, &u.codex.d7,  ph, dim, t, now);
+  bool cdim = dim || u.claude.stale, xdim = dim || u.codex.stale;   // #108: dim last-good per provider.
+  set_window(0, &u.claude.h5, ph, cdim, t, now);
+  set_window(1, &u.claude.d7, ph, cdim, t, now);
+  set_window(2, &u.codex.h5,  ph, xdim, t, now);
+  set_window(3, &u.codex.d7,  ph, xdim, t, now);
   char sbuf[24];
   if (sv_status(sbuf, sizeof(sbuf), &u.hdr, now)) {
     lv_label_set_text(s_status, sbuf);

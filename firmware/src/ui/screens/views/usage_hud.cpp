@@ -121,11 +121,12 @@ static void update(void) {
 
   bool ph = sv_placeholder(u.hdr.state);
   bool dim = sv_dim(u.hdr.state);
+  bool cdim = dim || u.claude.stale, xdim = dim || u.codex.stale;   // #108: dim last-good per provider.
 
-  set_window(0, &u.claude.h5, ph, dim, t->accent,  t, now);
-  set_window(1, &u.claude.d7, ph, dim, t->accent,  t, now);
-  set_window(2, &u.codex.h5,  ph, dim, t->accent2, t, now);
-  set_window(3, &u.codex.d7,  ph, dim, t->accent2, t, now);
+  set_window(0, &u.claude.h5, ph, cdim, t->accent,  t, now);
+  set_window(1, &u.claude.d7, ph, cdim, t->accent,  t, now);
+  set_window(2, &u.codex.h5,  ph, xdim, t->accent2, t, now);
+  set_window(3, &u.codex.d7,  ph, xdim, t->accent2, t, now);
 }
 
 extern const screen_view_t usage_hud_view = { build, update };

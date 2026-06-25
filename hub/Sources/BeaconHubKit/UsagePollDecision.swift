@@ -26,6 +26,45 @@ public enum UsagePollDecision {
         !statuslineFresh(age: statuslineAge, interval: interval)
     }
 
+    // Exponential backoff for the Claude oauth endpoint after consecutive transient failures (#108).
+    // consecutiveFails 0 => 0 (no backoff); 1 => base; 2 => 2*base; ... clamped to cap. Pure: jitter and
+    // any server-directed Retry-After are composed in pollDelay so this stays deterministic for tests.
+    public static func backoff(consecutiveFails: Int, base: TimeInterval, cap: TimeInterval) -> TimeInterval {
+        guard consecutiveFails > 0 else { return 0 }
+        let scaled = base * pow(2, Double(consecutiveFails - 1))
+        return min(scaled, cap)
+    }
+
+    // A server-directed Retry-After is honored up to its own (larger) sanity cap, NOT the exponential
+    // cap -- an explicit "wait 1h" must be respected. Absurd/negative values are rejected (#108).
+    public static func sanitizedRetryAfter(_ retryAfter: TimeInterval?, sanityCap: TimeInterval) -> TimeInterval {
+        guard let r = retryAfter, r > 0 else { return 0 }
+        return min(r, sanityCap)
+    }
+
+    // Final delay until the next allowed Claude oauth poll: never earlier than the (sanitized)
+    // server-directed Retry-After floor, else our jittered exponential backoff. jitterFraction is passed
+    // in (e.g. Double.random(in: -0.2...0.2)) so this function stays deterministic; pass 0 in tests.
+    // Floor wins so negative jitter can never schedule a poll before the server-mandated cooldown.
+    public static func pollDelay(consecutiveFails: Int, retryAfter: TimeInterval?,
+                                 base: TimeInterval, cap: TimeInterval,
+                                 retryAfterSanityCap: TimeInterval, jitterFraction: Double) -> TimeInterval {
+        let floor = sanitizedRetryAfter(retryAfter, sanityCap: retryAfterSanityCap)
+        let jittered = backoff(consecutiveFails: consecutiveFails, base: base, cap: cap) * (1 + jitterFraction)
+        return max(floor, jittered)
+    }
+
+    // A retained window is dropped (=> "--") once it is older than maxStale OR its own quota window has
+    // reset (the percentage would be semantically wrong post-rollover, not merely old). Per-window:
+    // h5/d7 reset independently. nil lastGoodAt => expired. now/reset are epoch-comparable.
+    public static func windowExpired(lastGoodAt: Date?, now: Date,
+                                     maxStale: TimeInterval, windowReset: Int) -> Bool {
+        guard let at = lastGoodAt else { return true }
+        if now.timeIntervalSince(at) > maxStale { return true }
+        if windowReset > 0, now.timeIntervalSince1970 >= Double(windowReset) { return true }
+        return false
+    }
+
     // Gate Keychain re-reads while the stored Claude token sits expired (waiting for the CLI to rotate
     // it): each SecItemCopyMatching can prompt the user unless they chose "Always Allow", so re-reading
     // every 45s tick would nag every 45s. nil = never read.

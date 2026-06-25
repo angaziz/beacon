@@ -15,13 +15,17 @@ struct HubPanel: View {
                 Banner(text: banner)
             }
             HeaderModule(model: model, closeAndRun: closeAndRun)
-            if !model.errors.isEmpty {
+            if !model.notes.isEmpty {
                 Module {
                     VStack(alignment: .leading, spacing: 4) {
-                        ForEach(model.errors, id: \.self) { Label($0, systemImage: "exclamationmark.triangle.fill") }
+                        ForEach(model.notes, id: \.text) { note in
+                            Label(note.text,
+                                  systemImage: note.severity == .error
+                                      ? "exclamationmark.triangle.fill" : "clock.arrow.circlepath")
+                                .foregroundStyle(note.severity == .error ? Color.red : Color.secondary)
+                        }
                     }
                     .font(.system(size: 11))
-                    .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }

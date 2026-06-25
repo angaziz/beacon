@@ -35,6 +35,7 @@ final class EqualityGateTests: XCTestCase {
             ("h5.nilPct",{ var p = base; p.h5.pct = nil; return p }()),
             ("d7.pct",   { var p = base; p.d7.pct = 33; return p }()),
             ("d7.reset", { var p = base; p.d7.reset = 1_717_800_001; return p }()),
+            ("stale",    { var p = base; p.stale = true; return p }()),   // #108: live<->stale must not be skipped.
         ]
         XCTAssertEqual(base, base)
         for m in mutations {
@@ -43,5 +44,18 @@ final class EqualityGateTests: XCTestCase {
         // The poller's "no data" sentinel and a real zero-pct window must not collapse to equal.
         XCTAssertNotEqual(ProviderUsage.unavailable,
                           ProviderUsage(h5: UsageWindow(pct: 0, reset: 0), d7: UsageWindow(pct: 0, reset: 0)))
+    }
+
+    // #108: a live value (stale == nil) MUST encode with NO `stale` key -- §A only ever carries
+    // "stale":true. A false would leak onto the wire and confuse the device parser.
+    func testStaleKeyOmittedWhenLive() throws {
+        let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
+        let live = ProviderUsage(h5: UsageWindow(pct: 24, reset: 1), d7: UsageWindow(pct: 32, reset: 2))
+        let liveJSON = String(data: try enc.encode(live), encoding: .utf8)!
+        XCTAssertFalse(liveJSON.contains("stale"), "live ProviderUsage must not emit a stale key: \(liveJSON)")
+
+        let stale = ProviderUsage(h5: UsageWindow(pct: 24, reset: 1), d7: UsageWindow(pct: 32, reset: 2), stale: true)
+        let staleJSON = String(data: try enc.encode(stale), encoding: .utf8)!
+        XCTAssertTrue(staleJSON.contains("\"stale\":true"), "stale ProviderUsage must emit stale:true: \(staleJSON)")
     }
 }

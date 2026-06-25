@@ -54,6 +54,8 @@ bool hub_parse_status(const char* json, size_t len,
     fill_window(&usage->claude.d7, u["claude"]["d7"]);
     fill_window(&usage->codex.h5,  u["codex"]["h5"]);
     fill_window(&usage->codex.d7,  u["codex"]["d7"]);
+    usage->claude.stale = u["claude"]["stale"] | false;  // #108: absent => live; only "stale":true dims.
+    usage->codex.stale  = u["codex"]["stale"]  | false;
   }
 
   JsonVariantConst b = doc["buddy"];
