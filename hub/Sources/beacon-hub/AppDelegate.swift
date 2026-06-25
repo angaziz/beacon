@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var codexNote: UsageNote?
     private var statuslineClaude: ProviderUsage?   // #59 dedup: statusline re-fires ~3x/s, usually unchanged.
     private var statuslineClaudeAt: Date?          // #93: last live statusline POST, for the source-precedence gate.
+    private var claudeTransientReason: String?     // #108: last oauth transient reason, for the backoff-window recheck.
     private var lastNotes: [UsageNote] = []        // #108: last notes handed to the menubar (note channel gate).
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -283,22 +284,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // the statusline just established.
     private func onUsage(_ claude: ProviderResult?, _ codex: ProviderResult) {
         reduceCodex(codex.outcome, codex.usage)
+        let age = statuslineClaudeAt.map { Date().timeIntervalSince($0) }
+        let fresh = UsagePollDecision.statuslineFresh(age: age, interval: poller.pollInterval)
         if let c = claude {
-            let age = statuslineClaudeAt.map { Date().timeIntervalSince($0) }
-            if !UsagePollDecision.statuslineFresh(age: age, interval: poller.pollInterval) {
+            if !fresh {
+                if case .transient(_, let reason) = c.outcome { claudeTransientReason = reason }
                 reduceClaude(c.outcome, c.usage)
             }
+        } else if !fresh, claudeRetention.lastGood != nil {
+            // OAuth poll suppressed (backoff / long Retry-After) with no live statusline: re-run the
+            // transient branch so the retained value still ages out on time (#108). Without this the
+            // reducer -- the only place applying windowExpired -- never re-checks during a long backoff,
+            // pinning a stale value past maxStale/reset. Idempotent re-evaluation on the same lastGood;
+            // codex always polls so this fires every ~45s tick.
+            reduceClaude(.transient(retryAfter: nil, reason: claudeTransientReason ?? "Claude usage unavailable"),
+                         .unavailable)
         }
         rebuildUsage()
     }
 
     // Liveness from Claude Code's statusline: fires on EVERY rate_limits POST (#93), even when the value
-    // is unchanged. Keeps the source-precedence stamp fresh AND re-affirms the current statusline value
-    // as live so last-good does not age out during an active-but-flat session (#108).
+    // is unchanged. A fresh POST means the statusline is the live source, so re-affirm the cached value
+    // as LIVE -- this clears any stale flag/note a prior oauth transient left even when the value callback
+    // was deduped (#59/#108). On a flat session (display already live) just keep last-good fresh so it
+    // does not age out mid-session.
     private func onStatuslineActivity() {
         poller.noteStatusline()    // #64: a live statusline => skip the (often-429) Claude oauth poll.
         statuslineClaudeAt = Date()
-        if claudeRetention.lastGood != nil { claudeRetention.lastGoodAt = Date() }
+        guard let v = statuslineClaude else { return }
+        var live = v; live.stale = nil
+        if claudeDisplay != live {
+            reduceClaude(.live, v)
+            rebuildUsage()
+        } else {
+            claudeRetention.lastGoodAt = Date()
+        }
     }
 
     // Claude usage VALUE from Claude Code's statusline rate_limits. Fed to the reducer as a LIVE
