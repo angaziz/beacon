@@ -117,6 +117,20 @@ static void test_parse_null_and_missing_windows(void) {
   TEST_ASSERT_EQUAL_INT16(-1, u.codex.d7.pct);
 }
 
+static void test_parse_stale_flag(void) {
+  // #108: per-provider stale. Present+true => stale; absent => live (false). Claude stale, Codex live.
+  const char* j = "{\"v\":1,\"usage\":{"
+                  "\"claude\":{\"stale\":true,\"h5\":{\"pct\":24,\"reset\":1},\"d7\":{\"pct\":32,\"reset\":2}},"
+                  "\"codex\":{\"h5\":{\"pct\":1,\"reset\":3},\"d7\":{\"pct\":0,\"reset\":4}}}}";
+  usage_rec_t u; buddy_rec_t b; bool hu, hb;
+  memset(&u, 0, sizeof(u)); memset(&b, 0, sizeof(b));
+  TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
+  TEST_ASSERT_TRUE(hu);
+  TEST_ASSERT_TRUE(u.claude.stale);    // explicit "stale":true
+  TEST_ASSERT_FALSE(u.codex.stale);    // absent => live
+  TEST_ASSERT_EQUAL_INT16(24, u.claude.h5.pct);   // value still parsed alongside the flag
+}
+
 static void test_parse_prompt_absent_is_idle(void) {
   const char* j = "{\"v\":1,\"buddy\":{\"running\":0,\"waiting\":0,\"tokens\":10,\"context_pct\":5}}";
   usage_rec_t u; buddy_rec_t b; bool hu, hb;
@@ -386,6 +400,7 @@ int main(int, char**) {
   RUN_TEST(test_reassemble_overflow_then_recover);
   RUN_TEST(test_parse_full_frame);
   RUN_TEST(test_parse_null_and_missing_windows);
+  RUN_TEST(test_parse_stale_flag);
   RUN_TEST(test_parse_prompt_absent_is_idle);
   RUN_TEST(test_parse_same_prompt_preserves_pending);
   RUN_TEST(test_parse_new_prompt_resets_decision);

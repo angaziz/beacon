@@ -132,8 +132,10 @@ static void update(void) {
   const usage_window_t* wins[METER_COUNT] = {
     &u.claude.h5, &u.claude.d7, &u.codex.h5, &u.codex.d7
   };
-  for (int i = 0; i < METER_COUNT; i++)
-    set_meter(t, i, ph ? &none : wins[i], dim, now);
+  for (int i = 0; i < METER_COUNT; i++) {
+    bool wdim = dim || (i < 2 ? u.claude.stale : u.codex.stale);   // #108: idx 0,1 claude; 2,3 codex.
+    set_meter(t, i, ph ? &none : wins[i], wdim, now);
+  }
 }
 
 extern const screen_view_t usage_led_view = { build, update };

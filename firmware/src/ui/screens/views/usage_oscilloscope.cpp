@@ -154,11 +154,12 @@ static void update(void) {
 
   bool ph = sv_placeholder(u.hdr.state);
   bool dim = sv_dim(u.hdr.state);
+  bool cdim = dim || u.claude.stale, xdim = dim || u.codex.stale;   // #108: dim last-good per provider.
 
-  apply_channel(t, 0, &u.claude.h5, ph, dim, now);
-  apply_channel(t, 1, &u.claude.d7, ph, dim, now);
-  apply_channel(t, 2, &u.codex.h5,  ph, dim, now);
-  apply_channel(t, 3, &u.codex.d7,  ph, dim, now);
+  apply_channel(t, 0, &u.claude.h5, ph, cdim, now);
+  apply_channel(t, 1, &u.claude.d7, ph, cdim, now);
+  apply_channel(t, 2, &u.codex.h5,  ph, xdim, now);
+  apply_channel(t, 3, &u.codex.d7,  ph, xdim, now);
 }
 
 extern const screen_view_t usage_oscilloscope_view = { build, update };

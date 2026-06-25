@@ -18,7 +18,8 @@ static Cell make_cell(lv_obj_t* page, int dx, int dy, const char* tag) {
   return c;
 }
 
-static void set_cell(Cell& c, const usage_window_t& w, const beacon_theme_t* th, uint32_t now, bool ph) {
+static void set_cell(Cell& c, const usage_window_t& w, const beacon_theme_t* th, uint32_t now,
+                     bool ph, bool dim) {
   if (ph || w.pct < 0) { txt_set(c.pct, "--"); hidden_set(c.bar, true); }
   else {
     txt_fmt(c.pct, "%d%%", w.pct);
@@ -27,8 +28,9 @@ static void set_cell(Cell& c, const usage_window_t& w, const beacon_theme_t* th,
     bg_opa_if(c.bar, LV_OPA_COVER, LV_PART_MAIN);
     bg_opa_if(c.bar, LV_OPA_COVER, LV_PART_INDICATOR);
     bg_color_if(c.bar, th->line, LV_PART_MAIN);
-    bg_color_if(c.bar, th->accent, LV_PART_INDICATOR);
+    bg_color_if(c.bar, dim ? th->line : th->accent, LV_PART_INDICATOR);   // #108: dim last-good.
   }
+  txt_color(c.pct, dim ? th->ink_dim : th->ink);   // set both branches so it resets when no longer stale.
   char rb[12]; reset_str(rb, sizeof(rb), ph ? 0 : w.reset, now);
   txt_fmt(c.resets, "rst %s", rb);
 }
@@ -50,9 +52,10 @@ static void build(lv_obj_t* page) {
 static void update(void) {
   usage_rec_t u = ds_get_usage(); const beacon_theme_t* th = theme_active(); uint32_t now = now_s();
   bool ph = sv_placeholder(u.hdr.state);
+  bool cdim = u.claude.stale, xdim = u.codex.stale;   // #108: dim last-good per provider.
   slot_set(s_slot, "POLL 30S", &u.hdr, now);
-  set_cell(s_c5, u.claude.h5, th, now, ph); set_cell(s_c7, u.claude.d7, th, now, ph);
-  set_cell(s_x5, u.codex.h5, th, now, ph);  set_cell(s_x7, u.codex.d7, th, now, ph);
+  set_cell(s_c5, u.claude.h5, th, now, ph, cdim); set_cell(s_c7, u.claude.d7, th, now, ph, cdim);
+  set_cell(s_x5, u.codex.h5, th, now, ph, xdim);  set_cell(s_x7, u.codex.d7, th, now, ph, xdim);
 }
 
 extern const screen_view_t usage_editorial_view = { build, update };

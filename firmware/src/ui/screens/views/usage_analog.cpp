@@ -121,11 +121,12 @@ static void update(void) {
 
   bool dim = sv_dim(u.hdr.state);
   bool ph  = sv_placeholder(u.hdr.state);
+  bool cdim = dim || u.claude.stale, xdim = dim || u.codex.stale;   // #108: dim last-good per provider.
 
-  apply(t, 0, &u.claude.h5, ph, dim, now);
-  apply(t, 1, &u.claude.d7, ph, dim, now);
-  apply(t, 2, &u.codex.h5,  ph, dim, now);
-  apply(t, 3, &u.codex.d7,  ph, dim, now);
+  apply(t, 0, &u.claude.h5, ph, cdim, now);
+  apply(t, 1, &u.claude.d7, ph, cdim, now);
+  apply(t, 2, &u.codex.h5,  ph, xdim, now);
+  apply(t, 3, &u.codex.d7,  ph, xdim, now);
 }
 
 extern const screen_view_t usage_analog_view = { build, update };

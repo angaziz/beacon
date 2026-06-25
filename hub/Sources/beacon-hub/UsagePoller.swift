@@ -7,11 +7,12 @@ import BeaconHubKit
 // (Keychain / ~/.codex) stay on the Mac; only computed pct/reset cross BLE (tech.md 9). Tokens are
 // never logged. The two unofficial endpoints sit behind UsageProvider so they can be swapped/mocked.
 
-// Result of one provider poll: the normalized windows (or .unavailable) plus an optional menubar
-// reason (nil on success). On failure usage is .unavailable AND reason is set (D2).
+// Result of one provider poll: the normalized windows (.unavailable on non-live) plus a classified
+// outcome the reducer interprets (#108). .live carries the value; .transient/.terminal carry the
+// reason and usage stays .unavailable (the reducer serves last-good on transient).
 struct ProviderResult {
     let usage: ProviderUsage
-    let reason: String?   // e.g. "Claude token expired - re-login"; nil on success.
+    let outcome: ProviderOutcome
 }
 
 protocol UsageProvider {
@@ -20,7 +21,10 @@ protocol UsageProvider {
 }
 
 final class UsagePoller {
-    var onUpdate: ((Usage, [String]) -> Void)?
+    // Per-tick result: Claude is nil when its oauth poll was skipped (statusline fresh OR backed off) --
+    // the reducer (#108) treats nil as "no new observation", distinct from a fresh failure. Codex always
+    // polls.
+    var onUpdate: ((ProviderResult?, ProviderResult) -> Void)?
 
     private let claude: UsageProvider
     private let codex: UsageProvider
@@ -29,6 +33,10 @@ final class UsagePoller {
     // interval as the poll gate -- they must never disagree.
     var pollInterval: TimeInterval { interval }
     private let backoff: TimeInterval = 300   // disconnected cadence (#64): no live device => no sub-min need.
+    // Claude oauth 429 backoff (#108): exponential from the base interval, capped; a server Retry-After
+    // is honored up to the larger sanity cap.
+    private let claudeBackoffCap: TimeInterval = 900
+    private let retryAfterSanityCap: TimeInterval = 3600
     private let session: URLSession
     private var timer: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "beacon.usage")
@@ -37,7 +45,8 @@ final class UsagePoller {
     private var connected = true
     private var lastStatuslineAt: Date?
     private var lastPollAt = Date.distantPast
-    private var lastClaudeResult = ProviderResult(usage: .unavailable, reason: nil)   // reused when Claude is skipped.
+    private var claudeFails = 0              // consecutive Claude transient failures, for the backoff curve.
+    private var claudeBackoffUntil: Date?    // next time the Claude oauth poll is allowed.
 
     // Default the providers to the configured 15s-timeout session (#64): previously they fell back to
     // URLSession.shared (60s), so a stalled network could hang a poll past the 45s tick and stack.
@@ -77,12 +86,16 @@ final class UsagePoller {
         // to the Keychain poll so usage still shows before a session starts -- ACCEPTED tradeoff: one
         // Keychain prompt can occur in that fallback (bounded by ClaudeUsageProvider's reread cooldown).
         // This is expected, not a regression -- do not "fix" it by dropping the poller (issue #93 Option B).
-        poll(includeClaude: UsagePollDecision.shouldPollClaude(statuslineAge: age, interval: interval))
+        // #108: AND honor the oauth backoff window so a 429 storm is not re-hit every tick.
+        let backedOff = claudeBackoffUntil.map { now < $0 } ?? false
+        let includeClaude = UsagePollDecision.shouldPollClaude(statuslineAge: age, interval: interval)
+            && !backedOff
+        poll(includeClaude: includeClaude)
     }
 
     private func poll(includeClaude: Bool) {
         let group = DispatchGroup()
-        var claudeRes: ProviderResult? = includeClaude ? nil : lastClaudeResult   // reuse last when skipping.
+        var claudeRes: ProviderResult?
         var codexRes: ProviderResult?
 
         if includeClaude {
@@ -94,15 +107,30 @@ final class UsagePoller {
 
         group.notify(queue: queue) { [weak self] in
             guard let self else { return }
-            // When Claude is skipped, claudeRes is pre-seeded to lastClaudeResult, so this fallback only
-            // applies on a genuine fetch failure.
-            let c = claudeRes ?? ProviderResult(usage: .unavailable, reason: "Claude unavailable")
-            if includeClaude { self.lastClaudeResult = c }
-            let x = codexRes ?? ProviderResult(usage: .unavailable, reason: "Codex unavailable")
-            let usage = Usage(claude: c.usage, codex: x.usage)
-            let errors = [c.reason, x.reason].compactMap { $0 }
+            // Update the Claude oauth backoff from the actual fetch outcome (only when we polled). Live =>
+            // reset; transient => advance the exponential window (jitter applied here so the pure
+            // pollDelay stays deterministic); terminal is not a rate-limit signal, leave the curve alone.
+            if includeClaude, let c = claudeRes {
+                switch c.outcome {
+                case .live:
+                    self.claudeFails = 0; self.claudeBackoffUntil = nil
+                case .transient(let retryAfter, _):
+                    self.claudeFails += 1
+                    let delay = UsagePollDecision.pollDelay(
+                        consecutiveFails: self.claudeFails, retryAfter: retryAfter,
+                        base: self.interval, cap: self.claudeBackoffCap,
+                        retryAfterSanityCap: self.retryAfterSanityCap,
+                        jitterFraction: Double.random(in: -0.2...0.2))
+                    self.claudeBackoffUntil = Date().addingTimeInterval(delay)
+                case .terminal:
+                    break
+                }
+            }
+            let x = codexRes ?? ProviderResult(usage: .unavailable,
+                                               outcome: .terminal(reason: "Codex unavailable"))
+            let claudeOut = includeClaude ? claudeRes : nil   // nil => skipped, no new observation.
             let cb = self.onUpdate
-            DispatchQueue.main.async { cb?(usage, errors) }
+            DispatchQueue.main.async { cb?(claudeOut, x) }
         }
     }
 }
@@ -143,14 +171,15 @@ final class ClaudeUsageProvider: UsageProvider {
 
     func fetch(completion: @escaping (ProviderResult) -> Void) {
         guard let cred = credential() else {
-            completion(ProviderResult(usage: .unavailable, reason: "Claude token missing - run claude login"))
+            completion(ProviderResult(usage: .unavailable,
+                                      outcome: .terminal(reason: "Claude token missing - run claude login")))
             return
         }
         // Expired on disk is NOT a logged-out state: only the `claude` CLI can run the (single-use,
         // rotating) refresh grant. Skip the doomed request and say what we are actually waiting for.
         if cred.isExpired(at: Date()) {
             completion(ProviderResult(usage: .unavailable,
-                                      reason: "Claude token stale - open Claude Code to refresh"))
+                                      outcome: .terminal(reason: "Claude token stale - open Claude Code to refresh")))
             return
         }
         fetch(token: cred.accessToken, retryOn401: true, completion: completion)
@@ -161,7 +190,7 @@ final class ClaudeUsageProvider: UsageProvider {
     // iff the token actually changed; an unchanged token or a second 401 surfaces the terminal reason.
     private func fetch(token: String, retryOn401: Bool, completion: @escaping (ProviderResult) -> Void) {
         guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
-            completion(ProviderResult(usage: .unavailable, reason: "Claude endpoint invalid"))
+            completion(ProviderResult(usage: .unavailable, outcome: .terminal(reason: "Claude endpoint invalid")))
             return
         }
         var req = URLRequest(url: url)
@@ -174,10 +203,12 @@ final class ClaudeUsageProvider: UsageProvider {
 
         session.dataTask(with: req) { data, resp, err in
             if let err = err {
-                completion(ProviderResult(usage: .unavailable, reason: "Claude network error: \(err.localizedDescription)"))
+                completion(ProviderResult(usage: .unavailable, outcome: .transient(retryAfter: nil,
+                    reason: "Claude network error: \(err.localizedDescription)")))
                 return
             }
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let http = resp as? HTTPURLResponse
+            let code = http?.statusCode ?? 0
             if code == 401 {
                 self.invalidateToken()   // token rotated; re-read from Keychain.
                 // Self-heal within this poll: the running `claude` CLI rotates the Keychain item before
@@ -187,20 +218,25 @@ final class ClaudeUsageProvider: UsageProvider {
                     self.fetch(token: fresh.accessToken, retryOn401: false, completion: completion)
                     return
                 }
-                completion(ProviderResult(usage: .unavailable, reason: "Claude token expired - re-login"))
+                completion(ProviderResult(usage: .unavailable,
+                                          outcome: .terminal(reason: "Claude token expired - re-login")))
                 return
             }
             guard code == 200, let data = data else {
-                completion(ProviderResult(usage: .unavailable, reason: "Claude usage unavailable (HTTP \(code))"))
+                // 429 / 5xx / other: transient. Honor a server Retry-After (#108).
+                let retryAfter = RetryAfter.parse(http?.value(forHTTPHeaderField: "Retry-After"), now: Date())
+                completion(ProviderResult(usage: .unavailable, outcome: .transient(retryAfter: retryAfter,
+                    reason: "Claude usage unavailable (HTTP \(code))")))
                 return
             }
             guard let usage = UsageNormalizer.claude(data) else {
                 // HTTP 200 but the body did not normalize => the unofficial endpoint's shape likely
                 // drifted. Surface it distinctly so a schema change is visible, not a silent "--".
-                completion(ProviderResult(usage: .unavailable, reason: "Claude usage: unexpected response shape"))
+                completion(ProviderResult(usage: .unavailable,
+                                          outcome: .terminal(reason: "Claude usage: unexpected response shape")))
                 return
             }
-            completion(ProviderResult(usage: usage, reason: nil))
+            completion(ProviderResult(usage: usage, outcome: .live))
         }.resume()
     }
 
@@ -229,7 +265,8 @@ final class CodexUsageProvider: UsageProvider {
 
     func fetch(completion: @escaping (ProviderResult) -> Void) {
         guard let creds = Self.credentials() else {
-            completion(ProviderResult(usage: .unavailable, reason: "Codex token missing - run codex login"))
+            completion(ProviderResult(usage: .unavailable,
+                                      outcome: .terminal(reason: "Codex token missing - run codex login")))
             return
         }
         fetch(token: creds.accessToken, accountId: creds.accountId, retryOn401: true, completion: completion)
@@ -241,7 +278,7 @@ final class CodexUsageProvider: UsageProvider {
     private func fetch(token: String, accountId: String, retryOn401: Bool,
                        completion: @escaping (ProviderResult) -> Void) {
         guard let url = URL(string: "https://chatgpt.com/backend-api/wham/usage") else {
-            completion(ProviderResult(usage: .unavailable, reason: "Codex endpoint invalid"))
+            completion(ProviderResult(usage: .unavailable, outcome: .terminal(reason: "Codex endpoint invalid")))
             return
         }
         var req = URLRequest(url: url)
@@ -250,10 +287,12 @@ final class CodexUsageProvider: UsageProvider {
 
         session.dataTask(with: req) { data, resp, err in
             if let err = err {
-                completion(ProviderResult(usage: .unavailable, reason: "Codex network error: \(err.localizedDescription)"))
+                completion(ProviderResult(usage: .unavailable, outcome: .transient(retryAfter: nil,
+                    reason: "Codex network error: \(err.localizedDescription)")))
                 return
             }
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let http = resp as? HTTPURLResponse
+            let code = http?.statusCode ?? 0
             if code == 401 {
                 // Self-heal within this poll: the running `codex` CLI rotates auth.json in place (bumps
                 // last_refresh), so re-read once and retry iff access_token changed (else genuinely expired).
@@ -262,20 +301,24 @@ final class CodexUsageProvider: UsageProvider {
                                retryOn401: false, completion: completion)
                     return
                 }
-                completion(ProviderResult(usage: .unavailable, reason: "Codex token expired - re-login"))
+                completion(ProviderResult(usage: .unavailable,
+                                          outcome: .terminal(reason: "Codex token expired - re-login")))
                 return
             }
             guard code == 200, let data = data else {
-                completion(ProviderResult(usage: .unavailable, reason: "Codex usage unavailable (HTTP \(code))"))
+                let retryAfter = RetryAfter.parse(http?.value(forHTTPHeaderField: "Retry-After"), now: Date())
+                completion(ProviderResult(usage: .unavailable, outcome: .transient(retryAfter: retryAfter,
+                    reason: "Codex usage unavailable (HTTP \(code))")))
                 return
             }
             guard let usage = UsageNormalizer.codex(data) else {
                 // HTTP 200 but the body did not normalize => the unofficial endpoint's shape likely
                 // drifted. Surface it distinctly so a schema change is visible, not a silent "--".
-                completion(ProviderResult(usage: .unavailable, reason: "Codex usage: unexpected response shape"))
+                completion(ProviderResult(usage: .unavailable,
+                                          outcome: .terminal(reason: "Codex usage: unexpected response shape")))
                 return
             }
-            completion(ProviderResult(usage: usage, reason: nil))
+            completion(ProviderResult(usage: usage, outcome: .live))
         }.resume()
     }
 

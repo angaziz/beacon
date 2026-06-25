@@ -142,9 +142,9 @@ final class MenubarController: NSObject {
     func setAlert(_ message: String?) { alert = message; model.alert = message; applyBarIcon() }
     func setBridgeAlert(_ message: String?) { bridgeAlert = message; model.bridgeAlert = message; applyBarIcon() }
 
-    func setUsage(_ usage: Usage, errors: [String]) {
+    func setUsage(_ usage: Usage, notes: [UsageNote]) {
         model.usage = usage
-        model.errors = errors
+        model.notes = notes
         model.lastSync = Date()
         model.now = Date()   // restamp so reset hints stay fresh even while the popover is open
     }

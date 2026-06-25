@@ -159,11 +159,12 @@ static void update(void) {
 
   bool dim = sv_dim(u.hdr.state);
   bool ph  = sv_placeholder(u.hdr.state) || u.hdr.state == ST_HUB_OFFLINE;
+  bool cdim = dim || u.claude.stale, xdim = dim || u.codex.stale;   // #108: dim last-good per provider.
 
-  apply_window(0, &u.claude.h5, dim, ph, t, now);
-  apply_window(1, &u.claude.d7, dim, ph, t, now);
-  apply_window(2, &u.codex.h5,  dim, ph, t, now);
-  apply_window(3, &u.codex.d7,  dim, ph, t, now);
+  apply_window(0, &u.claude.h5, cdim, ph, t, now);
+  apply_window(1, &u.claude.d7, cdim, ph, t, now);
+  apply_window(2, &u.codex.h5,  xdim, ph, t, now);
+  apply_window(3, &u.codex.d7,  xdim, ph, t, now);
 }
 
 extern const screen_view_t usage_blueprint_view = { build, update };

@@ -14,7 +14,13 @@ public struct UsageWindow: Codable, Equatable {
 public struct ProviderUsage: Codable, Equatable {
     public var h5: UsageWindow
     public var d7: UsageWindow
-    public init(h5: UsageWindow, d7: UsageWindow) { self.h5 = h5; self.d7 = d7 }
+    // true => the windows carry last-known-good held through a transient failure (device dims them).
+    // MUST be nil (not false) on live: synthesized Codable encodes `false` but omits nil, and §A only
+    // ever carries `"stale":true`. Additive v:1 ext (issue #108), mirrors qlen/loc.
+    public var stale: Bool?
+    public init(h5: UsageWindow, d7: UsageWindow, stale: Bool? = nil) {
+        self.h5 = h5; self.d7 = d7; self.stale = stale
+    }
     public static var unavailable: ProviderUsage {
         ProviderUsage(h5: UsageWindow(pct: nil, reset: 0), d7: UsageWindow(pct: nil, reset: 0))
     }

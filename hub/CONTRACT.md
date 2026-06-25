@@ -23,6 +23,10 @@ the device keeps an absent block's last values). A null/omitted window `pct` => 
 ```
 - Absent `buddy.prompt` => idle. `pct` is an integer 0..100 or JSON null (device reads null/absent as -1).
 - The device codec (`hub_parse_status`) + `test_hub_proto` assert exactly this shape.
+- `usage.<provider>.stale` (additive `v:1` ext, issue #108) -- `true` => the windows carry
+  last-known-good the hub held through a transient failure (e.g. Claude oauth 429); the device dims that
+  provider's windows. Emitted ONLY when `true` (absent/`false` => live), like `qlen`. Per-provider:
+  `claude` and `codex` carry it independently.
 - `buddy.prompt.qlen` (additive `v:1` ext, issue #98) -- total pending prompts incl. the shown front.
   Omitted or `<=1` => a single prompt (no `(1 of N)` badge). The device always shows the front;
   position is implicitly 1, so there is no `qpos`.
