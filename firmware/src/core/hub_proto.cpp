@@ -102,6 +102,7 @@ static uint8_t map_session_state(const char* s) {
   if (!strcmp(s, "waiting_queued")) return BST_WAITING_QUEUED;
   if (!strcmp(s, "attention"))      return BST_ATTENTION;
   if (!strcmp(s, "idle"))           return BST_IDLE;
+  if (!strcmp(s, "question"))       return BST_QUESTION;
   return BST_WORKING;                                  // unknown => safest non-alerting state
 }
 

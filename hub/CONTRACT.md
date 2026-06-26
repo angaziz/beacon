@@ -55,8 +55,10 @@ on any session-state change and on (re)connect; parsed by `hub_parse_sessions` i
 - Newest-first (hub-sorted by last update). **Frozen caps** (worst case asserted < 1024 B): `sessions`
   length ≤ **5**; `id` ≤ **6** chars (`s` + monotonic counter, wraps mod 100000); `label` ≤ **28** chars
   (`folder · branch`; default branches `main`/`master` dropped); `state` ∈ {`working`, `waiting`,
-  `waiting_queued`, `attention`, `idle`}; `ts` epoch seconds. Unknown `state` => `working` (device).
-  The device renders up to 4 rows on the `claude` screen.
+  `waiting_queued`, `attention`, `question`, `idle`}; `ts` epoch seconds. Unknown `state` => `working`
+  (device). `question` = the session is waiting on the user's input (from the CC `Notification` hook);
+  the device surfaces it as a "tap to answer on Mac" takeover (priority: permission prompt > question >
+  list). The device renders up to 4 rows on the `claude` screen.
 - Migration: `buddy.entries` stays emitted/legal for back-compat; new firmware reads `sessions` and
   ignores `entries`, old firmware ignores the unknown `sessions` frame. No version bump.
 

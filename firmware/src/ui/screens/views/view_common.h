@@ -57,12 +57,13 @@ static inline lv_color_t buddy_session_state_color(const beacon_theme_t* t, uint
     case BST_ATTENTION:      return t->accent;
     case BST_WAITING:        return t->down;
     case BST_WORKING:        return t->ink;
+    case BST_QUESTION:       return t->accent;
     default:                 return t->ink_dim;  // queued / idle
   }
 }
 static inline const char* buddy_session_glyph(uint8_t st) {
   switch (st) { case BST_ATTENTION: return "*"; case BST_WAITING: return "!";
-                case BST_WAITING_QUEUED: return "."; case BST_WORKING: return ">"; default: return "-"; }
+                case BST_WAITING_QUEUED: return "."; case BST_WORKING: return ">"; case BST_QUESTION: return "?"; default: return "-"; }
 }
 
 // Short state word for the session row's right column. Lowercase; views uppercase per their idiom.
@@ -72,6 +73,7 @@ static inline const char* buddy_session_state_word(uint8_t st) {
     case BST_WAITING:        return "waiting";
     case BST_WAITING_QUEUED: return "queued";
     case BST_IDLE:           return "idle";
+    case BST_QUESTION:       return "question";
     default:                 return "working";
   }
 }
@@ -102,15 +104,12 @@ static inline void buddy_session_split_label(const char* label, char* folder, si
   snprintf(branch, bn, "%s", b);
 }
 
-// Buddy telemetry stats line: "N RUN . N WAIT . NK TOK . CTX N%".
-// `caps` controls case.
+// Buddy telemetry stats line: "N RUN . N WAIT". `caps` controls case.
 static inline void buddy_stats_fmt(char* buf, size_t n, const buddy_rec_t* b, bool caps) {
   if (caps)
-    snprintf(buf, n, "%u RUN . %u WAIT . %uK TOK . CTX %u%%",
-             (unsigned)b->running, (unsigned)b->waiting,
-             (unsigned)(b->tokens / 1000), (unsigned)b->context_pct);
+    snprintf(buf, n, "%u RUN . %u WAIT",
+             (unsigned)b->running, (unsigned)b->waiting);
   else
-    snprintf(buf, n, "%u run . %u wait . %uk tok . ctx %u%%",
-             (unsigned)b->running, (unsigned)b->waiting,
-             (unsigned)(b->tokens / 1000), (unsigned)b->context_pct);
+    snprintf(buf, n, "%u run . %u wait",
+             (unsigned)b->running, (unsigned)b->waiting);
 }

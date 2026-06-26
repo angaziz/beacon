@@ -111,6 +111,54 @@ final class SessionRegistryTests: XCTestCase {
         XCTAssertEqual(h?.cwd, "/tmp/x")   // cwd from touchActivity is kept
     }
 
+    func testMarkNeedsInputProducesQuestion() {
+        let r = SessionRegistry(idleTTL: 300)
+        r.touchActivity(sessionId: "A", cwd: "/x/api", now: t0)
+        r.markNeedsInput(sessionId: "A")
+        let snap = r.snapshot(now: t0.addingTimeInterval(1), waitingFront: nil, waitingQueued: [])
+        XCTAssertEqual(snap.first?.state, .question)
+    }
+
+    func testActivityClearsQuestion() {
+        let r = SessionRegistry(idleTTL: 300)
+        r.touchActivity(sessionId: "A", cwd: "/x/api", now: t0)
+        r.markNeedsInput(sessionId: "A")
+        r.touchActivity(sessionId: "A", cwd: "/x/api", now: t0.addingTimeInterval(1))
+        let snap = r.snapshot(now: t0.addingTimeInterval(2), waitingFront: nil, waitingQueued: [])
+        XCTAssertEqual(snap.first?.state, .working)
+    }
+
+    func testQuestionWinsOverStaleAndStopped() {
+        struct C { let name: String; let setup: (SessionRegistry) -> Void; let expect: SessionState }
+        let cases: [C] = [
+            // needsInput + stale => still question (Claude is waiting regardless of age)
+            C(name: "question beats stale", setup: {
+                $0.touchActivity(sessionId: "A", cwd: "/x", now: self.t0)
+                $0.markNeedsInput(sessionId: "A") }, expect: .question),
+            // needsInput + stopped => question (not attention)
+            C(name: "question beats stopped", setup: {
+                $0.touchActivity(sessionId: "A", cwd: "/x", now: self.t0)
+                $0.markStop(sessionId: "A", now: self.t0)
+                $0.markNeedsInput(sessionId: "A") }, expect: .question),
+        ]
+        for c in cases {
+            let r = SessionRegistry(idleTTL: 300)
+            c.setup(r)
+            // Query 400s later so the session is stale.
+            let snap = r.snapshot(now: t0.addingTimeInterval(400), waitingFront: nil, waitingQueued: [])
+            XCTAssertEqual(snap.first?.state, c.expect, c.name)
+        }
+    }
+
+    func testWaitingBeatsQuestion() {
+        let r = SessionRegistry(idleTTL: 300)
+        r.touchActivity(sessionId: "A", cwd: "/x/api", now: t0)
+        r.markNeedsInput(sessionId: "A")
+        // front-prompt session overrides question
+        let snap = r.snapshot(now: t0.addingTimeInterval(1), waitingFront: "A", waitingQueued: [])
+        XCTAssertEqual(snap.first?.state, .waiting)
+    }
+
     // I2: a later setHost with empty/nil fields (e.g. a `compact` event that didn't re-export
     // WARP_FOCUS_URL) must MERGE, not wipe a previously-captured precise handle.
     func testSetHostMergesAndPreservesPriorValues() {

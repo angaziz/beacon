@@ -31,7 +31,7 @@ Five screens, navigated by swipe + motion gestures:
 - **Markets are curated from the hub, no re-flashing** — search Binance + Yahoo in the macOS menubar app, pick your tickers, and they push to the device over BLE and apply instantly (persisted on-device, no reboot, no code change). The device keeps fetching prices itself over WiFi.
 - **WiFi setup happens on-device** — the device opens a hotspot with a captive portal; no credentials are ever compiled into the firmware. Multiple networks are remembered.
 - **AI Usage is live over Bluetooth**: the macOS hub reads Claude Code + Codex usage and streams it to the device over a bonded BLE link, alongside the device's own WiFi plane.
-- **Coding Buddy is session-aware, validated on hardware**: the `claude` screen lists your live Claude Code sessions (state + folder·branch + age, newest first); approve/deny a tool-permission prompt from the device and the Mac honors it; **tap a session to focus its terminal** (precise for Warp; repo-window for VS Code/Cursor; app-level otherwise); a distinct chime fires when a session needs you, and the device wakes itself for it.
+- **Coding Buddy is session-aware, validated on hardware**: the `claude` screen lists your live Claude Code sessions (state + folder·branch + age, newest first); approve/deny a tool-permission prompt from the device and the Mac honors it; a session waiting on your input shows a **"tap to answer on Mac"** card; **tap any session to focus its terminal** (precise for Warp; repo-window for VS Code/Cursor; app-level otherwise); a distinct chime fires when a session needs you, and the device wakes itself for it.
 - Settings, theme picker, brightness, and preferences persist across reboots.
 
 ## Two-plane architecture

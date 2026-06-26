@@ -11,7 +11,7 @@
 #include <Arduino.h>
 
 // Aerospace HUD / Claude. "// CLAUDE" eyebrow + telemetry status line
-// (N RUNNING . N WAITING . NK TOK . CTX NN%). When a permission prompt is present:
+// (N RUN . N WAIT). When a permission prompt is present:
 // "PERMISSION - APPROVE?" + big tool name + hint box + DENY | APPROVE. Decide routes through
 // buddy_decide; the prompt waits on the hub ack ("SENT - AWAITING") and clears only on ok:true,
 // else warns "TOO LATE" with a dismiss. Otherwise idle: 4 session rows (folder + sub each).
@@ -36,10 +36,25 @@ static lv_obj_t *s_row_tick[SESSION_ROWS];    // leading state bar
 static lv_obj_t *s_row_state[SESSION_ROWS];   // right-aligned state word
 static lv_obj_t *s_row_age[SESSION_ROWS];     // right-aligned age
 static lv_obj_t *s_row_btn[SESSION_ROWS];     // transparent tap target (issue #110 Phase 2)
+static lv_obj_t *s_q_btn;                    // full-screen tap target for question card
+static lv_obj_t *s_q_badge;                  // "(1 OF N)" count label
+static uint8_t   s_q_session_idx;            // index of the question session being shown
+
+static void update(void);
 
 // In PROMPT_TOO_LATE the left action becomes "dismiss" (clear the warning); else it denies.
 static void deny_cb(lv_event_t* e)    { (void)e; if (idle_take_wake_tap()) return; if (!buddy_dismiss()) buddy_decide(false); }
 static void approve_cb(lv_event_t* e) { (void)e; if (idle_take_wake_tap()) return; buddy_decide(true); }
+static void on_question_tap(lv_event_t* e) {
+  (void)e;
+  if (idle_take_wake_tap()) return;
+  buddy_rec_t b = ds_get_buddy();
+  if (s_q_session_idx < b.session_count &&
+      b.sessions[s_q_session_idx].state == BST_QUESTION) {
+    buddy_open(b.sessions[s_q_session_idx].id);
+    update();
+  }
+}
 static void on_row_tap(lv_event_t* e) {
   if (idle_take_wake_tap()) return;
   uint8_t idx = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
@@ -62,7 +77,7 @@ static void build(lv_obj_t* page) {
 
   s_tele = lv_label_create(page);
   lv_obj_add_style(s_tele, &S.slot, 0);
-  lv_label_set_text(s_tele, "-- RUNNING . -- WAITING");
+  lv_label_set_text(s_tele, "-- RUN . -- WAIT");
   lv_obj_align(s_tele, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET + 24);
 
   // Prompt layout.
@@ -184,6 +199,21 @@ static void build(lv_obj_t* page) {
     lv_label_set_long_mode(s_row_age[i], LV_LABEL_LONG_DOT);
     lv_obj_align(s_row_age[i], LV_ALIGN_TOP_RIGHT, -SAFE_INSET, y + 22);
   }
+
+  // Question card: full-screen tap target and count badge (hidden until TIER 2 is active).
+  s_q_btn = lv_btn_create(page);
+  lv_obj_remove_style_all(s_q_btn);
+  lv_obj_set_size(s_q_btn, lv_pct(100), lv_pct(100));
+  lv_obj_align(s_q_btn, LV_ALIGN_TOP_LEFT, 0, 0);
+  lv_obj_add_flag(s_q_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_event_cb(s_q_btn, on_question_tap, LV_EVENT_CLICKED, NULL);
+
+  s_q_badge = lv_label_create(page);
+  lv_obj_set_style_text_font(s_q_badge, t->f_mono, 0);
+  lv_obj_set_style_text_color(s_q_badge, t->ink_dim, 0);
+  lv_label_set_text(s_q_badge, "");
+  lv_obj_align(s_q_badge, LV_ALIGN_TOP_RIGHT, -SAFE_INSET, SAFE_INSET);
+  lv_obj_add_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void update(void) {
@@ -201,18 +231,33 @@ static void update(void) {
 
   bool ph = sv_placeholder(b.hdr.state);
   if (ph) {
-    lv_label_set_text(s_tele, "-- RUNNING . -- WAITING");
+    lv_label_set_text(s_tele, "-- RUN . -- WAIT");
   } else {
     char tb[64];
-    snprintf(tb, sizeof(tb), "%u RUNNING . %u WAITING . %uK TOK . CTX %u%%",
-             (unsigned)b.running, (unsigned)b.waiting,
-             (unsigned)(b.tokens / 1000), (unsigned)b.context_pct);
+    snprintf(tb, sizeof(tb), "%u RUN . %u WAIT",
+             (unsigned)b.running, (unsigned)b.waiting);
     lv_label_set_text(s_tele, tb);
   }
 
+  // Find newest question session (first one with BST_QUESTION state).
+  int8_t q_idx = -1; uint8_t q_count = 0;
+  for (uint8_t i = 0; i < b.session_count; i++) {
+    if (b.sessions[i].state == BST_QUESTION) {
+      if (q_idx < 0) q_idx = (int8_t)i;
+      q_count++;
+    }
+  }
+
+  // Question objects always hidden unless TIER 2 activates them below.
+  lv_obj_add_flag(s_q_btn,   LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
+
   bool show_prompt = b.prompt.present && !ph;
   if (show_prompt) {
+    // TIER 1: permission prompt.
     lv_obj_clear_flag(s_prompt_box, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_deny,    LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_approve, LV_OBJ_FLAG_HIDDEN);
     for (uint8_t i = 0; i < SESSION_ROWS; i++) {
       lv_obj_add_flag(s_row_btn[i],    LV_OBJ_FLAG_HIDDEN);
       lv_obj_add_flag(s_row_tick[i],   LV_OBJ_FLAG_HIDDEN);
@@ -259,7 +304,61 @@ static void update(void) {
       break;
     }
     }
+  } else if (q_idx >= 0) {
+    // TIER 2: question card — a session wants a human decision on the Mac.
+    s_q_session_idx = (uint8_t)q_idx;
+    const buddy_session_t* qs = &b.sessions[q_idx];
+
+    lv_obj_clear_flag(s_prompt_box, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_deny,    LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_approve, LV_OBJ_FLAG_HIDDEN);
+    for (uint8_t i = 0; i < SESSION_ROWS; i++) {
+      lv_obj_add_flag(s_row_btn[i],    LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_tick[i],   LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_folder[i], LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_sub[i],    LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_state[i],  LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_age[i],    LV_OBJ_FLAG_HIDDEN);
+    }
+
+    lv_label_set_text(s_eyebrow, "YOUR TURN");
+    lv_obj_set_style_text_color(s_eyebrow, t->accent, 0);
+
+    char folder[BUDDY_LABEL_LEN], branch[BUDDY_LABEL_LEN];
+    buddy_session_split_label(qs->label, folder, sizeof(folder), branch, sizeof(branch));
+    lv_label_set_text(s_tool, folder[0] ? folder : qs->id);
+
+    char hintbuf[BUDDY_HINT_LEN + 32];
+    if (branch[0])
+      snprintf(hintbuf, sizeof(hintbuf), "%s\nTAP TO ANSWER ON MAC", branch);
+    else
+      snprintf(hintbuf, sizeof(hintbuf), "TAP TO ANSWER ON MAC");
+    lv_label_set_text(s_hint, hintbuf);
+
+    // Override eyebrow with open-state feedback if an open is in progress for this session.
+    if (b.open_state != OPEN_NONE &&
+        strncmp(b.open_id, qs->id, BUDDY_SID_LEN) == 0) {
+      if (b.open_state == OPEN_SENDING) {
+        lv_label_set_text(s_eyebrow, "OPENING...");
+        lv_obj_set_style_text_color(s_eyebrow, t->ink_dim, 0);
+      } else if (b.open_state == OPEN_OK) {
+        lv_label_set_text(s_eyebrow, "OPENED");
+        lv_obj_set_style_text_color(s_eyebrow, t->up, 0);
+      } else {
+        lv_label_set_text(s_eyebrow, "COULDN'T OPEN");
+        lv_obj_set_style_text_color(s_eyebrow, t->down, 0);
+      }
+    }
+
+    if (q_count > 1) {
+      char qbadge[16];
+      snprintf(qbadge, sizeof(qbadge), "(1 OF %u)", (unsigned)q_count);
+      lv_label_set_text(s_q_badge, qbadge);
+      lv_obj_clear_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_clear_flag(s_q_btn, LV_OBJ_FLAG_HIDDEN);
   } else {
+    // TIER 3: idle session list.
     lv_obj_add_flag(s_prompt_box, LV_OBJ_FLAG_HIDDEN);
     for (uint8_t i = 0; i < SESSION_ROWS; i++) {
       lv_obj_clear_flag(s_row_folder[i], LV_OBJ_FLAG_HIDDEN);

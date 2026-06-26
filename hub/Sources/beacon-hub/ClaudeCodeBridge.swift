@@ -489,7 +489,9 @@ final class ClaudeCodeBridge {
                 ensureBranch(sessionId: sid, cwd: cwd)
             }
         case "Notification":
-            break   // Notification is NOT a held prompt; waiting derives only from enqueuePrompt (design §2, Codex #2).
+            // CC fires Notification when the session asks the user a question (not a permission prompt).
+            // Mark needsInput so the device can surface a "tap to answer on Mac" takeover.
+            if let sid { registry.markNeedsInput(sessionId: sid) }
         case "SessionEnd":
             // Clean exit (does NOT fire on SIGKILL -- the TTL reaper backstops that). Remove all trace.
             if let sid {

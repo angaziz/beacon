@@ -30,6 +30,9 @@ static lv_obj_t *s_row_tick[SESSION_ROWS];    // leading state bar
 static lv_obj_t *s_row_state[SESSION_ROWS];   // right-aligned state word
 static lv_obj_t *s_row_age[SESSION_ROWS];     // right-aligned age
 static lv_obj_t *s_row_btn[SESSION_ROWS];     // transparent tap target (issue #110 Phase 2)
+static lv_obj_t *s_q_btn, *s_q_badge;
+static uint8_t   s_q_session_idx;
+static void update(void);
 
 static bool actions_locked(screen_state_t st) {
   return st == ST_HUB_OFFLINE;
@@ -47,6 +50,16 @@ static void on_row_tap(lv_event_t* e) {
   buddy_rec_t b = ds_get_buddy();
   if (idx < b.session_count) buddy_open(b.sessions[idx].id);
 }
+static void on_question_tap(lv_event_t* e) {
+  (void)e;
+  if (idle_take_wake_tap()) return;
+  buddy_rec_t b = ds_get_buddy();
+  if (s_q_session_idx < b.session_count &&
+      b.sessions[s_q_session_idx].state == BST_QUESTION) {
+    buddy_open(b.sessions[s_q_session_idx].id);
+    update();
+  }
+}
 
 static void build(lv_obj_t* page) {
   const beacon_theme_t* t = theme_active();
@@ -63,9 +76,9 @@ static void build(lv_obj_t* page) {
   lv_obj_set_style_text_font(s_status, t->f_mono, 0);
   lv_obj_align(s_status, LV_ALIGN_TOP_RIGHT, -SAFE_INSET, SAFE_INSET);
 
-  // Status dimension line: running/waiting/tokens/context.
+  // Status dimension line: running/waiting.
   s_stat = lv_label_create(page);
-  lv_label_set_text(s_stat, "- RUN . - WAIT . --K TOK . CTX --%");
+  lv_label_set_text(s_stat, "- RUN . - WAIT");
   lv_obj_set_style_text_color(s_stat, t->ink_dim, 0);
   lv_obj_set_style_text_font(s_stat, t->f_mono, 0);
   lv_obj_align(s_stat, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET + 26);
@@ -183,6 +196,21 @@ static void build(lv_obj_t* page) {
     lv_label_set_long_mode(s_row_age[i], LV_LABEL_LONG_DOT);
     lv_obj_align(s_row_age[i], LV_ALIGN_TOP_RIGHT, -SAFE_INSET, y + 26);
   }
+
+  // Question-card tier: full-page tap target + badge for multi-question count.
+  s_q_btn = lv_btn_create(page);
+  lv_obj_remove_style_all(s_q_btn);
+  lv_obj_set_size(s_q_btn, lv_pct(100), lv_pct(100));
+  lv_obj_align(s_q_btn, LV_ALIGN_TOP_LEFT, 0, 0);
+  lv_obj_add_flag(s_q_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_event_cb(s_q_btn, on_question_tap, LV_EVENT_CLICKED, NULL);
+
+  s_q_badge = lv_label_create(page);
+  lv_obj_set_style_text_font(s_q_badge, t->f_mono, 0);
+  lv_obj_set_style_text_color(s_q_badge, t->ink_dim, 0);
+  lv_label_set_text(s_q_badge, "");
+  lv_obj_align(s_q_badge, LV_ALIGN_TOP_RIGHT, -SAFE_INSET, SAFE_INSET);
+  lv_obj_add_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void show_prompt(bool on) {
@@ -223,13 +251,24 @@ static void update(void) {
 
   bool ph = sv_placeholder(r.hdr.state);
   char sb[64];
-  if (ph) snprintf(sb, sizeof(sb), "- RUN . - WAIT . --K TOK . CTX --%%");
+  if (ph) snprintf(sb, sizeof(sb), "- RUN . - WAIT");
   else buddy_stats_fmt(sb, sizeof(sb), &r, true);
   lv_label_set_text(s_stat, sb);
 
-  show_prompt(r.prompt.present);
+  // Find newest question session (first in array = newest by hub ordering).
+  int8_t q_idx = -1; uint8_t q_count = 0;
+  for (uint8_t i = 0; i < r.session_count; i++) {
+    if (r.sessions[i].state == BST_QUESTION) {
+      if (q_idx < 0) q_idx = (int8_t)i;
+      q_count++;
+    }
+  }
+
+  lv_obj_add_flag(s_q_btn,   LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
 
   if (r.prompt.present) {
+    show_prompt(true);
     lv_label_set_text(s_tool, r.prompt.tool);
     lv_label_set_text(s_hint, r.prompt.hint);
     bool locked = actions_locked(r.hdr.state);
@@ -281,7 +320,52 @@ static void update(void) {
       break;
     }
     }
+  } else if (q_idx >= 0) {
+    // TIER 2: question card — one or more sessions waiting for user input on mac.
+    s_q_session_idx = (uint8_t)q_idx;
+    const buddy_session_t* qs = &r.sessions[q_idx];
+
+    show_prompt(true);
+    lv_obj_add_flag(s_actrule, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_deny,    LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_approve, LV_OBJ_FLAG_HIDDEN);
+
+    lv_label_set_text(s_eyebrow, "YOUR TURN");
+    lv_obj_set_style_text_color(s_eyebrow, t->accent, 0);
+
+    char folder[BUDDY_LABEL_LEN], branch[BUDDY_LABEL_LEN];
+    buddy_session_split_label(qs->label, folder, sizeof(folder), branch, sizeof(branch));
+    lv_label_set_text(s_tool, folder[0] ? folder : qs->id);
+
+    char hintbuf[BUDDY_HINT_LEN + 32];
+    if (branch[0])
+      snprintf(hintbuf, sizeof(hintbuf), "%s\nTAP TO ANSWER ON MAC", branch);
+    else
+      snprintf(hintbuf, sizeof(hintbuf), "TAP TO ANSWER ON MAC");
+    lv_label_set_text(s_hint, hintbuf);
+
+    if (r.open_state != OPEN_NONE &&
+        strncmp(r.open_id, qs->id, BUDDY_SID_LEN) == 0) {
+      if (r.open_state == OPEN_SENDING) {
+        lv_label_set_text(s_eyebrow, "OPENING...");
+        lv_obj_set_style_text_color(s_eyebrow, t->ink_dim, 0);
+      } else if (r.open_state == OPEN_OK) {
+        lv_label_set_text(s_eyebrow, "OPENED");
+        lv_obj_set_style_text_color(s_eyebrow, t->up, 0);
+      } else {
+        lv_label_set_text(s_eyebrow, "COULDN'T OPEN");
+        lv_obj_set_style_text_color(s_eyebrow, t->down, 0);
+      }
+    }
+
+    if (q_count > 1) {
+      char badge[16]; snprintf(badge, sizeof(badge), "(1 OF %u)", (unsigned)q_count);
+      lv_label_set_text(s_q_badge, badge);
+      lv_obj_clear_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_clear_flag(s_q_btn, LV_OBJ_FLAG_HIDDEN);
   } else {
+    show_prompt(false);
     uint8_t n = (r.session_count < SESSION_ROWS) ? r.session_count : SESSION_ROWS;
     if (n == 0) {
       lv_obj_add_flag(s_row_btn[0],  LV_OBJ_FLAG_HIDDEN);

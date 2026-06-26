@@ -30,6 +30,9 @@ static lv_obj_t* s_box;         // hint scope box
 static lv_obj_t* s_hint;        // hint text
 static lv_obj_t* s_deny;
 static lv_obj_t* s_approve;
+static lv_obj_t* s_q_btn;
+static lv_obj_t* s_q_badge;
+static uint8_t   s_q_session_idx;
 
 static lv_obj_t* s_row_folder[SESSION_ROWS];
 static lv_obj_t* s_row_sub[SESSION_ROWS];
@@ -45,6 +48,16 @@ static void decide_cb(lv_event_t* e) {
   bool approve = (bool)(intptr_t)lv_event_get_user_data(e);
   if (!approve && buddy_dismiss()) { update(); return; }   // deny doubles as dismiss for "too late"
   if (buddy_decide(approve)) update();
+}
+static void on_question_tap(lv_event_t* e) {
+  (void)e;
+  if (idle_take_wake_tap()) return;
+  buddy_rec_t b = ds_get_buddy();
+  if (s_q_session_idx < b.session_count &&
+      b.sessions[s_q_session_idx].state == BST_QUESTION) {
+    buddy_open(b.sessions[s_q_session_idx].id);
+    update();
+  }
 }
 static void on_row_tap(lv_event_t* e) {
   if (idle_take_wake_tap()) return;
@@ -170,6 +183,21 @@ static void build(lv_obj_t* page) {
     lv_obj_align(s_row_age[i], LV_ALIGN_TOP_RIGHT, -SAFE_INSET, y + 22);
   }
 
+  // Question card: full-screen tap target and count badge (hidden until TIER 2 is active).
+  s_q_btn = lv_btn_create(page);
+  lv_obj_remove_style_all(s_q_btn);
+  lv_obj_set_size(s_q_btn, lv_pct(100), lv_pct(100));
+  lv_obj_align(s_q_btn, LV_ALIGN_TOP_LEFT, 0, 0);
+  lv_obj_add_flag(s_q_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_event_cb(s_q_btn, on_question_tap, LV_EVENT_CLICKED, NULL);
+
+  s_q_badge = lv_label_create(page);
+  lv_obj_set_style_text_font(s_q_badge, t->f_mono, 0);
+  lv_obj_set_style_text_color(s_q_badge, t->ink_dim, 0);
+  lv_label_set_text(s_q_badge, "");
+  lv_obj_align(s_q_badge, LV_ALIGN_TOP_RIGHT, -SAFE_INSET, SAFE_INSET);
+  lv_obj_add_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
+
   update();
 }
 
@@ -201,9 +229,23 @@ static void update(void) {
     lv_label_set_text(s_telem, tl);
   }
 
+  // Find newest question session (first one with BST_QUESTION state).
+  int8_t q_idx = -1; uint8_t q_count = 0;
+  for (uint8_t i = 0; i < b.session_count; i++) {
+    if (b.sessions[i].state == BST_QUESTION) {
+      if (q_idx < 0) q_idx = (int8_t)i;
+      q_count++;
+    }
+  }
+
+  // Question objects always hidden unless TIER 2 activates them below.
+  lv_obj_add_flag(s_q_btn,   LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
+
   if (b.prompt.present) {
-    // Show prompt objects, hide session rows.
+    // TIER 1: permission prompt — unchanged.
     lv_obj_clear_flag(s_tool, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_box,  LV_OBJ_FLAG_HIDDEN);
     for (uint8_t i = 0; i < SESSION_ROWS; i++) {
       lv_obj_add_flag(s_row_btn[i],    LV_OBJ_FLAG_HIDDEN);
       lv_obj_add_flag(s_row_tick[i],   LV_OBJ_FLAG_HIDDEN);
@@ -215,7 +257,6 @@ static void update(void) {
 
     lv_label_set_text(s_tool, b.prompt.tool[0] ? b.prompt.tool : "TOOL");
     lv_obj_set_style_text_font(s_tool, t->f_display, 0);
-    lv_obj_clear_flag(s_box, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(s_hint, b.prompt.hint[0] ? b.prompt.hint : "--");
     switch (b.prompt.decision_state) {
     case PROMPT_PENDING:   // sent; both readouts dim until the truthful ack (issue #8).
@@ -250,11 +291,66 @@ static void update(void) {
       break;
     }
     }
+  } else if (q_idx >= 0) {
+    // TIER 2: question card — a session needs a human decision on the Mac.
+    s_q_session_idx = (uint8_t)q_idx;
+    const buddy_session_t* qs = &b.sessions[q_idx];
+
+    lv_obj_clear_flag(s_tool, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_box,  LV_OBJ_FLAG_HIDDEN);
+    show_actions(false, false, t);
+    for (uint8_t i = 0; i < SESSION_ROWS; i++) {
+      lv_obj_add_flag(s_row_btn[i],    LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_tick[i],   LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_folder[i], LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_sub[i],    LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_state[i],  LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_age[i],    LV_OBJ_FLAG_HIDDEN);
+    }
+
+    lv_label_set_text(s_eyebrow, "YOUR TURN");
+    lv_obj_set_style_text_color(s_eyebrow, t->accent, 0);
+
+    char folder[BUDDY_LABEL_LEN], branch[BUDDY_LABEL_LEN];
+    buddy_session_split_label(qs->label, folder, sizeof(folder), branch, sizeof(branch));
+    lv_label_set_text(s_tool, folder[0] ? folder : qs->id);
+    lv_obj_set_style_text_font(s_tool, t->f_display, 0);
+
+    char hintbuf[BUDDY_HINT_LEN + 32];
+    if (branch[0])
+      snprintf(hintbuf, sizeof(hintbuf), "%s\nTAP TO ANSWER ON MAC", branch);
+    else
+      snprintf(hintbuf, sizeof(hintbuf), "TAP TO ANSWER ON MAC");
+    lv_label_set_text(s_hint, hintbuf);
+
+    // Override eyebrow with open-state feedback if an open is in progress for this session.
+    if (b.open_state != OPEN_NONE &&
+        strncmp(b.open_id, qs->id, BUDDY_SID_LEN) == 0) {
+      if (b.open_state == OPEN_SENDING) {
+        lv_label_set_text(s_eyebrow, "OPENING...");
+        lv_obj_set_style_text_color(s_eyebrow, t->ink_dim, 0);
+      } else if (b.open_state == OPEN_OK) {
+        lv_label_set_text(s_eyebrow, "OPENED");
+        lv_obj_set_style_text_color(s_eyebrow, t->up, 0);
+      } else {
+        lv_label_set_text(s_eyebrow, "COULDN'T OPEN");
+        lv_obj_set_style_text_color(s_eyebrow, t->down, 0);
+      }
+    }
+
+    if (q_count > 1) {
+      char qbadge[16];
+      snprintf(qbadge, sizeof(qbadge), "(1 OF %u)", (unsigned)q_count);
+      lv_label_set_text(s_q_badge, qbadge);
+      lv_obj_clear_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_clear_flag(s_q_btn, LV_OBJ_FLAG_HIDDEN);
   } else {
+    // TIER 3: idle session list.
     lv_label_set_text(s_eyebrow, "ACTIVITY");
     lv_obj_set_style_text_color(s_eyebrow, t->ink_dim, 0);
-    lv_obj_add_flag(s_box, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_tool, LV_OBJ_FLAG_HIDDEN);  // tool label is prompt-only
+    lv_obj_add_flag(s_box,  LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_tool, LV_OBJ_FLAG_HIDDEN);
     show_actions(false, false, t);
 
     for (uint8_t i = 0; i < SESSION_ROWS; i++) {

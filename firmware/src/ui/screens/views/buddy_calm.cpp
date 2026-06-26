@@ -1,5 +1,5 @@
 // Calm Futurism CLAUDE (coding buddy) view. Sparse white-on-black. Top: [dot] claude + status
-// slot. A dim stat line (running / waiting / tokens / ctx). prompt.present => big Doto tool name,
+// slot. A dim stat line (running / waiting). prompt.present => big Doto tool name,
 // a faint hint box, and DENY | APPROVE actions. Else => session list (up to 4 rows, 64px pitch)
 // or "idle" / "no sessions" empty state.
 // Decide routes through buddy_decide; the prompt waits on the hub ack and clears only on ok:true,
@@ -30,6 +30,8 @@ static lv_obj_t *s_status, *s_stat;
 static lv_obj_t *s_eyebrow, *s_tool, *s_hintbox, *s_hint;
 static lv_obj_t *s_deny, *s_approve;
 static bool      s_actions_enabled;
+static lv_obj_t *s_q_btn, *s_q_badge;
+static uint8_t   s_q_session_idx;  // index of displayed question session
 
 // Session rows: each row has a folder label (top) and a branch label (bottom dim),
 // plus a tick bar (left) and state word + age (right).
@@ -59,6 +61,16 @@ static void on_row_tap(lv_event_t* e) {
   buddy_rec_t b = ds_get_buddy();
   if (idx < b.session_count) {
     buddy_open(b.sessions[idx].id);
+    update();
+  }
+}
+static void on_question_tap(lv_event_t* e) {
+  (void)e;
+  if (idle_take_wake_tap()) return;
+  buddy_rec_t b = ds_get_buddy();
+  if (s_q_session_idx < b.session_count &&
+      b.sessions[s_q_session_idx].state == BST_QUESTION) {
+    buddy_open(b.sessions[s_q_session_idx].id);
     update();
   }
 }
@@ -211,6 +223,22 @@ static void build(lv_obj_t* page) {
     lv_obj_align(s_row_age[i], LV_ALIGN_TOP_RIGHT, -SAFE_INSET, y + 26);
   }
 
+  // Question card: full-page transparent tap target (hidden by default)
+  s_q_btn = lv_btn_create(page);
+  lv_obj_remove_style_all(s_q_btn);
+  lv_obj_set_size(s_q_btn, lv_pct(100), lv_pct(100));
+  lv_obj_align(s_q_btn, LV_ALIGN_TOP_LEFT, 0, 0);
+  lv_obj_add_flag(s_q_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_event_cb(s_q_btn, on_question_tap, LV_EVENT_CLICKED, NULL);
+
+  // Badge: "(1 of N)" — shown only when multiple question sessions
+  s_q_badge = lv_label_create(page);
+  lv_obj_set_style_text_font(s_q_badge, t->f_mono, 0);
+  lv_obj_set_style_text_color(s_q_badge, t->ink_dim, 0);
+  lv_label_set_text(s_q_badge, "");
+  lv_obj_align(s_q_badge, LV_ALIGN_TOP_RIGHT, -SAFE_INSET, SAFE_INSET + 52);
+  lv_obj_add_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
+
   update();
 }
 
@@ -260,13 +288,25 @@ static void update(void) {
     lv_label_set_text(s_stat, "--");
   } else {
     char st[48];
-    snprintf(st, sizeof(st), "%u run  %u wait  %uK  ctx %u%%",
-             (unsigned)b.running, (unsigned)b.waiting,
-             (unsigned)(b.tokens / 1000), (unsigned)b.context_pct);
+    snprintf(st, sizeof(st), "%u run . %u wait",
+             (unsigned)b.running, (unsigned)b.waiting);
     lv_label_set_text(s_stat, st);
   }
 
+  // Find newest question session (sessions are hub-sorted newest-first)
+  int8_t q_idx = -1;
+  uint8_t q_count = 0;
+  for (uint8_t i = 0; i < b.session_count; i++) {
+    if (b.sessions[i].state == BST_QUESTION) {
+      if (q_idx < 0) q_idx = (int8_t)i;  // first = newest
+      q_count++;
+    }
+  }
+
   if (b.prompt.present) {
+    // TIER 1: PROMPT MODE
+    lv_obj_add_flag(s_q_btn,   LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
     show_prompt(true);
     lv_label_set_text(s_tool, b.prompt.tool[0] ? b.prompt.tool : "tool");
     lv_label_set_text(s_hint, b.prompt.hint);
@@ -306,7 +346,74 @@ static void update(void) {
       break;
     }
     }
+  } else if (q_idx >= 0) {
+    // TIER 2: QUESTION CARD
+    s_q_session_idx = (uint8_t)q_idx;
+    const buddy_session_t* qs = &b.sessions[q_idx];
+
+    // Hide session list objects
+    for (int i = 0; i < SESSION_ROWS; i++) {
+      lv_obj_add_flag(s_row_btn[i],    LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_tick[i],   LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_folder[i], LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_sub[i],    LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_state[i],  LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_age[i],    LV_OBJ_FLAG_HIDDEN);
+    }
+    // Hide prompt-only actions; show shared prompt layout objects
+    lv_obj_add_flag(s_deny,    LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_approve, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_eyebrow, LV_OBJ_FLAG_HIDDEN);
+
+    // Eyebrow: "your turn" (overridden below if open feedback is active)
+    lv_label_set_text(s_eyebrow, "your turn");
+    lv_obj_set_style_text_color(s_eyebrow, t->accent, 0);
+
+    // Folder (prominent) in s_tool; branch in s_hint inside s_hintbox
+    char folder[BUDDY_LABEL_LEN], branch[BUDDY_LABEL_LEN];
+    buddy_session_split_label(qs->label, folder, sizeof(folder), branch, sizeof(branch));
+    lv_label_set_text(s_tool, folder[0] ? folder : qs->id);
+    lv_obj_clear_flag(s_tool, LV_OBJ_FLAG_HIDDEN);
+
+    // Branch dim + hint in hintbox
+    char hintbuf[BUDDY_HINT_LEN + 32];
+    if (branch[0])
+      snprintf(hintbuf, sizeof(hintbuf), "%s\ntap to answer on mac", branch);
+    else
+      snprintf(hintbuf, sizeof(hintbuf), "tap to answer on mac");
+    lv_label_set_text(s_hint, hintbuf);
+    lv_obj_clear_flag(s_hintbox, LV_OBJ_FLAG_HIDDEN);
+
+    // Open feedback: if this question session has open feedback, show on eyebrow
+    if (b.open_state != OPEN_NONE &&
+        strncmp(b.open_id, qs->id, BUDDY_SID_LEN) == 0) {
+      if (b.open_state == OPEN_SENDING) {
+        lv_label_set_text(s_eyebrow, "opening...");
+        lv_obj_set_style_text_color(s_eyebrow, t->ink_dim, 0);
+      } else if (b.open_state == OPEN_OK) {
+        lv_label_set_text(s_eyebrow, "opened");
+        lv_obj_set_style_text_color(s_eyebrow, t->up, 0);
+      } else {
+        lv_label_set_text(s_eyebrow, "couldn't open");
+        lv_obj_set_style_text_color(s_eyebrow, t->down, 0);
+      }
+    }
+
+    // Badge: "(1 of N)" when multiple question sessions
+    if (q_count > 1) {
+      char badge[16];
+      snprintf(badge, sizeof(badge), "(1 of %u)", (unsigned)q_count);
+      lv_label_set_text(s_q_badge, badge);
+      lv_obj_clear_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    lv_obj_clear_flag(s_q_btn, LV_OBJ_FLAG_HIDDEN);
   } else {
+    // TIER 3: SESSION LIST
+    lv_obj_add_flag(s_q_btn,   LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
     show_prompt(false);
 
     uint8_t n = (b.session_count < SESSION_ROWS) ? b.session_count : SESSION_ROWS;

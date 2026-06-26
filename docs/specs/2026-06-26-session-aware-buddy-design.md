@@ -46,6 +46,15 @@ already arriving at the hub. No transcript parsing.
 the session (matching today's `ClaudeCodeBridge.swift:471-477` removal); it simply disappears
 from the next `sessions` frame. It is listed above only to complete the lifecycle.
 
+> **Post-spec addition (issue #110 follow-up):** a `question` state was added after this spec.
+> It is driven by the CC `Notification` hook (session waiting on the user's input), sits in the
+> precedence below `waiting`/`waiting_queued` and above `attention`, and the device surfaces it as a
+> "tap to answer on Mac" takeover (permission prompt > question > list). This intentionally walks back
+> the "do not differentiate question vs done" decision below — `Notification` gave a clean
+> needs-input signal that `Stop` (which fires every turn) did not. The token/context figures were
+> also dropped from the buddy header (kept on the AI Usage screen). See `hub/CONTRACT.md` §A,
+> `docs/prd.md` FR-BUDDY-1/8.
+
 **State precedence (resolves overlapping signals).** A session can have several signals live
 at once (statusline still ticking while a prompt is held). The hub picks the highest:
 `waiting`/`waiting_queued` (a held prompt) **>** `attention` (last lifecycle event was `Stop`,

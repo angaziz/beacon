@@ -53,6 +53,30 @@ final class BridgeSessionsTests: XCTestCase {
         XCTAssertEqual(fires, 1)   // aggregate per-bucket, not per-session (spec §6)
     }
 
+    func testNotificationProducesQuestion() {
+        let b = ClaudeCodeBridge()
+        var last: [Session] = []
+        b.onSessionsUpdate = { last = $0 }
+        b.applySessionHookForTest(event: "SessionStart", sessionId: "A", cwd: "/x/api")
+        b.applySessionHookForTest(event: "Notification", sessionId: "A", cwd: "/x/api")
+        drainMain()
+        XCTAssertEqual(last.first(where: { $0.label.hasPrefix("api") })?.state, .question)
+    }
+
+    func testStatuslineAfterNotificationClearsQuestion() {
+        let b = ClaudeCodeBridge()
+        var last: [Session] = []
+        b.onSessionsUpdate = { last = $0 }
+        b.applySessionHookForTest(event: "SessionStart", sessionId: "A", cwd: "/x/api")
+        b.applySessionHookForTest(event: "Notification", sessionId: "A", cwd: "/x/api")
+        drainMain()
+        XCTAssertEqual(last.first(where: { $0.label.hasPrefix("api") })?.state, .question)
+        // A statusline POST signals Claude is active again — clears the question.
+        b.handleStatusline(["session_id": "A", "context_window": ["used_percentage": 20]])
+        drainMain()
+        XCTAssertEqual(last.first(where: { $0.label.hasPrefix("api") })?.state, .working)
+    }
+
     func testBranchResolvedAndCachedPerCwd() {
         let b = ClaudeCodeBridge()
         var resolves = 0

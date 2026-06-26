@@ -10,6 +10,7 @@ public final class SessionRegistry {
         var branch: String?
         var updatedAt: Date     // sort key: max(last activity ts, stoppedAt)
         var stopped: Bool       // last lifecycle event was Stop, no newer activity => attention
+        var needsInput: Bool = false   // CC Notification hook fired => session is waiting on user input
         // Host context captured by the beacon-session command hook on SessionStart (Phase 2a).
         var hostApp: String?    // TERM_PROGRAM (always set by CC env)
         var focusURL: String?   // WARP_FOCUS_URL — precise session handle (Warp only)
@@ -31,12 +32,20 @@ public final class SessionRegistry {
         guard !sessionId.isEmpty else { return }
         if var e = entries[sessionId] {
             if let cwd, !cwd.isEmpty { e.cwd = cwd }
-            e.updatedAt = now; e.stopped = false
+            e.updatedAt = now; e.stopped = false; e.needsInput = false
             entries[sessionId] = e
         } else {
             entries[sessionId] = Entry(shortId: mintId(), cwd: cwd ?? "", branch: nil,
                                        updatedAt: now, stopped: false)
         }
+    }
+
+    // Mark a session as waiting on user input (CC Notification hook). Does NOT bump updatedAt so the
+    // entry's sort position is preserved. Cleared by touchActivity (any new activity moves it on).
+    public func markNeedsInput(sessionId: String) {
+        guard !sessionId.isEmpty, var e = entries[sessionId] else { return }
+        e.needsInput = true
+        entries[sessionId] = e
     }
 
     public func markStop(sessionId: String, now: Date) {
@@ -85,8 +94,12 @@ public final class SessionRegistry {
         entries.map { (sid, e) -> (Date, Session) in
             let state: SessionState
             let stale = now.timeIntervalSince(e.updatedAt) >= idleTTL
+            // Precedence: waiting (front) > waitingQueued > question > idle > attention > working.
+            // question wins over stale/stopped: Claude is actively awaiting user input regardless of age.
+            // waiting beats question: a held permission prompt is more urgent than a text question.
             if sid == waitingFront { state = .waiting }
             else if waitingQueued.contains(sid) { state = .waitingQueued }
+            else if e.needsInput { state = .question }
             else if stale { state = .idle }                 // idle TTL wins over a long-ago Stop (Codex B3)
             else if e.stopped { state = .attention }
             else { state = .working }

@@ -81,7 +81,7 @@ Every theme has bespoke per-screen layouts (each composed from the shared tokens
 1. **Home** — clock, date, weather (temp + humidity + condition). [WiFi]
 2. **Finance** — config-driven ticker list: FX→IDR, BTC, indices/ETFs, IHSG. Value + signed change. [WiFi]
 3. **AI Usage** — Claude and Codex, each showing **both** a 5-hour and a 7-day window (utilization % + reset). All four values, not one per provider. [BLE / Mac hub]
-4. **Coding Buddy** — idle state (session count, tokens, context %, recent activity) and prompt state (tool-permission prompt with Approve/Deny). See Coding Buddy contract. [BLE / Mac hub]
+4. **Coding Buddy** — a per-session list (state + `folder · branch` + age, `running · waiting` header), with two takeover states: a tool-permission prompt (Approve/Deny) and a `question` "tap to answer on Mac" card; tap a session to focus its terminal. See Coding Buddy contract. [BLE / Mac hub]
 5. **Settings** — battery %, Wi-Fi, brightness, **Theme picker**, sleep, about. (Battery shows level + charging, color-coded; low = `down` color.) [local / NVS]
 
 Navigation (with `prd.md` phase): horizontal **swipe** = prev/next screen (carousel) — **P0**; **long-press** = screen context action and **swipe-down** = quick brightness — **P3**; **IMU** raise/flick = wake, shake = dismiss overlay / exit a subview (no carousel back-stack) — **P3**. Minimum touch target ~64px (~3mm) given arm's-length use; primary actions get the largest hit areas.
@@ -103,7 +103,7 @@ The mockup device frames render the true rounded shape; [`docs/design/mockups/sa
 - **Clock** — display figures + date line (or analog face in Analog theme).
 - **Gauge** — renders per `gauge-style` token (bar/ring/cell/waveform/measure/bigfig/subdial). Single component, token-switched.
 - **List row** — label (body) + value (mono/display) + optional caret; hairline separator. Used by Finance, Settings. Labels are width-capped and ellipsize (`…`): Finance ticker names are user-configurable (hub-pushed) and can exceed the short defaults, so they truncate rather than overrun the value.
-- **Session row** (Coding Buddy `claude` screen, issue #110) — folder label (body, colored by state: accent=attention, alert/amber=waiting, ink=working, dim=queued/idle) + dim secondary line (`branch` + relative age). The `claude` screen shows **up to 4** session rows at ~64 px pitch within the 386 px safe content height (sorted newest-first), replacing the old chronological activity log; an "idle" empty state shows when there are none. Per-theme styling, shared render helpers (`view_common.h`).
+- **Session row** (Coding Buddy `claude` screen, issue #110) — a leading state tick (color: accent=attention, alert/amber=waiting/question, ink=working, dim=queued/idle) + folder label (body) + dim secondary line (`branch` + relative age) + a right-aligned state word. The `claude` screen shows **up to 4** session rows at ~64 px pitch within the 386 px safe content height (sorted newest-first), replacing the old chronological activity log; an "idle" empty state shows when there are none. A pending permission prompt or a `question` session takes over the screen as an actionable card. Per-theme styling, shared render helpers (`view_common.h`).
 - **Stat block** — name + big figure + detail line + gauge. Used by AI Usage.
 - **Prompt** — alert label + tool + mono command hint + Deny/Approve split actions. Used by Coding Buddy.
 - **Eyebrow** — mono `BEACON / <SCREEN>` + right-side status (used sparingly, one per screen — not on every section).

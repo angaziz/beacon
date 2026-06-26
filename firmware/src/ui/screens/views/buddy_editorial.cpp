@@ -20,6 +20,21 @@ static lv_obj_t *s_row_tick[SESSION_ROWS];
 static lv_obj_t *s_row_state[SESSION_ROWS];
 static lv_obj_t *s_row_age[SESSION_ROWS];
 static lv_obj_t *s_row_btn[SESSION_ROWS];   // transparent tap target (issue #110 Phase 2)
+static lv_obj_t *s_q_btn, *s_q_badge;
+static uint8_t   s_q_session_idx;
+
+static void update(void);
+
+static void on_question_tap(lv_event_t* e) {
+  (void)e;
+  if (idle_take_wake_tap()) return;
+  buddy_rec_t b = ds_get_buddy();
+  if (s_q_session_idx < b.session_count &&
+      b.sessions[s_q_session_idx].state == BST_QUESTION) {
+    buddy_open(b.sessions[s_q_session_idx].id);
+    update();
+  }
+}
 
 static void decide_cb(lv_event_t* e) {
   if (idle_take_wake_tap()) return;
@@ -118,6 +133,21 @@ static void build(lv_obj_t* page) {
     lv_label_set_long_mode(s_row_age[i], LV_LABEL_LONG_DOT);
     lv_obj_align(s_row_age[i], LV_ALIGN_TOP_RIGHT, -SAFE_INSET, y + 26);
   }
+
+  s_q_btn = lv_btn_create(page);
+  lv_obj_remove_style_all(s_q_btn);
+  lv_obj_set_size(s_q_btn, lv_pct(100), lv_pct(100));
+  lv_obj_align(s_q_btn, LV_ALIGN_TOP_LEFT, 0, 0);
+  lv_obj_add_flag(s_q_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_event_cb(s_q_btn, on_question_tap, LV_EVENT_CLICKED, NULL);
+
+  const beacon_theme_t* t = theme_active();
+  s_q_badge = lv_label_create(page);
+  lv_obj_set_style_text_font(s_q_badge, t->f_mono, 0);
+  lv_obj_set_style_text_color(s_q_badge, t->ink_dim, 0);
+  lv_label_set_text(s_q_badge, "");
+  lv_obj_align(s_q_badge, LV_ALIGN_TOP_RIGHT, -SAFE_INSET, SAFE_INSET);
+  lv_obj_add_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void show_prompt(bool on) {
@@ -147,10 +177,25 @@ static void show_prompt(bool on) {
 static void update(void) {
   buddy_rec_t b = ds_get_buddy(); uint32_t now = now_s();
   slot_set(s_slot, "REQ --", &b.hdr, now);
-  txt_fmt(s_status, "%u RUNNING . %u WAITING . %uK TOK . CTX %u%%",
-    b.running, b.waiting, (unsigned)(b.tokens/1000), b.context_pct);
+  txt_fmt(s_status, "%u RUN . %u WAIT",
+    b.running, b.waiting);
   bool disabled = (b.hdr.state == ST_HUB_OFFLINE);
+
+  // Find newest QUESTION session.
+  int8_t q_idx = -1;
+  uint8_t q_count = 0;
+  for (uint8_t i = 0; i < b.session_count; i++) {
+    if (b.sessions[i].state == BST_QUESTION) {
+      if (q_idx < 0) q_idx = (int8_t)i;
+      q_count++;
+    }
+  }
+
+  lv_obj_add_flag(s_q_btn,   LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
+
   if (b.prompt.present && !disabled) {
+    // TIER 1: permission prompt card (unchanged).
     show_prompt(true);
     txt_set(s_tool, b.prompt.tool);
     txt_set(s_cmd, b.prompt.hint);
@@ -190,7 +235,53 @@ static void update(void) {
       break;
     }
     }
+  } else if (q_idx >= 0 && !disabled) {
+    // TIER 2: question card — reuses prompt-card layout; deny/approve hidden.
+    s_q_session_idx = (uint8_t)q_idx;
+    const buddy_session_t* qs = &b.sessions[q_idx];
+    const beacon_theme_t* t = theme_active();
+
+    show_prompt(true);
+    lv_obj_add_flag(s_deny,    LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_approve, LV_OBJ_FLAG_HIDDEN);
+
+    txt_set(s_kicker, "YOUR TURN");
+    txt_color(s_kicker, t->accent);
+
+    char folder[BUDDY_LABEL_LEN], branch[BUDDY_LABEL_LEN];
+    buddy_session_split_label(qs->label, folder, sizeof(folder), branch, sizeof(branch));
+    txt_set(s_tool, folder[0] ? folder : qs->id);
+
+    char hintbuf[BUDDY_LABEL_LEN + 24];
+    if (branch[0])
+      snprintf(hintbuf, sizeof(hintbuf), "%s\nTAP TO ANSWER ON MAC", branch);
+    else
+      snprintf(hintbuf, sizeof(hintbuf), "TAP TO ANSWER ON MAC");
+    txt_set(s_cmd, hintbuf);
+
+    // Open-state feedback overrides the eyebrow.
+    if (b.open_state != OPEN_NONE &&
+        strncmp(b.open_id, qs->id, BUDDY_SID_LEN) == 0) {
+      if (b.open_state == OPEN_SENDING) {
+        txt_set(s_kicker, "OPENING...");
+        txt_color(s_kicker, t->accent);
+      } else if (b.open_state == OPEN_OK) {
+        txt_set(s_kicker, "OPENED");
+        txt_color(s_kicker, t->up);
+      } else {
+        txt_set(s_kicker, "COULDN'T OPEN");
+        txt_color(s_kicker, t->down);
+      }
+    }
+
+    if (q_count > 1) {
+      char badge[16]; snprintf(badge, sizeof(badge), "(1 OF %u)", (unsigned)q_count);
+      lv_label_set_text(s_q_badge, badge);
+      lv_obj_clear_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_clear_flag(s_q_btn, LV_OBJ_FLAG_HIDDEN);
   } else {
+    // TIER 3: session list (unchanged).
     show_prompt(false);
     const beacon_theme_t* t = theme_active();
 

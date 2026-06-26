@@ -21,6 +21,7 @@ enum {                          // wire `state` string => firmware enum
   BST_WAITING_QUEUED,
   BST_ATTENTION,
   BST_IDLE,
+  BST_QUESTION,
 };
 typedef struct {
   char     id[BUDDY_SID_LEN];   // opaque hub-minted s<n>, echoed back on tap (Phase 2)

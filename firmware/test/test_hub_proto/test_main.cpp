@@ -456,6 +456,19 @@ void test_parse_sessions_rejects_bad_version(void) {
   TEST_ASSERT_FALSE(had);
 }
 
+void test_parse_sessions_question_state(void) {
+  const char* j = "{\"v\":1,\"sessions\":["
+    "{\"id\":\"s9\",\"label\":\"myrepo \xC2\xB7 feat/ask\",\"state\":\"question\",\"ts\":1719401000}]}";
+  buddy_rec_t b; memset(&b, 0, sizeof(b));
+  bool had = false;
+  TEST_ASSERT_TRUE(hub_parse_sessions(j, strlen(j), &b, &had));
+  TEST_ASSERT_TRUE(had);
+  TEST_ASSERT_EQUAL_UINT8(1, b.session_count);
+  TEST_ASSERT_EQUAL_STRING("s9", b.sessions[0].id);
+  TEST_ASSERT_EQUAL_UINT8(BST_QUESTION, b.sessions[0].state);
+  TEST_ASSERT_EQUAL_UINT32(1719401000u, b.sessions[0].ts);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_reassemble_single_frame);
@@ -496,5 +509,6 @@ int main(int, char**) {
   RUN_TEST(test_parse_sessions_basic);
   RUN_TEST(test_parse_sessions_caps_and_truncates);
   RUN_TEST(test_parse_sessions_rejects_bad_version);
+  RUN_TEST(test_parse_sessions_question_state);
   return UNITY_END();
 }

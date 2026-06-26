@@ -76,7 +76,7 @@ public struct Loc: Codable, Equatable {
 public enum SessionLimits { public static let maxCount = 5; public static let labelMaxChars = 28; public static let idMaxChars = 6 }
 
 public enum SessionState: String, Codable, Equatable {
-    case working, waiting, attention, idle
+    case working, waiting, attention, idle, question
     case waitingQueued = "waiting_queued"
 }
 
