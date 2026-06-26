@@ -73,6 +73,16 @@ void ds_set_buddy(const buddy_rec_t* r) {
   s_buddy = *r; s_buddy.hdr.state = ST_LIVE; s_buddy.hdr.err = ERR_NONE;
   ds_lock_give(s_lock);
 }
+void ds_apply_sessions(const buddy_session_t* s, uint8_t count, uint32_t now) {
+  if (count > BUDDY_SESSIONS_MAX) count = BUDDY_SESSIONS_MAX;
+  ds_lock_take(s_lock);
+  s_buddy.session_count = count;
+  for (uint8_t i = 0; i < count; i++) s_buddy.sessions[i] = s[i];
+  s_buddy.hdr.last_updated = now;
+  s_buddy.hdr.state = ST_LIVE;
+  s_buddy.hdr.err = ERR_NONE;
+  ds_lock_give(s_lock);
+}
 
 // --- explicit state transitions: do not touch value payload ---
 void ds_set_state_weather(screen_state_t s, data_err_t e) {
@@ -131,6 +141,48 @@ void ds_tick_staleness(uint32_t now) {
   sweep_one(&s_usage.hdr,      now, USAGE_STALE_S);
   sweep_one(&s_buddy.hdr,      now, BUDDY_STALE_S);
   for (uint8_t i = 0; i < s_finance_count; i++) sweep_one(&s_finance[i].hdr, now, finance_stale_s(i));
+  ds_lock_give(s_lock);
+}
+
+void ds_set_open_pending(const char* id, uint32_t now) {
+  if (!id) return;
+  ds_lock_take(s_lock);
+  strncpy(s_buddy.open_id, id, BUDDY_SID_LEN - 1);
+  s_buddy.open_id[BUDDY_SID_LEN - 1] = '\0';
+  s_buddy.open_state = OPEN_SENDING;
+  s_buddy.open_at    = now;
+  ds_lock_give(s_lock);
+}
+
+void ds_apply_open_ack(const char* id, bool ok, uint32_t now) {
+  if (!id) return;
+  ds_lock_take(s_lock);
+  if (s_buddy.open_state == OPEN_SENDING &&
+      strncmp(s_buddy.open_id, id, BUDDY_SID_LEN) == 0) {
+    s_buddy.open_state = ok ? OPEN_OK : OPEN_FAIL;
+    s_buddy.open_at    = now;
+  }
+  ds_lock_give(s_lock);
+}
+
+void ds_tick_open(uint32_t now) {
+  ds_lock_take(s_lock);
+  switch (s_buddy.open_state) {
+    case OPEN_OK:
+    case OPEN_FAIL:
+      if (now - s_buddy.open_at >= BUDDY_OPEN_HOLD_S) {
+        s_buddy.open_state = OPEN_NONE;
+        s_buddy.open_id[0] = '\0';
+      }
+      break;
+    case OPEN_SENDING:
+      if (now - s_buddy.open_at >= BUDDY_OPEN_TIMEOUT_S) {
+        s_buddy.open_state = OPEN_NONE;
+        s_buddy.open_id[0] = '\0';
+      }
+      break;
+    default: break;
+  }
   ds_lock_give(s_lock);
 }
 

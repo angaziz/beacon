@@ -42,6 +42,26 @@ loc-only frame on meaningful (> ~0.01 deg) change — **never** on the 30s heart
 - Device precedence: hub `loc` > cached NVS > IP geolocation; a hub fix is never overwritten by IP.
 - Permission denied / no fix => the hub omits `loc` and the device keeps its IP-based place name.
 
+Optional `sessions` block (additive `v:1` extension, issue #110). A **standalone** frame — NOT embedded
+in `buddy`: the combined `usage`+`buddy`+`loc` status frame already nears `HUB_FRAME_MAX` (1024 B), and a
+session array would push it over (silently dropped). A separate frame keeps the budget independent and
+lets old firmware ignore it while still reading the unchanged `buddy`/`entries` block. The hub emits it
+on any session-state change and on (re)connect; parsed by `hub_parse_sessions` into `buddy_rec_t.sessions[]`.
+
+```json
+{"v":1,"sessions":[{"id":"s3","label":"beacon · fix/109","state":"attention","ts":1719400000},
+                   {"id":"s1","label":"api · main","state":"working","ts":1719399860}]}
+```
+- Newest-first (hub-sorted by last update). **Frozen caps** (worst case asserted < 1024 B): `sessions`
+  length ≤ **5**; `id` ≤ **6** chars (`s` + monotonic counter, wraps mod 100000); `label` ≤ **28** chars
+  (`folder · branch`; default branches `main`/`master` dropped); `state` ∈ {`working`, `waiting`,
+  `waiting_queued`, `attention`, `question`, `idle`}; `ts` epoch seconds. Unknown `state` => `working`
+  (device). `question` = the session is waiting on the user's input (from the CC `Notification` hook);
+  the device surfaces it as a "tap to answer on Mac" takeover (priority: permission prompt > question >
+  list). The device renders up to 4 rows on the `claude` screen.
+- Migration: `buddy.entries` stays emitted/legal for back-compat; new firmware reads `sessions` and
+  ignores `entries`, old firmware ignores the unknown `sessions` frame. No version bump.
+
 ## B. Device -> hub commands + hub acks (FROZEN, `tech.md` §7.1)
 
 ```json
@@ -49,10 +69,16 @@ loc-only frame on meaningful (> ~0.01 deg) change — **never** on the 30s heart
 {"v":1,"ack":"p07","ok":true}                                // decision applied
 {"v":1,"ack":"p07","ok":false}                               // decision did NOT apply (late/superseded)
 {"v":1,"err":"unknown_prompt_id","id":"p07"}                 // id the hub never minted
+{"v":1,"cmd":"open","id":"s3"}                               // device tap -> focus this session (issue #110, Phase 2)
+{"v":1,"ack":"s3","ok":true}                                 // focus attempted (best-effort tier succeeded)
+{"v":1,"err":"unknown_session","id":"s3"}                    // session id the hub never minted / already reaped
 ```
 - `id` echoes the hub-minted short id (see §D). The hub maps it back to the real hook request id.
-- `ok:false` = the device decided but the hub had already resolved the prompt (e.g. the 25s fail-closed
+- `ok:false` = the device decided but the hub had already resolved the prompt (e.g. the ~590 s fail-closed
   cap fired first, or it was superseded). The device must surface this, not treat it as success.
+- `open` (additive `v:1`, Phase 2): the device sends it when a session row is tapped; the hub resolves the
+  `s<id>` to its captured host context and focuses that terminal/editor (tiered best-effort). `ok:false` =>
+  could not focus (e.g. Automation permission denied / app gone); `unknown_session` => stale/never-minted id.
 
 ## B2. Hub -> device ticker config + device -> hub config ack (FROZEN, issue #92, design `docs/specs/2026-06-17-hub-ticker-config-design.md` §2)
 
@@ -193,9 +219,12 @@ one silently fails to gate the tool:
 // PreToolUse (back-compat): permissionDecision in {allow,deny,ask}; precedence deny>ask>allow
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"Approved on Beacon device"}}
 // AskUserQuestion (a question, not yes/no): hub never holds it -- it defers to the Mac's prompt so the
-// human picks an option there; the device shows only a passive "asking a question" feed entry. Since
-// PermissionRequest's decision.behavior has no "ask" (allow/deny only), defer by emitting NO decision --
-// an empty body CC reads as "no gate", falling through to its own interactive prompt.
+// human picks an option there. The device cannot answer a multi-choice question; it only INDICATES that
+// a session is waiting on input -- via the `question` session state (set by the separate `Notification`
+// hook) and the "tap to answer on Mac" takeover (§A, FR-BUDDY-8), which on tap focuses that terminal so
+// the user answers there. Since PermissionRequest's decision.behavior has no "ask" (allow/deny only),
+// defer by emitting NO decision -- an empty body CC reads as "no gate", falling through to its own
+// interactive prompt.
 {}
 ```
 HTTP 2xx + body, no outer envelope. Hook `timeout` is in **seconds** (config: 600 to cover the

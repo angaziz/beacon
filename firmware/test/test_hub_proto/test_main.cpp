@@ -273,6 +273,25 @@ static void test_build_overflow_returns_zero(void) {
   TEST_ASSERT_EQUAL_size_t(0, hub_build_permission(buf, sizeof(buf), "req_abc", true));
 }
 
+// hub_build_open (issue #110, P2-b)
+static void test_build_open_frame(void) {
+  char buf[128];
+  size_t n = hub_build_open(buf, sizeof(buf), "s3");
+  TEST_ASSERT_GREATER_THAN_size_t(0, n);
+  TEST_ASSERT_EQUAL_CHAR('\n', buf[n - 1]);          // newline-terminated (framing rule)
+  TEST_ASSERT_EQUAL_CHAR('\0', buf[n]);
+  TEST_ASSERT_NOT_NULL(strstr(buf, "\"v\":1"));
+  TEST_ASSERT_NOT_NULL(strstr(buf, "\"cmd\":\"open\""));
+  TEST_ASSERT_NOT_NULL(strstr(buf, "\"id\":\"s3\""));
+}
+
+static void test_build_open_null_returns_zero(void) {
+  char buf[64];
+  TEST_ASSERT_EQUAL_size_t(0, hub_build_open(buf, sizeof(buf), nullptr));
+  TEST_ASSERT_EQUAL_size_t(0, hub_build_open(nullptr, sizeof(buf), "s3"));
+  TEST_ASSERT_EQUAL_size_t(0, hub_build_open(buf, 0, "s3"));
+}
+
 // ===== ack / err =====
 
 static void test_parse_ack_ok(void) {
@@ -391,6 +410,65 @@ static void test_parse_prompt_qlen_clamps_out_of_range(void) {
   }
 }
 
+// ===== sessions parse =====
+
+void test_parse_sessions_basic(void) {
+  const char* j = "{\"v\":1,\"sessions\":["
+    "{\"id\":\"s3\",\"label\":\"beacon \xC2\xB7 fix/109\",\"state\":\"attention\",\"ts\":1719400000},"
+    "{\"id\":\"s1\",\"label\":\"api \xC2\xB7 main\",\"state\":\"working\",\"ts\":1719399860}]}";
+  buddy_rec_t b; memset(&b, 0, sizeof(b));
+  bool had = false;
+  TEST_ASSERT_TRUE(hub_parse_sessions(j, strlen(j), &b, &had));
+  TEST_ASSERT_TRUE(had);
+  TEST_ASSERT_EQUAL_UINT8(2, b.session_count);
+  TEST_ASSERT_EQUAL_STRING("s3", b.sessions[0].id);
+  TEST_ASSERT_EQUAL_UINT8(BST_ATTENTION, b.sessions[0].state);
+  TEST_ASSERT_EQUAL_UINT8(BST_WORKING, b.sessions[1].state);
+  TEST_ASSERT_EQUAL_UINT32(1719400000u, b.sessions[0].ts);
+  TEST_ASSERT_EQUAL_STRING("beacon \xC2\xB7 fix/109", b.sessions[0].label);
+  TEST_ASSERT_EQUAL_UINT32(1719399860u, b.sessions[1].ts);
+}
+
+void test_parse_sessions_caps_and_truncates(void) {
+  // 7 sessions, an over-length label, an unknown state.
+  const char* j = "{\"v\":1,\"sessions\":["
+    "{\"id\":\"s1\",\"label\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"state\":\"glorp\",\"ts\":7},"
+    "{\"id\":\"s2\",\"label\":\"x\",\"state\":\"idle\",\"ts\":6},"
+    "{\"id\":\"s3\",\"label\":\"x\",\"state\":\"idle\",\"ts\":5},"
+    "{\"id\":\"s4\",\"label\":\"x\",\"state\":\"idle\",\"ts\":4},"
+    "{\"id\":\"s5\",\"label\":\"x\",\"state\":\"idle\",\"ts\":3},"
+    "{\"id\":\"s6\",\"label\":\"x\",\"state\":\"idle\",\"ts\":2},"
+    "{\"id\":\"s7\",\"label\":\"x\",\"state\":\"idle\",\"ts\":1}]}";
+  buddy_rec_t b; memset(&b, 0, sizeof(b));
+  bool had = false;
+  TEST_ASSERT_TRUE(hub_parse_sessions(j, strlen(j), &b, &had));
+  TEST_ASSERT_TRUE(had);
+  TEST_ASSERT_EQUAL_UINT8(BUDDY_SESSIONS_MAX, b.session_count);          // capped at 5
+  TEST_ASSERT_TRUE(strlen(b.sessions[0].label) <= BUDDY_LABEL_LEN - 1);  // truncated
+  TEST_ASSERT_EQUAL_UINT8(BST_WORKING, b.sessions[0].state);             // unknown => working
+}
+
+void test_parse_sessions_rejects_bad_version(void) {
+  const char* j = "{\"v\":2,\"sessions\":[]}";
+  buddy_rec_t b; memset(&b, 0, sizeof(b));
+  bool had = false;
+  TEST_ASSERT_FALSE(hub_parse_sessions(j, strlen(j), &b, &had));
+  TEST_ASSERT_FALSE(had);
+}
+
+void test_parse_sessions_question_state(void) {
+  const char* j = "{\"v\":1,\"sessions\":["
+    "{\"id\":\"s9\",\"label\":\"myrepo \xC2\xB7 feat/ask\",\"state\":\"question\",\"ts\":1719401000}]}";
+  buddy_rec_t b; memset(&b, 0, sizeof(b));
+  bool had = false;
+  TEST_ASSERT_TRUE(hub_parse_sessions(j, strlen(j), &b, &had));
+  TEST_ASSERT_TRUE(had);
+  TEST_ASSERT_EQUAL_UINT8(1, b.session_count);
+  TEST_ASSERT_EQUAL_STRING("s9", b.sessions[0].id);
+  TEST_ASSERT_EQUAL_UINT8(BST_QUESTION, b.sessions[0].state);
+  TEST_ASSERT_EQUAL_UINT32(1719401000u, b.sessions[0].ts);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_reassemble_single_frame);
@@ -414,6 +492,8 @@ int main(int, char**) {
   RUN_TEST(test_build_permission_roundtrips);
   RUN_TEST(test_build_permission_deny);
   RUN_TEST(test_build_overflow_returns_zero);
+  RUN_TEST(test_build_open_frame);
+  RUN_TEST(test_build_open_null_returns_zero);
   RUN_TEST(test_parse_ack_ok);
   RUN_TEST(test_parse_ack_not_ok);
   RUN_TEST(test_parse_err);
@@ -426,5 +506,9 @@ int main(int, char**) {
   RUN_TEST(test_parse_prompt_qlen);
   RUN_TEST(test_parse_prompt_qlen_absent_defaults_one);
   RUN_TEST(test_parse_prompt_qlen_clamps_out_of_range);
+  RUN_TEST(test_parse_sessions_basic);
+  RUN_TEST(test_parse_sessions_caps_and_truncates);
+  RUN_TEST(test_parse_sessions_rejects_bad_version);
+  RUN_TEST(test_parse_sessions_question_state);
   return UNITY_END();
 }

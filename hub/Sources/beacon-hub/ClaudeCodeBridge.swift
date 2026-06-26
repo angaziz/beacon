@@ -21,7 +21,9 @@ final class ClaudeCodeBridge {
     var onStatuslineActivity: (() -> Void)?         // liveness: fires on EVERY rate_limits POST, undeduped (#93)
     var onPromptUndeliverable: ((String) -> Void)?  // a prompt couldn't be shown (device offline)
     var onPromptArrived: (() -> Void)?              // a deliverable prompt was shown on the device (cue the user)
+    var onAttention: (() -> Void)?                  // fires on aggregate 0->non-0 attention-bucket transition (spec §6)
     var onBridgeStatus: ((String?) -> Void)?        // non-nil = bind failed (loud); nil = recovered
+    var onSessionsUpdate: (([Session]) -> Void)?
 
     // Fixed localhost port so Claude Code's native http hooks use a static URL
     // (http://127.0.0.1:8765/hook). Also written to ~/.beacon-hub/port for the statusline shim.
@@ -48,6 +50,14 @@ final class ClaudeCodeBridge {
     // deltas -- the 30s heartbeat still resends the full frame, so a stalled consumer catches up.
     private var lastPublishedBuddy: BuddyState?
     private var lastClaudeUsage: ProviderUsage?
+    private let registry = SessionRegistry(idleTTL: 300)
+    private var lastPublishedSessions: [Session] = []
+
+    // Injectable for tests; production runs `git -C <cwd> rev-parse --abbrev-ref HEAD` off-queue.
+    var branchResolverForTest: ((String) -> String?)?
+    private var branchCache: [String: String] = [:]            // cwd => resolved branch (queue-confined)
+    private var branchInFlight: [String: [String]] = [:]       // cwd => sessionIds awaiting one in-flight resolve
+    private let gitQueue = DispatchQueue(label: "beacon.git", qos: .utility)
 
     // Pending permission holds, keyed by the short BLE-safe id we mint. Resolving fulfills the held
     // HTTP response. Concurrent prompts queue (promptQueue, FIFO): the front is shown on the device and
@@ -188,6 +198,12 @@ final class ClaudeCodeBridge {
         }
     }
 
+    // Look up host context by the device's short id (e.g. "s3"). Safe to call from any thread
+    // (queue.sync). Returns nil when the session is unknown or has no host context.
+    func hostForShortId(_ id: String) -> (app: String?, focusURL: String?, bundleId: String?, cwd: String)? {
+        queue.sync { registry.hostByShortId(id) }
+    }
+
     // Mirror the BLE link state so an arriving prompt can be denied as "offline" instead of held
     // invisibly until the cap. Safe to call from any thread.
     func setDeviceConnected(_ connected: Bool) {
@@ -261,6 +277,9 @@ final class ClaudeCodeBridge {
             handleHook(conn, body: obj)
         case ("POST", "/statusline"):
             handleStatusline(obj)
+            respondJSON(conn, ["ok": true])
+        case ("POST", "/session"):
+            handleSession(obj)
             respondJSON(conn, ["ok": true])
         default:
             respond(conn, status: "404 Not Found", json: Data("{}".utf8))
@@ -356,6 +375,7 @@ final class ClaudeCodeBridge {
         if !sessionId.isEmpty {
             waitingSessionCounts[sessionId, default: 0] += 1
             buddy.waiting = waitingSessionCounts.count
+            registry.touchActivity(sessionId: sessionId, cwd: nil, now: Date())
         }
         let shortId = mintId()
         let cap = DispatchSource.makeTimerSource(queue: queue)
@@ -368,6 +388,7 @@ final class ClaudeCodeBridge {
         promptQueue.append(shortId)
         cap.resume()
         publishFront()
+        publishSessions()
         log(id: shortId, decision: "prompt")
         onPromptArrived?()
     }
@@ -394,6 +415,7 @@ final class ClaudeCodeBridge {
             buddy.waiting = waitingSessionCounts.count
         }
         publishFront()   // advances to the next front, or clears to idle when the FIFO is empty
+        publishSessions()
         log(id: id, decision: capped ? "deny-timeout" : (approve ? "allow" : "deny"))
         p.respond(approve, message, onSent)
         return .applied
@@ -428,6 +450,7 @@ final class ClaudeCodeBridge {
             buddy.waiting = waitingSessionCounts.count
         }
         publishFront()
+        publishSessions()
         log(id: id, decision: "withdrawn-resolved-elsewhere")
     }
 
@@ -455,27 +478,32 @@ final class ClaudeCodeBridge {
     private func applySessionHook(event: String, body: [String: Any]) {
         let sid = body["session_id"] as? String
         touch(sid)   // every session event is liveness; first-seen also covers SessionStart never firing.
+        let cwd = body["cwd"] as? String
         switch event {
         case "Stop":
             // Turn finished (session still alive) => no longer blocked on the user; running unchanged.
-            if let sid { waitingSessionCounts.removeValue(forKey: sid) }
+            if let sid {
+                waitingSessionCounts.removeValue(forKey: sid)
+                registry.touchActivity(sessionId: sid, cwd: cwd, now: Date())
+                registry.markStop(sessionId: sid, now: Date())
+                ensureBranch(sessionId: sid, cwd: cwd)
+            }
         case "Notification":
-            // CC's Notification matcher is "*", so it also fires for non-waiting types (auth_success,
-            // elicitation_*). The waiting type is not reliably machine-readable from this body yet
-            // (confirm the field -- likely a `message`/type marker -- against a live payload), so we
-            // mark waiting for ALL Notifications and let the next Stop/SessionEnd/TTL clear a false
-            // wait (e.g. auth_success self-clears on the next Stop). Conservative: better a brief
-            // false-wait than a missed permission_prompt/idle_prompt. Only ensure >=1 so it never
-            // clobbers a live per-prompt refcount from enqueuePrompt.
-            if let sid { waitingSessionCounts[sid] = max(waitingSessionCounts[sid] ?? 0, 1) }
+            // CC fires Notification when the session asks the user a question (not a permission prompt).
+            // touchActivity first: creates the entry if this is the first signal for the session
+            // (SessionStart is not a guaranteed precursor). markNeedsInput then sets the flag;
+            // it no-ops on a missing entry, so the order matters.
+            if let sid { registry.touchActivity(sessionId: sid, cwd: cwd, now: Date()); registry.markNeedsInput(sessionId: sid) }
         case "SessionEnd":
             // Clean exit (does NOT fire on SIGKILL -- the TTL reaper backstops that). Remove all trace.
             if let sid {
                 sessions.removeValue(forKey: sid)
                 waitingSessionCounts.removeValue(forKey: sid)
                 sessionStats.removeValue(forKey: sid)
+                registry.end(sessionId: sid)
             }
-        default: break   // SessionStart: first-seen via touch() already counted it.
+        default:   // SessionStart + any: activity establishes the session as working.
+            if let sid { registry.touchActivity(sessionId: sid, cwd: cwd, now: Date()); ensureBranch(sessionId: sid, cwd: cwd) }
         }
         buddy.running = sessions.count
         buddy.waiting = waitingSessionCounts.count
@@ -488,6 +516,7 @@ final class ClaudeCodeBridge {
             buddy.entries = Array(([entry] + buddy.entries).prefix(3))
         }
         publishBuddy()
+        publishSessions()
     }
 
     // internal (not private) so beacon-hubTests can drive the statusline path without the Network stack.
@@ -497,6 +526,7 @@ final class ClaudeCodeBridge {
         // path to Claude usage without the Keychain/oauth call.)
         let sid = body["session_id"] as? String
         touch(sid)   // statusline traffic is the most frequent liveness signal.
+        if let sid { registry.touchActivity(sessionId: sid, cwd: body["cwd"] as? String, now: Date()); ensureBranch(sessionId: sid, cwd: body["cwd"] as? String) }
         if let cw = body["context_window"] as? [String: Any] {
             let pct = Self.double(cw["used_percentage"]).map { max(0, min(100, Int($0.rounded()))) } ?? 0
             let inTok = Self.int(cw["total_input_tokens"]) ?? 0
@@ -526,6 +556,23 @@ final class ClaudeCodeBridge {
             }
         }
         publishBuddy()
+        publishSessions()
+    }
+
+    // POST /session — receives host-context env from the beacon-session command hook on SessionStart.
+    // Logs only host_app (never focus_url, which may embed a token per tech.md 9).
+    private func handleSession(_ body: [String: Any]) {
+        guard let sid = body["session_id"] as? String, !sid.isEmpty else { return }
+        let cwd = body["cwd"] as? String
+        let hostApp = body["host_app"] as? String
+        let focusURL = body["focus_url"] as? String
+        let bundleId = body["bundle_id"] as? String
+        registry.touchActivity(sessionId: sid, cwd: cwd, now: Date())
+        registry.setHost(sessionId: sid, hostApp: hostApp, focusURL: focusURL, bundleId: bundleId)
+        if let app = hostApp, !app.isEmpty {
+            FileHandle.standardError.write(Data("[beacon-hub] session host sid=\(sid.prefix(8)) app=\(app)\n".utf8))
+        }
+        publishSessions()
     }
 
     private static func rlWindow(_ any: Any?) -> UsageWindow {
@@ -564,6 +611,7 @@ final class ClaudeCodeBridge {
         if before != (sessions.count, waitingSessionCounts.count, buddy.tokens, buddy.contextPct) {
             publishBuddy()
         }
+        publishSessions()
     }
 
     // Re-derive the device-visible prompt from the front of the FIFO + current depth, then publish.
@@ -583,6 +631,71 @@ final class ClaudeCodeBridge {
         let snapshot = buddy
         let cb = onBuddyUpdate
         DispatchQueue.main.async { cb?(snapshot) }
+    }
+
+    private func waitingSessionSets() -> (front: String?, queued: Set<String>) {
+        guard let frontId = promptQueue.first, let fp = pending[frontId], !fp.done else { return (nil, []) }
+        let front = fp.sessionId.isEmpty ? nil : fp.sessionId
+        var queued = Set<String>()
+        for id in promptQueue.dropFirst() {
+            if let p = pending[id], !p.done, !p.sessionId.isEmpty { queued.insert(p.sessionId) }
+        }
+        queued.subtract(front.map { [$0] } ?? [])
+        return (front, queued)
+    }
+
+    private func publishSessions() {
+        registry.reap(now: Date())
+        let (front, queued) = waitingSessionSets()
+        let snap = registry.snapshot(now: Date(), waitingFront: front, waitingQueued: queued)
+        guard snap != lastPublishedSessions else { return }
+        let prevAttention = lastPublishedSessions.contains { $0.state == .attention }
+        let nowAttention  = snap.contains { $0.state == .attention }
+        if !prevAttention && nowAttention {     // bucket went 0 -> >0
+            let cb = onAttention
+            DispatchQueue.main.async { cb?() }
+        }
+        lastPublishedSessions = snap
+        let cb = onSessionsUpdate
+        DispatchQueue.main.async { cb?(snap) }
+    }
+
+    // Call from applySessionHook/handleStatusline AFTER registry.touchActivity, on `queue`. Dedupes by
+    // cwd: a cached branch applies immediately; a cwd already resolving just appends the session to the
+    // waiter list (Codex B4 -- never spawns a second git for the same cwd). git runs off `queue` (on
+    // gitQueue) so a slow rev-parse never blocks a hook reply; the result hops back to `queue`.
+    private func ensureBranch(sessionId: String, cwd: String?) {
+        guard let cwd, !cwd.isEmpty else { return }
+        if let cached = branchCache[cwd] { registry.setBranch(sessionId: sessionId, branch: cached); return }
+        if branchInFlight[cwd] != nil { branchInFlight[cwd]!.append(sessionId); return }   // already resolving
+        branchInFlight[cwd] = [sessionId]
+        let resolver = branchResolverForTest
+        gitQueue.async { [weak self] in
+            let branch = resolver?(cwd) ?? Self.gitBranch(cwd)
+            self?.queue.async {
+                guard let self else { return }
+                if let branch, !branch.isEmpty { self.branchCache[cwd] = branch }
+                for sid in self.branchInFlight[cwd] ?? [] { self.registry.setBranch(sessionId: sid, branch: branch) }
+                self.branchInFlight.removeValue(forKey: cwd)
+                self.publishSessions()
+            }
+        }
+    }
+
+    private static func gitBranch(_ cwd: String) -> String? {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        p.arguments = ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"]
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = Pipe()
+        do { try p.run() } catch { return nil }
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return nil }
+        let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let b = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (b.isEmpty || b == "HEAD") ? nil : b
+    }
+
+    func applySessionHookForTest(event: String, sessionId: String, cwd: String) {
+        queue.sync { self.applySessionHook(event: event, body: ["session_id": sessionId, "cwd": cwd, "hook_event_name": event]) }
     }
 
     // --- helpers ---

@@ -1,16 +1,22 @@
 #include "ui/idle_glue.h"
 #include "core/idle.h"
 #include "core/nvs.h"
+#include "core/datastore.h"
+#include "core/records.h"
 #include "ui/durations.h"
 #include "ui/carousel.h"
 #include "hal/display.h"
 #include <lvgl.h>
+#include <string.h>
 
 #define IDLE_DIM_RAW 24   // ~9% backlight while dimmed; on AMOLED this is clearly "asleep soon"
 
 static uint32_t     s_dim_ms   = 0;
 static uint32_t     s_sleep_ms = 0;
 static idle_phase_t s_phase    = IDLE_ACTIVE;
+
+// Wake-tap protection state.
+static bool s_wake_tap = false;
 
 static uint8_t clamp_idx(uint8_t i, uint8_t def) { return i < DURATION_COUNT ? i : def; }
 
@@ -39,4 +45,44 @@ void idle_service(void) {
   // can sleep); resume + immediately refresh on wake. The brightness write above still runs first.
   carousel_set_tick_paused(p != IDLE_ACTIVE);
   s_phase = p;
+}
+
+void idle_note_press(bool was_inactive) { s_wake_tap = was_inactive; }
+
+bool idle_take_wake_tap(void) {
+  bool v = s_wake_tap;
+  s_wake_tap = false;
+  return v;
+}
+
+void buddy_wake_service(void) {
+  buddy_rec_t b = ds_get_buddy();
+
+  // Compute needs_user: a prompt is pending, or any session needs attention/response.
+  bool needs_user = b.prompt.present;
+  for (uint8_t i = 0; !needs_user && i < b.session_count; i++) {
+    uint8_t st = b.sessions[i].state;
+    needs_user = (st == BST_WAITING || st == BST_ATTENTION);
+  }
+
+  // Track previous state + prompt id to detect rising edges and new prompts while already needing.
+  static bool s_prev_needs  = false;
+  static char s_prev_prompt[BUDDY_ID_LEN];
+
+  bool rising = (!s_prev_needs && needs_user) ||
+                (needs_user && b.prompt.present &&
+                 strncmp(s_prev_prompt, b.prompt.id, BUDDY_ID_LEN) != 0);
+
+  if (rising && idle_is_inactive()) {
+    lv_disp_trig_activity(NULL);
+    carousel_goto_buddy();
+  }
+
+  s_prev_needs = needs_user;
+  if (b.prompt.present) {
+    strncpy(s_prev_prompt, b.prompt.id, BUDDY_ID_LEN - 1);
+    s_prev_prompt[BUDDY_ID_LEN - 1] = '\0';
+  } else {
+    s_prev_prompt[0] = '\0';
+  }
 }

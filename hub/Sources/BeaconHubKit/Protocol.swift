@@ -73,6 +73,45 @@ public struct Loc: Codable, Equatable {
     }
 }
 
+public enum SessionLimits { public static let maxCount = 5; public static let labelMaxChars = 28; public static let idMaxChars = 6 }
+
+public enum SessionState: String, Codable, Equatable {
+    case working, waiting, attention, idle, question
+    case waitingQueued = "waiting_queued"
+}
+
+public struct Session: Codable, Equatable {
+    public var id: String
+    public var label: String
+    public var state: SessionState
+    public var ts: Int            // Unix epoch seconds of last update
+    public init(id: String, label: String, state: SessionState, ts: Int) {
+        self.id = id; self.label = label; self.state = state; self.ts = ts
+    }
+}
+
+// Standalone hub->device frame (design §4). NOT embedded in `buddy`: the combined status frame
+// (usage+buddy+loc) already nears HUB_FRAME_MAX; a separate frame keeps the budget independent and
+// lets old firmware ignore it (it still reads the unchanged `buddy`/`entries` frame).
+public struct SessionsFrame: Codable {
+    public var sessions: [Session]
+    public let v: Int
+    // Defensive cap/truncation at the wire boundary even though SessionRegistry is the sole producer:
+    // guarantees the frame can never exceed the frozen caps regardless of caller.
+    public init(_ sessions: [Session]) {
+        self.sessions = sessions.prefix(SessionLimits.maxCount).map {
+            Session(id: String($0.id.prefix(SessionLimits.idMaxChars)),
+                    label: String($0.label.prefix(SessionLimits.labelMaxChars)),
+                    state: $0.state, ts: $0.ts)
+        }
+        self.v = 1
+    }
+    public func encoded() throws -> Data {
+        let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
+        var d = try enc.encode(self); d.append(0x0A); return d
+    }
+}
+
 // One hub->device status frame. usage/buddy/loc are independently optional (send what changed; the
 // device keeps an absent block's last values). encoded() emits the §7.1 wire form with "v":1 + a \n.
 public struct StatusFrame: Codable {
@@ -103,6 +142,8 @@ public enum DeviceCommand: Equatable {
     // reassembles. rev is always 0 (the device does not persist the hub's rev). Used so a fresh hub
     // can adopt the list the device already holds.
     case report(what: String, rev: UInt32, part: Int, parts: Int, rows: [TickerRow])
+    // Tap-to-open: device asks hub to focus the terminal/editor for session `id` (issue #110, P2-b).
+    case open(id: String)
 
     public static func parse(_ data: Data) -> DeviceCommand? {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -111,6 +152,9 @@ public enum DeviceCommand: Equatable {
         case "permission":
             guard let id = obj["id"] as? String, let dec = obj["decision"] as? String else { return nil }
             return .permission(id: id, approve: dec == "approve")
+        case "open":
+            guard let id = obj["id"] as? String, !id.isEmpty else { return nil }
+            return .open(id: id)
         case "config_ack":
             guard let rev = obj["rev"] as? Int, rev >= 0, let ok = obj["ok"] as? Bool else { return nil }
             return .configAck(rev: UInt32(rev), ok: ok, count: obj["count"] as? Int, err: obj["err"] as? String)

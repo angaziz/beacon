@@ -155,6 +155,14 @@ void carousel_set_tick_paused(bool paused) {
 int carousel_current(void) { return s_current; }
 lv_obj_t* carousel_root(void) { return s_pager; }
 
+// Buddy screen is at index 3 in MODULES (home=0, finance=1, usage=2, buddy=3, settings=4).
+// Kept as a named function rather than carousel_goto(3) so callers don't embed the magic index.
+void carousel_goto_buddy(void) {
+  if (s_current == 3) return;   // already there; no scroll churn
+  show(3);
+  recenter();
+}
+
 #if BEACON_CAPTURE
 int carousel_count(void) { return COUNT; }
 const char* carousel_screen_id(int idx) { return MODULES[idx]->id; }

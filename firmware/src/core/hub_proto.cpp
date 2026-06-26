@@ -96,6 +96,37 @@ bool hub_parse_status(const char* json, size_t len,
   return true;
 }
 
+static uint8_t map_session_state(const char* s) {
+  if (!s) return BST_WORKING;
+  if (!strcmp(s, "waiting"))        return BST_WAITING;
+  if (!strcmp(s, "waiting_queued")) return BST_WAITING_QUEUED;
+  if (!strcmp(s, "attention"))      return BST_ATTENTION;
+  if (!strcmp(s, "idle"))           return BST_IDLE;
+  if (!strcmp(s, "question"))       return BST_QUESTION;
+  return BST_WORKING;                                  // unknown => safest non-alerting state
+}
+
+bool hub_parse_sessions(const char* json, size_t len, buddy_rec_t* buddy, bool* had_sessions) {
+  *had_sessions = false;
+  JsonDocument doc;
+  if (deserializeJson(doc, json, len)) return false;
+  if ((doc["v"] | 0) != 1) return false;
+  JsonVariantConst arr = doc["sessions"];
+  if (!arr.is<JsonArrayConst>()) return false;
+  *had_sessions = true;
+  buddy->session_count = 0;
+  for (JsonVariantConst s : arr.as<JsonArrayConst>()) {
+    if (buddy->session_count >= BUDDY_SESSIONS_MAX) break;   // hub caps at 5; defend anyway
+    buddy_session_t* d = &buddy->sessions[buddy->session_count];
+    copy_trunc(d->id,    BUDDY_SID_LEN,   s["id"].as<const char*>());
+    copy_trunc(d->label, BUDDY_LABEL_LEN, s["label"].as<const char*>());
+    d->state = map_session_state(s["state"].as<const char*>());
+    d->ts    = s["ts"] | (uint32_t)0;
+    buddy->session_count++;
+  }
+  return true;
+}
+
 bool hub_parse_loc(const char* json, size_t len, hub_loc_t* out) {
   JsonDocument doc;
   if (deserializeJson(doc, json, len)) return false;   // not valid JSON
@@ -126,6 +157,15 @@ size_t hub_build_permission(char* buf, size_t cap, const char* id, bool approve)
   doc["cmd"] = "permission";
   doc["id"] = id;
   doc["decision"] = approve ? "approve" : "deny";
+  return finish_frame(doc, buf, cap);
+}
+
+size_t hub_build_open(char* buf, size_t cap, const char* id) {
+  if (!buf || !id || cap == 0) return 0;
+  JsonDocument doc;
+  doc["v"] = 1;
+  doc["cmd"] = "open";
+  doc["id"] = id;
   return finish_frame(doc, buf, cap);
 }
 

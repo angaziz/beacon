@@ -115,7 +115,11 @@ static void on_frame(const char* json, size_t len) {
   }
   if (frame_has(json, len, "\"ack\"") || frame_has(json, len, "\"err\"")) {
     hub_ack_t ack;
-    if (hub_parse_ack(json, len, &ack)) { apply_ack(ack); return; }
+    if (hub_parse_ack(json, len, &ack)) {
+      apply_ack(ack);                                          // prompt path (p<n> ids)
+      ds_apply_open_ack(ack.id, ack.ok && !ack.is_err, uptime_s());  // session-open path (s<n> ids; no-ops if unmatched)
+      return;
+    }
   }
 
   // A config frame (chunked ticker snapshot) carries neither "ack" nor "err"; dispatch it before the
@@ -129,6 +133,13 @@ static void on_frame(const char* json, size_t len) {
     location_set_from_hub(loc.lat, loc.lon, loc.tz, loc.name);
     if (loc.tz[0] && timekeep_tz_supported(loc.tz)) timekeep_set_tz(loc.tz);
   }
+
+  // A sessions frame arrives independently of the buddy frame; merge ONLY sessions into the buddy record.
+  { buddy_rec_t tmp; bool had = false;
+    if (hub_parse_sessions(json, len, &tmp, &had) && had) {
+      ds_apply_sessions(tmp.sessions, tmp.session_count, (uint32_t)timekeep_now());
+      return;
+    } }
 
   usage_rec_t u = ds_get_usage();
   buddy_rec_t b = ds_get_buddy();
@@ -155,7 +166,9 @@ static void hub_task(void*) {
   int k = 0;
   for (;;) {
     s_link.loop();
-    ds_tick_buddy_prompt(uptime_s());   // prompt expiry + confirm-hold (monotonic; runs every screen)
+    uint32_t mono = uptime_s();
+    ds_tick_buddy_prompt(mono);   // prompt expiry + confirm-hold (monotonic; runs every screen)
+    ds_tick_open(mono);           // open-feedback hold/timeout (issue #110 Phase 2)
 
     bool c = s_link.isConnected();
     if (s_was_connected && !c) { ds_set_hub_offline(); s_reported = false; }   // re-report next connection
@@ -206,4 +219,16 @@ bool buddy_dismiss(void) {
   r.prompt.present = false;
   ds_set_buddy(&r);
   return true;
+}
+
+bool buddy_open(const char* id) {
+  if (!id || id[0] == '\0') return false;
+  if (!g_link) { LOGI("buddy open (no hub link; noop) id=%s", id); return true; }
+  char buf[64];
+  size_t n = hub_build_open(buf, sizeof(buf), id);
+  if (!n) return false;
+  bool ok = g_link->send(buf, n);
+  LOGI("buddy open -> hub id=%s sent=%d", id, ok);
+  if (ok) ds_set_open_pending(id, uptime_s());
+  return ok;
 }

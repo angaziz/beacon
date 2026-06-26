@@ -41,6 +41,9 @@ static void rounder_cb(lv_disp_drv_t* drv, lv_area_t* a) {
 static void indev_read_cb(lv_indev_drv_t* drv, lv_indev_data_t* data) {
   int16_t x, y;
   if (touch_read(&x, &y)) {
+    // Record whether this press is waking the device BEFORE triggering activity, so the flag is
+    // set on every PRESSED (fresh each contact; stale flags can't linger across gestures).
+    idle_note_press(idle_is_inactive());
     if (idle_is_inactive()) {                // dimmed or asleep => wake only; don't activate what's under the finger
       lv_disp_trig_activity(NULL);           // LVGL counts only PRESSED as activity; force the reset
       data->state = LV_INDEV_STATE_RELEASED;

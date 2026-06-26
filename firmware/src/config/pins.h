@@ -17,3 +17,13 @@
 // Touch
 #define PIN_TOUCH_INT 11
 #define ADDR_TOUCH    0x5A
+
+// Audio — ES8311 codec + I2S (device-only; not used in native/host builds)
+#if !BEACON_NATIVE
+#define AUDIO_I2S_MCLK   42
+#define AUDIO_I2S_BCLK    9
+#define AUDIO_I2S_WS     45
+#define AUDIO_I2S_DOUT    8
+#define AUDIO_PA_CTRL    46   // HIGH = amp unmuted
+#define AUDIO_ES8311_ADDR 0x18
+#endif

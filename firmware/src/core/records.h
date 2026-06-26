@@ -11,6 +11,24 @@
 #define BUDDY_HINT_LEN  80
 #define BUDDY_ENTRY_LEN 40
 #define BUDDY_ENTRIES    3
+#define BUDDY_SID_LEN      8   // "s" + up to 6 digits + NUL
+#define BUDDY_LABEL_LEN   29   // 28 chars + NUL (design §4 cap)
+#define BUDDY_SESSIONS_MAX 5
+
+enum {                          // wire `state` string => firmware enum
+  BST_WORKING = 0,
+  BST_WAITING,
+  BST_WAITING_QUEUED,
+  BST_ATTENTION,
+  BST_IDLE,
+  BST_QUESTION,
+};
+typedef struct {
+  char     id[BUDDY_SID_LEN];   // opaque hub-minted s<n>, echoed back on tap (Phase 2)
+  char     label[BUDDY_LABEL_LEN];
+  uint8_t  state;               // BST_*
+  uint32_t ts;                  // epoch seconds of last update (sort key, age source)
+} buddy_session_t;
 
 typedef struct {
   uint32_t       last_updated;  // epoch seconds of last successful update; 0 = never
@@ -64,6 +82,15 @@ enum {
   PROMPT_SENT_OK       = 2,    // hub acked ok:true -> decision applied
   PROMPT_TOO_LATE      = 3,    // hub acked ok:false / err -> decision did not apply (late/superseded)
 };
+// open_state: device-local tap-to-open lifecycle (issue #110, Phase 2). NOT on the wire.
+enum {
+  OPEN_NONE    = 0,            // no in-flight/just-finished open (memset-zero default)
+  OPEN_SENDING = 1,            // open command enqueued; awaiting hub ack
+  OPEN_OK      = 2,            // hub acked ok:true -> session focused
+  OPEN_FAIL    = 3,            // hub acked err -> focus failed
+};
+#define BUDDY_OPEN_HOLD_S    2u   // how long OPEN_OK/FAIL feedback stays on screen
+#define BUDDY_OPEN_TIMEOUT_S 8u   // OPEN_SENDING times out (no ack) after this many seconds
 // Prompt lifecycle timeouts (monotonic seconds): a prompt nobody decides expires; an applied decision
 // holds its "sent ok" beat briefly before clearing. See ds_tick_buddy_prompt.
 #define BUDDY_PROMPT_EXPIRY_S 590u   // align to the hub ~600s hold (CC PermissionRequest max); local fail-safe for a dropped hub link
@@ -88,4 +115,11 @@ typedef struct {
   char          entries[BUDDY_ENTRIES][BUDDY_ENTRY_LEN]; // recent activity (newest first)
   uint8_t       entry_count;
   buddy_prompt_t prompt;
+  buddy_session_t sessions[BUDDY_SESSIONS_MAX];  // newest-first (hub-sorted); arrives in its OWN frame
+  uint8_t         session_count;
+  // Tap-to-open feedback (device-local; issue #110 Phase 2). NOT on the wire; ds_apply_sessions
+  // must NOT clear these -- they survive session list refreshes until timed out by ds_tick_open.
+  char     open_id[BUDDY_SID_LEN];  // session id of the in-flight / just-finished open
+  uint8_t  open_state;              // OPEN_*
+  uint32_t open_at;                 // uptime_s() stamp when the open was sent / acked
 } buddy_rec_t;

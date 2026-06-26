@@ -214,7 +214,7 @@ Exact hook event field names + statusline fields: capture into a `hub/CONTRACT.m
 | Input feedback | <100 ms touch→visual | timestamp touch event → first changed frame |
 | Boot | <4 s to first **rendered** screen (WiFi/NTP connect happens async afterward, not counted) | log time from reset to first `lv_scr_load` |
 | Memory | LVGL buffers per §6; **≥60 KB free internal heap at all times** | `esp_get_free_internal_heap_size()` min, logged each second under the worst-case screen + active BLE + cert TLS (P2 re-measure) |
-| Permission round-trip | <5 s human; hard fail-closed at ~30 s | hook fixture timing |
+| Permission round-trip | <5 s human; hard fail-closed at ~590 s (below CC's ~600 s hook timeout) | hook fixture timing |
 | Reliability | no crash/hang on WiFi loss, API error, hub disconnect | fault-injection test: drop WiFi, 500/429 from a stub, kill hub — UI stays responsive |
 | Power | dark themes; dim→sleep on idle; wake on touch/IMU | (battery current measurement deferred; track sleep entry/exit in logs) |
 | Accessibility | body ≥4.5:1, large ≥3:1; targets ≥64 px; reduced-motion alt; no color-only state | contrast check on tokens (`DESIGN.md`); inspect hit-area sizes |

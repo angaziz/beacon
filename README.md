@@ -21,7 +21,7 @@ Five screens, navigated by swipe + motion gestures:
 | Home | clock, date, weather, humidity | WiFi (direct) |
 | Finance | FX, crypto, indices, ETFs — curated from the Mac hub | WiFi (direct) |
 | AI Usage | Claude + Codex, **both** 5h and 7-day windows + reset | Mac hub (BLE) |
-| Coding Buddy | session state + approve/deny Claude tool-permission prompts | Mac hub (BLE) |
+| Coding Buddy | live per-session list (state + folder·branch + age), approve/deny tool-permission prompts, tap a session to focus its terminal | Mac hub (BLE) |
 | Settings | WiFi, brightness, theme picker, sleep, etc. | local (NVS) |
 
 ## What works today
@@ -31,7 +31,7 @@ Five screens, navigated by swipe + motion gestures:
 - **Markets are curated from the hub, no re-flashing** — search Binance + Yahoo in the macOS menubar app, pick your tickers, and they push to the device over BLE and apply instantly (persisted on-device, no reboot, no code change). The device keeps fetching prices itself over WiFi.
 - **WiFi setup happens on-device** — the device opens a hotspot with a captive portal; no credentials are ever compiled into the firmware. Multiple networks are remembered.
 - **AI Usage is live over Bluetooth**: the macOS hub reads Claude Code + Codex usage and streams it to the device over a bonded BLE link, alongside the device's own WiFi plane.
-- **Coding Buddy round-trip is validated on hardware**: approve or deny a Claude Code tool-permission prompt from the device, and the Mac honors it.
+- **Coding Buddy is session-aware, validated on hardware**: the `claude` screen lists your live Claude Code sessions (state + folder·branch + age, newest first); approve/deny a tool-permission prompt from the device and the Mac honors it; a session waiting on your input shows a **"tap to answer on Mac"** card; **tap any session to focus its terminal** (precise for Warp; repo-window for VS Code/Cursor; app-level otherwise); a distinct chime fires when a session needs you, and the device wakes itself for it.
 - Settings, theme picker, brightness, and preferences persist across reboots.
 
 ## Two-plane architecture
@@ -54,7 +54,7 @@ The UI is fully themeable — **7 themes**, each a bespoke per-screen experience
 
 Every theme across all five screens, captured straight from the device framebuffer:
 
-| Theme | Home | Markets | AI Usage | Approval | Settings |
+| Theme | Home | Markets | AI Usage | Coding Buddy | Settings |
 |---|---|---|---|---|---|
 | **Editorial Index** | <img src="docs/assets/screens/editorial_HOME.png" width="150"> | <img src="docs/assets/screens/editorial_MARKETS.png" width="150"> | <img src="docs/assets/screens/editorial_LIMITS.png" width="150"> | <img src="docs/assets/screens/editorial_CLAUDE.png" width="150"> | <img src="docs/assets/screens/editorial_SETTINGS.png" width="150"> |
 | **Aerospace HUD** | <img src="docs/assets/screens/hud_HOME.png" width="150"> | <img src="docs/assets/screens/hud_MARKETS.png" width="150"> | <img src="docs/assets/screens/hud_LIMITS.png" width="150"> | <img src="docs/assets/screens/hud_CLAUDE.png" width="150"> | <img src="docs/assets/screens/hud_SETTINGS.png" width="150"> |
@@ -63,6 +63,12 @@ Every theme across all five screens, captured straight from the device framebuff
 | **LED Matrix** | <img src="docs/assets/screens/led_HOME.png" width="150"> | <img src="docs/assets/screens/led_MARKETS.png" width="150"> | <img src="docs/assets/screens/led_LIMITS.png" width="150"> | <img src="docs/assets/screens/led_CLAUDE.png" width="150"> | <img src="docs/assets/screens/led_SETTINGS.png" width="150"> |
 | **Oscilloscope** | <img src="docs/assets/screens/oscilloscope_HOME.png" width="150"> | <img src="docs/assets/screens/oscilloscope_MARKETS.png" width="150"> | <img src="docs/assets/screens/oscilloscope_LIMITS.png" width="150"> | <img src="docs/assets/screens/oscilloscope_CLAUDE.png" width="150"> | <img src="docs/assets/screens/oscilloscope_SETTINGS.png" width="150"> |
 | **Analog Neo** | <img src="docs/assets/screens/analog_HOME.png" width="150"> | <img src="docs/assets/screens/analog_MARKETS.png" width="150"> | <img src="docs/assets/screens/analog_LIMITS.png" width="150"> | <img src="docs/assets/screens/analog_CLAUDE.png" width="150"> | <img src="docs/assets/screens/analog_SETTINGS.png" width="150"> |
+
+**Coding Buddy — three states** (shown in Editorial; every theme renders all three in its own style): the live **session list**, a **permission prompt** (Approve/Deny on the device), and a **question** ("tap to answer on Mac" → focuses that terminal). Each `*_CLAUDE_prompt.png` / `*_CLAUDE_question.png` exists for every theme.
+
+| Session list | Permission prompt | Question (tap to answer) |
+|---|---|---|
+| <img src="docs/assets/screens/editorial_CLAUDE.png" width="160"> | <img src="docs/assets/screens/editorial_CLAUDE_prompt.png" width="160"> | <img src="docs/assets/screens/editorial_CLAUDE_question.png" width="160"> |
 
 [**View the full montage**](docs/assets/screens/montage.png) — all 35 in a single image.
 
