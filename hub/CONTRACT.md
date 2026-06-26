@@ -219,9 +219,12 @@ one silently fails to gate the tool:
 // PreToolUse (back-compat): permissionDecision in {allow,deny,ask}; precedence deny>ask>allow
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"Approved on Beacon device"}}
 // AskUserQuestion (a question, not yes/no): hub never holds it -- it defers to the Mac's prompt so the
-// human picks an option there; the device shows only a passive "asking a question" feed entry. Since
-// PermissionRequest's decision.behavior has no "ask" (allow/deny only), defer by emitting NO decision --
-// an empty body CC reads as "no gate", falling through to its own interactive prompt.
+// human picks an option there. The device cannot answer a multi-choice question; it only INDICATES that
+// a session is waiting on input -- via the `question` session state (set by the separate `Notification`
+// hook) and the "tap to answer on Mac" takeover (§A, FR-BUDDY-8), which on tap focuses that terminal so
+// the user answers there. Since PermissionRequest's decision.behavior has no "ask" (allow/deny only),
+// defer by emitting NO decision -- an empty body CC reads as "no gate", falling through to its own
+// interactive prompt.
 {}
 ```
 HTTP 2xx + body, no outer envelope. Hook `timeout` is in **seconds** (config: 600 to cover the

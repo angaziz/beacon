@@ -11,6 +11,12 @@
 #include "ui/screen.h"
 #include "util/log.h"
 
+// Capture-time buddy state selector (build flag only; does not affect runtime behavior).
+// 0 = session list (default), 1 = Approve/Deny prompt card, 2 = question takeover.
+#ifndef BEACON_CAP_BUDDY
+#define BEACON_CAP_BUDDY 0
+#endif
+
 static void seed(void) {
   uint32_t now = now_s();
   weather_rec_t w; memset(&w, 0, sizeof(w)); w.temp_c = 31.8f; w.humidity_pct = 57; w.wmo_code = 2; w.hdr.last_updated = now;
@@ -29,11 +35,25 @@ static void seed(void) {
   u.hdr.last_updated = now; ds_set_usage(&u);
   buddy_rec_t b; memset(&b, 0, sizeof(b)); b.running = 2; b.waiting = 1; b.tokens = 184502; b.context_pct = 42;
   // No prompt seeded: capture shows the session list (the new design), not the permission screen.
+#if BEACON_CAP_BUDDY == 1
+  // Prompt state: Approve/Deny card rendered over the session list.
+  b.prompt.present = true;
+  strncpy(b.prompt.tool, "Bash", BUDDY_TOOL_LEN-1);
+  strncpy(b.prompt.hint, "[beacon] rm -rf /tmp/build-cache", BUDDY_HINT_LEN-1);
+  b.prompt.queue_len = 2;
+#endif
   b.hdr.last_updated = now; ds_set_buddy(&b);
   // Seed 4 representative sessions (newest-first) so the session list renders across all themes.
   buddy_session_t sess[4];
   memset(sess, 0, sizeof(sess));
-  strncpy(sess[0].id, "s3", BUDDY_SID_LEN-1); strncpy(sess[0].label, "beacon \xc2\xb7 fix/109", BUDDY_LABEL_LEN-1); sess[0].state = BST_ATTENTION;      sess[0].ts = now - 30;
+  strncpy(sess[0].id, "s3", BUDDY_SID_LEN-1); strncpy(sess[0].label, "beacon \xc2\xb7 fix/109", BUDDY_LABEL_LEN-1);
+#if BEACON_CAP_BUDDY == 2
+  // Question state: first session shows the "tap to answer on Mac" takeover card.
+  sess[0].state = BST_QUESTION;
+#else
+  sess[0].state = BST_ATTENTION;
+#endif
+  sess[0].ts = now - 30;
   strncpy(sess[1].id, "s1", BUDDY_SID_LEN-1); strncpy(sess[1].label, "api \xc2\xb7 main",       BUDDY_LABEL_LEN-1); sess[1].state = BST_WORKING;         sess[1].ts = now - 120;
   strncpy(sess[2].id, "s7", BUDDY_SID_LEN-1); strncpy(sess[2].label, "hub-tools",                BUDDY_LABEL_LEN-1); sess[2].state = BST_WAITING_QUEUED;  sess[2].ts = now - 300;
   strncpy(sess[3].id, "s2", BUDDY_SID_LEN-1); strncpy(sess[3].label, "notes",                    BUDDY_LABEL_LEN-1); sess[3].state = BST_IDLE;            sess[3].ts = now - 900;

@@ -29,7 +29,21 @@ final class BridgeSessionsTests: XCTestCase {
         b.applySessionHookForTest(event: "SessionStart", sessionId: "A", cwd: "/x/api")
         b.applySessionHookForTest(event: "Notification", sessionId: "A", cwd: "/x/api")
         drainMain()
+        XCTAssertNotNil(last.first)   // session must be present (guards the next assertion from being vacuous)
         XCTAssertNotEqual(last.first?.state, .waiting)   // Notification is not a held prompt
+    }
+
+    func testNotificationAsFirstSignalCreatesQuestionSession() {
+        // Regression for I1/M4: if Notification arrives before SessionStart the entry must still
+        // be created (touchActivity) and marked .question (markNeedsInput). The old code called
+        // markNeedsInput on a missing entry, which silently no-oped and dropped the question.
+        let b = ClaudeCodeBridge()
+        var last: [Session] = []
+        b.onSessionsUpdate = { last = $0 }
+        b.applySessionHookForTest(event: "Notification", sessionId: "B", cwd: "/x/srv")
+        drainMain()
+        XCTAssertNotNil(last.first, "Notification as first signal must create a session entry")
+        XCTAssertEqual(last.first?.state, .question)
     }
 
     func testPermissionFirstSignalAppearsAsWaiting() {   // Codex B2: permission must register the session

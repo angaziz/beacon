@@ -490,8 +490,10 @@ final class ClaudeCodeBridge {
             }
         case "Notification":
             // CC fires Notification when the session asks the user a question (not a permission prompt).
-            // Mark needsInput so the device can surface a "tap to answer on Mac" takeover.
-            if let sid { registry.markNeedsInput(sessionId: sid) }
+            // touchActivity first: creates the entry if this is the first signal for the session
+            // (SessionStart is not a guaranteed precursor). markNeedsInput then sets the flag;
+            // it no-ops on a missing entry, so the order matters.
+            if let sid { registry.touchActivity(sessionId: sid, cwd: cwd, now: Date()); registry.markNeedsInput(sessionId: sid) }
         case "SessionEnd":
             // Clean exit (does NOT fire on SIGKILL -- the TTL reaper backstops that). Remove all trace.
             if let sid {

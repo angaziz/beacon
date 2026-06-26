@@ -54,7 +54,7 @@ The UI is fully themeable — **7 themes**, each a bespoke per-screen experience
 
 Every theme across all five screens, captured straight from the device framebuffer:
 
-| Theme | Home | Markets | AI Usage | Approval | Settings |
+| Theme | Home | Markets | AI Usage | Coding Buddy | Settings |
 |---|---|---|---|---|---|
 | **Editorial Index** | <img src="docs/assets/screens/editorial_HOME.png" width="150"> | <img src="docs/assets/screens/editorial_MARKETS.png" width="150"> | <img src="docs/assets/screens/editorial_LIMITS.png" width="150"> | <img src="docs/assets/screens/editorial_CLAUDE.png" width="150"> | <img src="docs/assets/screens/editorial_SETTINGS.png" width="150"> |
 | **Aerospace HUD** | <img src="docs/assets/screens/hud_HOME.png" width="150"> | <img src="docs/assets/screens/hud_MARKETS.png" width="150"> | <img src="docs/assets/screens/hud_LIMITS.png" width="150"> | <img src="docs/assets/screens/hud_CLAUDE.png" width="150"> | <img src="docs/assets/screens/hud_SETTINGS.png" width="150"> |
@@ -63,6 +63,12 @@ Every theme across all five screens, captured straight from the device framebuff
 | **LED Matrix** | <img src="docs/assets/screens/led_HOME.png" width="150"> | <img src="docs/assets/screens/led_MARKETS.png" width="150"> | <img src="docs/assets/screens/led_LIMITS.png" width="150"> | <img src="docs/assets/screens/led_CLAUDE.png" width="150"> | <img src="docs/assets/screens/led_SETTINGS.png" width="150"> |
 | **Oscilloscope** | <img src="docs/assets/screens/oscilloscope_HOME.png" width="150"> | <img src="docs/assets/screens/oscilloscope_MARKETS.png" width="150"> | <img src="docs/assets/screens/oscilloscope_LIMITS.png" width="150"> | <img src="docs/assets/screens/oscilloscope_CLAUDE.png" width="150"> | <img src="docs/assets/screens/oscilloscope_SETTINGS.png" width="150"> |
 | **Analog Neo** | <img src="docs/assets/screens/analog_HOME.png" width="150"> | <img src="docs/assets/screens/analog_MARKETS.png" width="150"> | <img src="docs/assets/screens/analog_LIMITS.png" width="150"> | <img src="docs/assets/screens/analog_CLAUDE.png" width="150"> | <img src="docs/assets/screens/analog_SETTINGS.png" width="150"> |
+
+**Coding Buddy — three states** (shown in Editorial; every theme renders all three in its own style): the live **session list**, a **permission prompt** (Approve/Deny on the device), and a **question** ("tap to answer on Mac" → focuses that terminal). Each `*_CLAUDE_prompt.png` / `*_CLAUDE_question.png` exists for every theme.
+
+| Session list | Permission prompt | Question (tap to answer) |
+|---|---|---|
+| <img src="docs/assets/screens/editorial_CLAUDE.png" width="160"> | <img src="docs/assets/screens/editorial_CLAUDE_prompt.png" width="160"> | <img src="docs/assets/screens/editorial_CLAUDE_question.png" width="160"> |
 
 [**View the full montage**](docs/assets/screens/montage.png) — all 35 in a single image.
 

@@ -194,8 +194,9 @@ static void update(void) {
   lv_obj_add_flag(s_q_btn,   LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_flag(s_q_badge, LV_OBJ_FLAG_HIDDEN);
 
-  if (b.prompt.present && !disabled) {
-    // TIER 1: permission prompt card (unchanged).
+  if (b.prompt.present) {
+    // TIER 1: permission prompt card. Rendered even when offline; approve is dimmed when locked
+    // (matching calm/hud which dim actions rather than hiding the entire takeover).
     show_prompt(true);
     txt_set(s_tool, b.prompt.tool);
     txt_set(s_cmd, b.prompt.hint);
@@ -231,11 +232,12 @@ static void update(void) {
       txt_color(s_kicker, t->accent);
       txt_set(s_deny, "< DENY");
       txt_color(s_deny, t->ink_dim);
-      txt_color(s_approve, t->accent);
+      // Dim approve when offline (hub can't relay the decision).
+      txt_color(s_approve, disabled ? t->ink_dim : t->accent);
       break;
     }
     }
-  } else if (q_idx >= 0 && !disabled) {
+  } else if (q_idx >= 0) {
     // TIER 2: question card — reuses prompt-card layout; deny/approve hidden.
     s_q_session_idx = (uint8_t)q_idx;
     const buddy_session_t* qs = &b.sessions[q_idx];
@@ -286,19 +288,16 @@ static void update(void) {
     const beacon_theme_t* t = theme_active();
 
     if (disabled) {
-      lv_obj_add_flag(s_row_tick[0], LV_OBJ_FLAG_HIDDEN);
-      lv_label_set_text(s_row_folder[0], "OFFLINE");
-      lv_obj_set_style_text_color(s_row_folder[0], lv_color_hex(0x666666), 0);
-      lv_label_set_text(s_row_sub[0], "");
-      lv_label_set_text(s_row_state[0], "");
-      lv_label_set_text(s_row_age[0], "");
-      for (uint8_t i = 1; i < SESSION_ROWS; i++) {
+      // Hub offline: show "OFFLINE" label and ensure all row tap buttons are non-clickable.
+      for (uint8_t i = 0; i < SESSION_ROWS; i++) {
+        lv_obj_add_flag(s_row_btn[i],  LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_row_tick[i], LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(s_row_folder[i], "");
-        lv_label_set_text(s_row_sub[i], "");
-        lv_label_set_text(s_row_state[i], "");
-        lv_label_set_text(s_row_age[i], "");
+        lv_label_set_text(s_row_folder[i], i == 0 ? "OFFLINE" : "");
+        lv_label_set_text(s_row_sub[i],    "");
+        lv_label_set_text(s_row_state[i],  "");
+        lv_label_set_text(s_row_age[i],    "");
       }
+      lv_obj_set_style_text_color(s_row_folder[0], lv_color_hex(0x666666), 0);
       return;
     }
 
