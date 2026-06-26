@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Latest known state -- the source of truth we (re)send on heartbeat/reconnect.
     private var usage = Usage(claude: .unavailable, codex: .unavailable)   // merged; resent on heartbeat
     private var buddy = BuddyState()
+    private var sessions: [Session] = []
     private var lastFix: Loc?   // most recent CoreLocation fix (issue #54); rides the (re)connect full frame
     private var heartbeat: Timer?
 
@@ -180,8 +181,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         b.onPromptArrived = { [weak self] in
             Task { @MainActor in self?.menubar.playPromptSoundIfEnabled() }
         }
+        b.onAttention = { [weak self] in
+            Task { @MainActor in self?.menubar.playAttentionSoundIfEnabled() }
+        }
         b.onBridgeStatus = { [weak self] msg in
             Task { @MainActor in self?.menubar.setBridgeAlert(msg) }
+        }
+        b.onSessionsUpdate = { [weak self] sessions in
+            Task { @MainActor in
+                self?.sessions = sessions
+                if let data = try? SessionsFrame(sessions).encoded() { self?.central.send(data) }
+            }
         }
         b.start()
         bridge = b
@@ -201,6 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 self?.reportAssembler.reset()   // discard any partial device report from a prior connection (#105)
                 self?.sendFullFrame(includeLocation: true)
+                if let data = try? SessionsFrame(self?.sessions ?? []).encoded() { self?.central.send(data) }
                 self?.pushTickerConfig()
             }
         }
@@ -261,6 +272,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard rev == tickerStore.current.rev else { break }
             menubar.setTickerSync(ok ? .synced(count ?? tickerStore.current.rows.count)
                                      : .error(err ?? "rejected"))
+        case .open(let id):
+            guard let h = bridge?.hostForShortId(id) else {
+                FileHandle.standardError.write(Data("[beacon-hub] open id=\(id) -> unknown_session\n".utf8))
+                central.send(HubAck.err(id: id, reason: "unknown_session"))
+                return
+            }
+            let target = FocusTarget(hostApp: h.app, focusURL: h.focusURL, bundleId: h.bundleId, cwd: h.cwd)
+            Task.detached {
+                let ok = SessionFocus.focus(target)
+                // Logs only app + result, never focus_url (may embed a token, tech.md 9).
+                FileHandle.standardError.write(Data("[beacon-hub] open id=\(id) app=\(h.app ?? "?") ok=\(ok)\n".utf8))
+                await MainActor.run { [weak self] in
+                    self?.central.send(HubAck.ack(id: id, ok: ok))
+                }
+            }
         case .report(_, _, _, _, _):
             switch reportAssembler.feed(cmd) {
             case .assembled(let rows): adoptDeviceReport(rows)

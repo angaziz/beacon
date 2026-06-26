@@ -53,10 +53,20 @@ typedef struct { float lat, lon; char tz[40]; char name[48]; } hub_loc_t;
 // to their capacities. Kept separate from hub_parse_status so existing callers/tests stay unchanged.
 bool hub_parse_loc(const char* json, size_t len, hub_loc_t* out);
 
+// --- Inbound: hub -> device sessions frame ---
+// Parse {"v":1,"sessions":[...]} into buddy->sessions[] (capped at BUDDY_SESSIONS_MAX, labels
+// truncated, unknown state strings => BST_WORKING). Sets *had_sessions true when a "sessions"
+// array is present (even if empty). Returns false on invalid JSON or v != 1.
+bool hub_parse_sessions(const char* json, size_t len, buddy_rec_t* buddy, bool* had_sessions);
+
 // --- Outbound: device -> hub command builders ---
 // Write a newline-terminated command frame into buf. Returns bytes written (incl. the '\n', excl. the
 // NUL), or 0 on overflow / invalid args. `id` echoes the originating (short) prompt id.
 size_t hub_build_permission(char* buf, size_t cap, const char* id, bool approve);
+
+// Tap-to-open: {"v":1,"cmd":"open","id":"<id>"}\n  (issue #110, P2-b).
+// Returns bytes written (incl. '\n', excl. NUL), or 0 on overflow / null args.
+size_t hub_build_open(char* buf, size_t cap, const char* id);
 
 // --- Inbound: hub -> device ack/err (after a command) ---
 typedef struct { char id[BUDDY_ID_LEN]; bool ok; bool is_err; } hub_ack_t;

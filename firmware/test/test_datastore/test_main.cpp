@@ -131,6 +131,76 @@ static void test_tick_buddy_prompt_preserves_hub_offline(void) {
   TEST_ASSERT_EQUAL_UINT8(PROMPT_TOO_LATE, g.prompt.decision_state);   // prompt still ages
 }
 
+// ds_apply_sessions: merges ONLY sessions[]/session_count into the buddy record; leaves
+// prompt + scalars (running, waiting, tokens, ...) from the prior buddy frame intact.
+static void test_apply_sessions_preserves_prompt(void) {
+  datastore_init();
+  buddy_rec_t seed; memset(&seed, 0, sizeof(seed));
+  seed.running = 1; seed.prompt.present = true;
+  strcpy(seed.prompt.id, "p1"); strcpy(seed.prompt.tool, "Bash"); strcpy(seed.prompt.hint, "x");
+  ds_set_buddy(&seed);                                   // buddy frame established the prompt
+
+  buddy_session_t s[1]; memset(s, 0, sizeof(s));
+  strcpy(s[0].id, "s1"); strcpy(s[0].label, "api"); s[0].state = BST_WORKING; s[0].ts = 9;
+  ds_apply_sessions(s, 1, /*now=*/1000);                 // sessions frame merges in
+
+  buddy_rec_t b = ds_get_buddy();
+  TEST_ASSERT_TRUE(b.prompt.present);                    // prompt survived the merge
+  TEST_ASSERT_EQUAL_UINT8(1, b.running);                 // scalars survived
+  TEST_ASSERT_EQUAL_UINT8(1, b.session_count);
+  TEST_ASSERT_EQUAL_STRING("s1", b.sessions[0].id);
+}
+
+// ds_set_open_pending / ds_apply_open_ack / ds_tick_open: device-local tap-to-open feedback (issue #110 Phase 2).
+static void test_open_pending_then_ok_ack(void) {
+  ds_set_open_pending("s1", /*now=*/100);
+  buddy_rec_t b = ds_get_buddy();
+  TEST_ASSERT_EQUAL_UINT8(OPEN_SENDING, b.open_state);
+  TEST_ASSERT_EQUAL_STRING("s1", b.open_id);
+
+  ds_apply_open_ack("s1", /*ok=*/true, /*now=*/102);
+  b = ds_get_buddy();
+  TEST_ASSERT_EQUAL_UINT8(OPEN_OK, b.open_state);
+  TEST_ASSERT_EQUAL_UINT32(102, b.open_at);
+}
+
+static void test_open_ack_mismatched_id_ignored(void) {
+  ds_set_open_pending("s2", 200);
+  ds_apply_open_ack("s9", true, 201);   // wrong id => no-op
+  buddy_rec_t b = ds_get_buddy();
+  TEST_ASSERT_EQUAL_UINT8(OPEN_SENDING, b.open_state);
+}
+
+static void test_open_tick_clears_ok_after_hold(void) {
+  ds_set_open_pending("s3", 300);
+  ds_apply_open_ack("s3", true, 302);
+  ds_tick_open(302 + BUDDY_OPEN_HOLD_S - 1);   // before threshold => still OK
+  TEST_ASSERT_EQUAL_UINT8(OPEN_OK, ds_get_buddy().open_state);
+  ds_tick_open(302 + BUDDY_OPEN_HOLD_S);        // at threshold => cleared
+  buddy_rec_t b = ds_get_buddy();
+  TEST_ASSERT_EQUAL_UINT8(OPEN_NONE, b.open_state);
+  TEST_ASSERT_EQUAL_UINT8('\0', b.open_id[0]);
+}
+
+static void test_open_tick_times_out_sending(void) {
+  ds_set_open_pending("s4", 400);
+  ds_tick_open(400 + BUDDY_OPEN_TIMEOUT_S - 1);  // before timeout => still SENDING
+  TEST_ASSERT_EQUAL_UINT8(OPEN_SENDING, ds_get_buddy().open_state);
+  ds_tick_open(400 + BUDDY_OPEN_TIMEOUT_S);       // at timeout => cleared
+  buddy_rec_t b = ds_get_buddy();
+  TEST_ASSERT_EQUAL_UINT8(OPEN_NONE, b.open_state);
+}
+
+static void test_apply_sessions_does_not_clear_open(void) {
+  ds_set_open_pending("s5", 500);
+  buddy_session_t s[1]; memset(s, 0, sizeof(s));
+  strcpy(s[0].id, "s5"); s[0].state = BST_WORKING; s[0].ts = 9;
+  ds_apply_sessions(s, 1, 501);   // sessions frame must NOT wipe open_state/open_id
+  buddy_rec_t b = ds_get_buddy();
+  TEST_ASSERT_EQUAL_UINT8(OPEN_SENDING, b.open_state);
+  TEST_ASSERT_EQUAL_STRING("s5", b.open_id);
+}
+
 // A5 stale-fetch guard: ds_set_finance_if publishes only when the slot still holds the expected id.
 static void test_set_finance_if_publish_vs_drop(void) {
   struct { const char* name; const char* expect_id; bool published; } cases[] = {
@@ -180,5 +250,11 @@ int main(int, char**) {
   RUN_TEST(test_explicit_failure_preserves_payload);
   RUN_TEST(test_tick_buddy_prompt_transitions);
   RUN_TEST(test_tick_buddy_prompt_preserves_hub_offline);
+  RUN_TEST(test_apply_sessions_preserves_prompt);
+  RUN_TEST(test_open_pending_then_ok_ack);
+  RUN_TEST(test_open_ack_mismatched_id_ignored);
+  RUN_TEST(test_open_tick_clears_ok_after_hold);
+  RUN_TEST(test_open_tick_times_out_sending);
+  RUN_TEST(test_apply_sessions_does_not_clear_open);
   return UNITY_END();
 }

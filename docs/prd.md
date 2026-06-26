@@ -117,12 +117,14 @@ Priority = MUST / SHOULD / COULD. Phase per §7.
 
 | ID | Priority | Phase | Requirement |
 |---|---|---|---|
-| FR-BUDDY-1 | MUST | P2 | **Idle state:** show Claude Code session state pushed by the Hub — running/waiting counts, tokens, context %, recent activity. |
+| FR-BUDDY-1 | MUST | P2 | **Session list (idle state):** show a per-session list pushed by the Hub — one row per live Claude Code session with a **state** (`working`/`waiting`/`waiting_queued`/`attention`/`idle`), a `folder · branch` label, and a relative age, sorted newest-first (up to 4 visible). State is conveyed by a colored tick + a state word. Replaces the old chronological activity log. A header keeps the running/waiting/tokens/context summary. (Issue #110.) |
 | FR-BUDDY-2 | MUST | P2 | **Prompt state:** when a tool-permission prompt arrives, surface it (tool name + command hint) and let the user **Approve** or **Deny** by tap/gesture; the decision returns to the Hub and resolves the prompt. A prompt the user instead answers on the **Mac** (in the terminal) is **withdrawn from the device silently** — no decision, no "too late". |
-| FR-BUDDY-3 | MUST | P2 | Approve/Deny round-trip must complete well within the Claude Code hook timeout (~30s); design for a <5s human action; on timeout the prompt is treated as denied (fail-closed) and labeled. |
+| FR-BUDDY-3 | MUST | P2 | Approve/Deny round-trip must complete well within the Claude Code hook hold (~590s, under CC's ~600s `PermissionRequest` timeout); design for a <5s human action; on timeout the prompt is treated as denied (fail-closed) and labeled. |
 | FR-BUDDY-5 | MUST | P2 | The buddy must NOT imply unsupported actions: it **cannot** answer Claude's `AskUserQuestion` multiple-choice prompts (these are passed through to the Mac and surfaced only as a passive "asking a question" indicator — **never** as an Approve/Deny prompt, and never occupying the prompt slot), persist "don't ask again", or type into a live TUI session. |
+| FR-BUDDY-6 | SHOULD | P2 | **Tap-to-open:** tapping a session row focuses that session's terminal/editor on the Mac (best-effort, tiered by app: precise for Warp via its focus URL and iTerm/Terminal where addressable; repo-window for VS Code/Cursor; app-level otherwise). The Hub captures host context at `SessionStart`. The device shows opening/opened/couldn't feedback. (Issue #110, Phase 2.) |
+| FR-BUDDY-7 | SHOULD | P2 | **Notification cues:** distinct Hub chimes for `waiting` (existing) and a new `attention` ("your turn") transition, debounced. When the device is dim/asleep, a `waiting`/`attention` transition wakes it and shows the buddy screen; a touch that wakes the device does not also act. (Issue #110.) |
 
-**Acceptance:** a real Claude Code tool prompt appears on the device and an Approve/Deny tap resolves it in Claude Code; idle state reflects live session counts; unsupported actions are absent from the UI.
+**Acceptance:** a real Claude Code tool prompt appears on the device and an Approve/Deny tap resolves it in Claude Code; the session list reflects live per-session state sorted by activity; tapping a session focuses the right terminal on the Mac; unsupported actions are absent from the UI.
 
 ### 5.7 Now-Playing — `FR-NOW` (device-direct)
 

@@ -103,6 +103,7 @@ The mockup device frames render the true rounded shape; [`docs/design/mockups/sa
 - **Clock** — display figures + date line (or analog face in Analog theme).
 - **Gauge** — renders per `gauge-style` token (bar/ring/cell/waveform/measure/bigfig/subdial). Single component, token-switched.
 - **List row** — label (body) + value (mono/display) + optional caret; hairline separator. Used by Finance, Settings. Labels are width-capped and ellipsize (`…`): Finance ticker names are user-configurable (hub-pushed) and can exceed the short defaults, so they truncate rather than overrun the value.
+- **Session row** (Coding Buddy `claude` screen, issue #110) — folder label (body, colored by state: accent=attention, alert/amber=waiting, ink=working, dim=queued/idle) + dim secondary line (`branch` + relative age). The `claude` screen shows **up to 4** session rows at ~64 px pitch within the 386 px safe content height (sorted newest-first), replacing the old chronological activity log; an "idle" empty state shows when there are none. Per-theme styling, shared render helpers (`view_common.h`).
 - **Stat block** — name + big figure + detail line + gauge. Used by AI Usage.
 - **Prompt** — alert label + tool + mono command hint + Deny/Approve split actions. Used by Coding Buddy.
 - **Eyebrow** — mono `BEACON / <SCREEN>` + right-side status (used sparingly, one per screen — not on every section).

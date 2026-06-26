@@ -47,6 +47,61 @@ static inline bool status_chip_update(lv_obj_t* lbl, const record_hdr_t* hdr,
   return false;
 }
 
+// Session-list helpers (Task 10). Used by buddy_calm and future per-theme views.
+
+// State cue: accent for sessions needing attention; down (amber) for waiting; ink for working;
+// ink_dim for queued/idle. (One accent editorial rule from DESIGN.md — accent reserved for the
+// single session that needs you.)
+static inline lv_color_t buddy_session_state_color(const beacon_theme_t* t, uint8_t st) {
+  switch (st) {
+    case BST_ATTENTION:      return t->accent;
+    case BST_WAITING:        return t->down;
+    case BST_WORKING:        return t->ink;
+    default:                 return t->ink_dim;  // queued / idle
+  }
+}
+static inline const char* buddy_session_glyph(uint8_t st) {
+  switch (st) { case BST_ATTENTION: return "*"; case BST_WAITING: return "!";
+                case BST_WAITING_QUEUED: return "."; case BST_WORKING: return ">"; default: return "-"; }
+}
+
+// Short state word for the session row's right column. Lowercase; views uppercase per their idiom.
+static inline const char* buddy_session_state_word(uint8_t st) {
+  switch (st) {
+    case BST_ATTENTION:      return "attention";
+    case BST_WAITING:        return "waiting";
+    case BST_WAITING_QUEUED: return "queued";
+    case BST_IDLE:           return "idle";
+    default:                 return "working";
+  }
+}
+
+// Relative age from a hub epoch ts using the device's synced wall clock. Empty when clock unsynced
+// (design §5: never render a garbage delta) or ts==0.
+static inline void buddy_session_age(uint32_t ts, char* out, size_t n) {
+  if (!timekeep_has_time() || ts == 0) { out[0] = '\0'; return; }
+  time_t now = time(NULL);
+  long d = (long)now - (long)ts;
+  if (d < 5)         snprintf(out, n, "now");
+  else if (d < 60)   snprintf(out, n, "%lds", d);
+  else if (d < 3600) snprintf(out, n, "%ldm", d / 60);
+  else               snprintf(out, n, "%ldh", d / 3600);
+}
+
+// Split the hub label "folder · branch" into its two parts for the row's two lines. The separator
+// is the UTF-8 middle dot "\xC2\xB7"; absent => the whole label is folder and branch is empty.
+static inline void buddy_session_split_label(const char* label, char* folder, size_t fn,
+                                             char* branch, size_t bn) {
+  const char* sep = strstr(label ? label : "", "\xC2\xB7");
+  if (!sep) { snprintf(folder, fn, "%s", label ? label : ""); branch[0] = '\0'; return; }
+  size_t flen = (size_t)(sep - label);
+  while (flen > 0 && label[flen - 1] == ' ') flen--;   // trim trailing space before the dot
+  snprintf(folder, fn, "%.*s", (int)flen, label);
+  const char* b = sep + 2;                              // skip the 2-byte separator
+  while (*b == ' ') b++;                                // trim leading space after the dot
+  snprintf(branch, bn, "%s", b);
+}
+
 // Buddy telemetry stats line: "N RUN . N WAIT . NK TOK . CTX N%".
 // `caps` controls case.
 static inline void buddy_stats_fmt(char* buf, size_t n, const buddy_rec_t* b, bool caps) {

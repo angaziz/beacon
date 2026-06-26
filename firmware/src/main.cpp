@@ -25,6 +25,9 @@
 #include "hal/imu.h"
 #include "core/imu_detect.h"
 #include "ui/overlays.h"
+#if defined(BEACON_AUDIO_SPIKE)
+#include "hal/audio.h"
+#endif
 
 static lv_obj_t* setup_step(lv_obj_t* card, const beacon_theme_t* t, const char* txt) {
   lv_obj_t* l = lv_label_create(card);   // default font: reliable full-ASCII (theme fonts are subset)
@@ -103,6 +106,10 @@ void setup() {
     force_provision = held > 22; }
   if (force_provision) LOGI("boot touch-hold => forcing provisioning portal");
   timekeep_init();   // PCF85063 RTC on the shared Wire bus; NTP starts later (after WiFi up)
+#if defined(BEACON_AUDIO_SPIKE)
+  // Audio init after I2C bus is up (power_begin) and display is live. Wire shared — no re-init.
+  if (!audio_init()) LOGW("audio: init failed — heap spike will log only, no chime");
+#endif
   if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) { LOGE("halt: no PSRAM (LVGL pool needs it)"); return; }
   LOGI("psram total=%u free=%u", (unsigned)heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
@@ -133,6 +140,16 @@ void setup() {
 }
 
 void loop() {
+#if defined(BEACON_AUDIO_SPIKE)
+  {
+    static uint32_t s_heap_at   = 0;
+    static uint32_t s_chime_at  = 0;
+    static uint8_t  s_chime_idx = 0;
+    uint32_t now = millis();
+    if (now - s_heap_at >= 1000u) { s_heap_at = now; audio_spike_log(); }
+    if (now - s_chime_at >= 15000u) { s_chime_at = now; audio_play_chime(s_chime_idx++ & 1); }
+  }
+#endif
   provision_loop();    // no-op unless the setup portal is active
   pair_overlay_service();  // show/hide the BLE passkey card while a hub is bonding (Core-1)
   timekeep_service();  // perform any staged RTC write here (Core-1, serialized with touch on I2C)
@@ -141,6 +158,7 @@ void loop() {
   capture_service();   // 'C' over serial => sweep every theme x screen to the host
 #endif
   idle_service();
+  buddy_wake_service();
   uint8_t g = imu_poll();
   if (g & IMU_RAISE) lv_disp_trig_activity(NULL);   // wake from dim/sleep
   if (g & IMU_SHAKE) ui_dismiss_top_overlay();

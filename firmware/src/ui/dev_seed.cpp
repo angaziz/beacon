@@ -28,9 +28,16 @@ static void seed(void) {
   u.codex.h5  = {1,  now + 16860}; u.codex.d7 = {29, now + 400000};
   u.hdr.last_updated = now; ds_set_usage(&u);
   buddy_rec_t b; memset(&b, 0, sizeof(b)); b.running = 2; b.waiting = 1; b.tokens = 184502; b.context_pct = 42;
-  b.prompt.present = true; strncpy(b.prompt.id, "A1B2", BUDDY_ID_LEN-1); strncpy(b.prompt.tool, "Bash", BUDDY_TOOL_LEN-1);
-  strncpy(b.prompt.hint, "rm -rf /tmp/build-cache", BUDDY_HINT_LEN-1); b.prompt.shown_at = uptime_s();
+  // No prompt seeded: capture shows the session list (the new design), not the permission screen.
   b.hdr.last_updated = now; ds_set_buddy(&b);
+  // Seed 4 representative sessions (newest-first) so the session list renders across all themes.
+  buddy_session_t sess[4];
+  memset(sess, 0, sizeof(sess));
+  strncpy(sess[0].id, "s3", BUDDY_SID_LEN-1); strncpy(sess[0].label, "beacon \xc2\xb7 fix/109", BUDDY_LABEL_LEN-1); sess[0].state = BST_ATTENTION;      sess[0].ts = now - 30;
+  strncpy(sess[1].id, "s1", BUDDY_SID_LEN-1); strncpy(sess[1].label, "api \xc2\xb7 main",       BUDDY_LABEL_LEN-1); sess[1].state = BST_WORKING;         sess[1].ts = now - 120;
+  strncpy(sess[2].id, "s7", BUDDY_SID_LEN-1); strncpy(sess[2].label, "hub-tools",                BUDDY_LABEL_LEN-1); sess[2].state = BST_WAITING_QUEUED;  sess[2].ts = now - 300;
+  strncpy(sess[3].id, "s2", BUDDY_SID_LEN-1); strncpy(sess[3].label, "notes",                    BUDDY_LABEL_LEN-1); sess[3].state = BST_IDLE;            sess[3].ts = now - 900;
+  ds_apply_sessions(sess, 4, now);
 }
 
 // Core-0 staleness ticker (DataStore sweeps are Core-0; P1's fetch task replaces this) + heap gate log.

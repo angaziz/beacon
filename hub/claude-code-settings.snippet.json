@@ -16,6 +16,12 @@
         "hooks": [
           { "type": "http", "url": "http://127.0.0.1:8765/hook", "timeout": 5 }
         ]
+      },
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          { "type": "command", "command": "__BEACON_SESSION__", "timeout": 5 }
+        ]
       }
     ],
     "Stop": [

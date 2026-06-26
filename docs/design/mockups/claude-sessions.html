@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Beacon — Claude session list (Editorial theme)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{--page:#08080a;--page-muted:#6c727c;--frame-radius:104px}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--page);color:#e9edf2;font-family:'Space Grotesk',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  body{padding:56px 40px 96px;display:flex;flex-direction:column;align-items:center}
+  header.intro{max-width:1100px;text-align:center;margin-bottom:40px}
+  header.intro h1{font-family:'Space Grotesk';font-weight:600;font-size:28px;letter-spacing:.06em}
+  header.intro p{color:var(--page-muted);font-size:14px;font-weight:300;margin-top:8px}
+  header.intro code{font-family:'JetBrains Mono',monospace;font-size:12px;color:#c9cdd3}
+  .gallery{display:flex;flex-wrap:wrap;gap:40px 40px;justify-content:center;max-width:1100px}
+  .unit{display:flex;flex-direction:column;align-items:center;gap:12px}
+  .cap{font-family:'JetBrains Mono',monospace;font-size:11px;color:#565b64;letter-spacing:.12em;text-transform:uppercase;text-align:center;line-height:1.5}
+  .cap b{color:#9aa0a8;font-weight:500}
+
+  .device{width:480px;height:480px;border-radius:var(--frame-radius);background:#000;position:relative;overflow:hidden;
+    box-shadow:0 0 0 2px #161821,0 0 0 13px #0c0d12,0 28px 70px -20px rgba(0,0,0,.9)}
+  .device::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;box-shadow:inset 0 0 70px 4px rgba(0,0,0,.6)}
+
+  /* ===== EDITORIAL THEME TOKENS (matches editorial.html) ===== */
+  .edi{--ink:#f4f3ef;--dim:#74726c;--acc:#ff4a2b;--line:rgba(255,255,255,.14);--disp:'Space Grotesk',sans-serif;--mono:'JetBrains Mono',monospace}
+  .edi .screen{position:absolute;inset:0;border-radius:inherit;padding:42px 44px;display:flex;flex-direction:column;font-family:var(--disp);color:var(--ink)}
+  .edi .eyebrow{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase;z-index:2}
+  .edi .eyebrow .a{color:var(--acc)}
+  .edi .bstat{font-family:var(--mono);font-size:12px;letter-spacing:.1em;color:var(--dim);margin-top:14px;text-transform:uppercase}
+  .edi .bstat i{font-style:normal;color:var(--acc)}
+  .edi .rule{height:1px;background:var(--line);margin:18px 0 6px;z-index:2}
+
+  /* ===== SESSION LIST (new claude screen) ===== */
+  .edi .sl{flex:1;display:flex;flex-direction:column;justify-content:center}
+  .edi .srow{display:flex;align-items:center;gap:18px;padding:16px 0;border-bottom:1px solid var(--line);min-height:64px}
+  .edi .srow:last-child{border-bottom:0}
+  /* leading state marker: a 2px editorial tick, accent only when the session needs you */
+  .edi .mk{width:3px;height:30px;flex-shrink:0;background:var(--dim)}
+  .edi .srow.working .mk{background:var(--ink)}
+  .edi .srow.attention .mk{background:var(--acc)}
+  .edi .srow.idle .mk{background:rgba(255,255,255,.16)}
+  .edi .srow.queued .mk{background:var(--dim)}
+  .edi .name{flex:1;min-width:0}
+  .edi .name .folder{font-weight:600;font-size:30px;letter-spacing:-.01em;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .edi .name .branch{font-family:var(--mono);font-size:13px;color:var(--dim);letter-spacing:.06em;margin-top:7px}
+  .edi .meta{text-align:right;flex-shrink:0}
+  .edi .meta .state{font-family:var(--mono);font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
+  .edi .srow.attention .meta .state{color:var(--acc)}
+  .edi .srow.working .meta .state{color:var(--ink)}
+  .edi .meta .age{font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--dim);margin-top:7px}
+  /* phase-2 tap feedback, pinned to the tapped row */
+  .edi .srow.opening{background:rgba(255,74,43,.06)}
+  .edi .srow.opening .meta .state{color:var(--acc)}
+  .edi .foot{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase;margin-top:14px;text-align:center}
+</style>
+</head>
+<body>
+  <header class="intro">
+    <h1>Beacon — <code>claude</code> screen, redesigned as a session list</h1>
+    <p>Editorial theme (default). Replaces the chronological event log with up to 4 session rows, sorted by last activity.
+       State is carried by a leading tick + status word; the single accent is reserved for the session that needs you.</p>
+  </header>
+
+  <div class="gallery edi">
+
+    <!-- A · AMBIENT GLANCE -->
+    <div class="unit"><div class="device"><div class="screen">
+      <div class="eyebrow"><span class="a">BEACON / CLAUDE</span><span>3 SESSIONS</span></div>
+      <div class="bstat">3 RUNNING &middot; 0 WAITING &middot; 184K TOK</div>
+      <div class="rule"></div>
+      <div class="sl">
+        <div class="srow working"><span class="mk"></span>
+          <div class="name"><div class="folder">beacon</div><div class="branch">fix/109-buddy</div></div>
+          <div class="meta"><div class="state">working</div><div class="age">12s</div></div></div>
+        <div class="srow working"><span class="mk"></span>
+          <div class="name"><div class="folder">api</div><div class="branch">main</div></div>
+          <div class="meta"><div class="state">working</div><div class="age">1m</div></div></div>
+        <div class="srow idle"><span class="mk"></span>
+          <div class="name"><div class="folder">notes</div><div class="branch">main</div></div>
+          <div class="meta"><div class="state">idle</div><div class="age">9m</div></div></div>
+      </div>
+    </div></div><div class="cap">A &middot; <b>Ambient glance</b><br>everything flowing &middot; silent</div></div>
+
+    <!-- B · ATTENTION ARRIVES -->
+    <div class="unit"><div class="device"><div class="screen">
+      <div class="eyebrow"><span class="a">BEACON / CLAUDE</span><span>3 SESSIONS</span></div>
+      <div class="bstat">2 RUNNING &middot; <i>1 ATTENTION</i> &middot; 192K TOK</div>
+      <div class="rule"></div>
+      <div class="sl">
+        <div class="srow attention"><span class="mk"></span>
+          <div class="name"><div class="folder">api</div><div class="branch">main</div></div>
+          <div class="meta"><div class="state">attention</div><div class="age">now</div></div></div>
+        <div class="srow working"><span class="mk"></span>
+          <div class="name"><div class="folder">beacon</div><div class="branch">fix/109-buddy</div></div>
+          <div class="meta"><div class="state">working</div><div class="age">8s</div></div></div>
+        <div class="srow idle"><span class="mk"></span>
+          <div class="name"><div class="folder">notes</div><div class="branch">main</div></div>
+          <div class="meta"><div class="state">idle</div><div class="age">11m</div></div></div>
+      </div>
+    </div></div><div class="cap">B &middot; <b>Your turn</b><br>api jumps to top &middot; <i style="color:#ff4a2b;font-style:normal">beacon-attention.wav</i></div></div>
+
+    <!-- C · TAP TO OPEN (PHASE 2) -->
+    <div class="unit"><div class="device"><div class="screen">
+      <div class="eyebrow"><span class="a">BEACON / CLAUDE</span><span>3 SESSIONS</span></div>
+      <div class="bstat">2 RUNNING &middot; <i>1 ATTENTION</i> &middot; 192K TOK</div>
+      <div class="rule"></div>
+      <div class="sl">
+        <div class="srow attention opening"><span class="mk"></span>
+          <div class="name"><div class="folder">api</div><div class="branch">main</div></div>
+          <div class="meta"><div class="state">opening&hellip;</div><div class="age">VS Code</div></div></div>
+        <div class="srow working"><span class="mk"></span>
+          <div class="name"><div class="folder">beacon</div><div class="branch">fix/109-buddy</div></div>
+          <div class="meta"><div class="state">working</div><div class="age">8s</div></div></div>
+        <div class="srow idle"><span class="mk"></span>
+          <div class="name"><div class="folder">notes</div><div class="branch">main</div></div>
+          <div class="meta"><div class="state">idle</div><div class="age">11m</div></div></div>
+      </div>
+      <div class="foot">tap &rarr; hub focuses the api window</div>
+    </div></div><div class="cap">C &middot; <b>Tap to open</b> (Phase 2)<br>row pinned until ack/err</div></div>
+
+  </div>
+</body>
+</html>

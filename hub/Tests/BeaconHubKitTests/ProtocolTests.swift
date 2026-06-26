@@ -74,6 +74,18 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(deny, .permission(id: "x", approve: false))
     }
 
+    func testParseOpen() {
+        // Valid open command (issue #110, P2-b).
+        XCTAssertEqual(DeviceCommand.parse(Data(#"{"v":1,"cmd":"open","id":"s3"}"#.utf8)), .open(id: "s3"))
+    }
+
+    func testParseOpenRejectsMissingOrEmptyId() {
+        // Missing id field.
+        XCTAssertNil(DeviceCommand.parse(Data(#"{"v":1,"cmd":"open"}"#.utf8)))
+        // Empty id string.
+        XCTAssertNil(DeviceCommand.parse(Data(#"{"v":1,"cmd":"open","id":""}"#.utf8)))
+    }
+
     func testParseRejectsBadVersionOrCmd() {
         XCTAssertNil(DeviceCommand.parse(Data(#"{"v":2,"cmd":"permission","id":"x","decision":"deny"}"#.utf8)))
         XCTAssertNil(DeviceCommand.parse(Data(#"{"v":1,"cmd":"nope"}"#.utf8)))

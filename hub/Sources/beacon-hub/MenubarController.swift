@@ -52,6 +52,12 @@ final class MenubarController: NSObject {
         }
         return NSSound(named: "Glass")
     }()
+    private let attentionSound: NSSound? = {
+        if let url = Bundle.main.url(forResource: "beacon-attention", withExtension: "wav") {
+            return NSSound(contentsOf: url, byReference: true)
+        }
+        return NSSound(named: "Submarine")
+    }()
     private var promptSoundMuted: Bool {
         get { UserDefaults.standard.bool(forKey: "BeaconPromptSoundMuted") }
         set { UserDefaults.standard.set(newValue, forKey: "BeaconPromptSoundMuted") }
@@ -208,6 +214,7 @@ final class MenubarController: NSObject {
         promptSound?.stop()
         promptSound?.play()
     }
+    func playAttentionSoundIfEnabled() { guard !promptSoundMuted else { return }; attentionSound?.stop(); attentionSound?.play() }
 
     private func openLink() {
         SettingsLinks.open(fixURL ?? SettingsLinks.fallback)

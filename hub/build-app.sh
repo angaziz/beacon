@@ -19,13 +19,20 @@ if [ "${1:-}" = "install-hooks" ]; then
   # Step 0 -- dep check. jq is the only hard requirement; everything else is coreutils.
   command -v jq >/dev/null 2>&1 || { echo "error: jq not found. Install it: brew install jq" >&2; exit 1; }
 
-  # Step 1 -- shim path. The app passes a stable no-space path via BEACON_SHIM (it copies the bundled
-  # shim to ~/.beacon/beacon-statusline first); dev fallback is the in-repo shim under $PWD (hub/).
+  # Step 1 -- shim paths. The app passes stable no-space paths via BEACON_SHIM / BEACON_SESSION
+  # (it copies bundled shims to ~/.beacon/ first); dev fallback is the in-repo shims under $PWD (hub/).
   SHIM="${BEACON_SHIM:-$PWD/statusline-shim/beacon-statusline}"
   [ -f "$SHIM" ] || { echo "error: shim not found at $SHIM" >&2; exit 1; }
   [ -x "$SHIM" ] || { echo "error: shim not executable: $SHIM (chmod +x it)" >&2; exit 1; }
   case "$SHIM" in
     *" "*) echo "warning: shim path contains spaces; the space-joined statusLine string may not parse at the Claude Code layer." >&2 ;;
+  esac
+
+  SESSION_SHIM="${BEACON_SESSION:-$PWD/statusline-shim/beacon-session}"
+  [ -f "$SESSION_SHIM" ] || { echo "error: session shim not found at $SESSION_SHIM" >&2; exit 1; }
+  [ -x "$SESSION_SHIM" ] || { echo "error: session shim not executable: $SESSION_SHIM (chmod +x it)" >&2; exit 1; }
+  case "$SESSION_SHIM" in
+    *" "*) echo "warning: session shim path contains spaces." >&2 ;;
   esac
 
   SNIPPET="claude-code-settings.snippet.json"
@@ -61,11 +68,17 @@ if [ "${1:-}" = "install-hooks" ]; then
   # reinstall propagates field changes (e.g. the timeout bump 35->600); non-beacon wrappers are preserved.
   # Still idempotent (re-running yields the same result). def's must precede the pipeline (a leading/
   # trailing `|` around them is a jq syntax error).
-  jq -n --arg shim "$SHIM" --slurpfile cur "$SETTINGS" --slurpfile snip "$SNIPPET" '
+  jq -n --arg shim "$SHIM" --arg session_shim "$SESSION_SHIM" --slurpfile cur "$SETTINGS" --slurpfile snip "$SNIPPET" '
     def is_beacon_inner: (.type=="http") and (.url=="http://127.0.0.1:8765/hook");
-    def wrapper_is_beacon: (.hooks // []) | any(.[]; is_beacon_inner);
+    # Exact-match only: never select out a user command hook that merely ends in "beacon-session".
+    def is_beacon_session_inner: (.type=="command") and ((.command == $session_shim) or (.command == "__BEACON_SESSION__"));
+    def wrapper_is_beacon: (.hooks // []) | any(.[]; is_beacon_inner or is_beacon_session_inner);
     ($cur[0]) as $s
-    | ($snip[0] | del(._comment)) as $snippet
+    # Substitute __BEACON_SHIM__ and __BEACON_SESSION__ placeholders before merging.
+    | ($snip[0] | del(._comment)
+       | walk(if type == "string" then
+               gsub("__BEACON_SHIM__"; $shim) | gsub("__BEACON_SESSION__"; $session_shim)
+             else . end)) as $snippet
     | reduce ($snippet.hooks | keys_unsorted[]) as $ev ($s;
         ($snippet.hooks[$ev]) as $beaconWrappers
         | .hooks[$ev] = (((.hooks[$ev] // []) | map(select(wrapper_is_beacon | not))) + $beaconWrappers))
@@ -92,9 +105,10 @@ if [ "${1:-}" = "install-hooks" ]; then
   # Step 7 -- report.
   echo ""
   echo "Beacon hooks installed."
-  echo "  settings: $SETTINGS"
-  echo "  shim:     $SHIM"
-  echo "  backup:   $BACKUP"
+  echo "  settings:     $SETTINGS"
+  echo "  shim:         $SHIM"
+  echo "  session shim: $SESSION_SHIM"
+  echo "  backup:       $BACKUP"
   echo "Restart Claude Code for the hooks + statusLine to take effect."
   exit 0
 fi
@@ -113,6 +127,7 @@ cp "$BIN" "$APP/Contents/MacOS/beacon-hub"
 cp Info.plist "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources"
 cp Resources/beacon-prompt.wav "$APP/Contents/Resources/"   # prompt-arrival chime (MenubarController loads via Bundle.main)
+cp Resources/beacon-attention.wav "$APP/Contents/Resources/"   # attention chime (your-turn)
 cp Resources/BeaconHub.icns "$APP/Contents/Resources/"      # app icon (CFBundleIconFile)
 # Bundle the installer assets so the in-app "Install" button works from the shipped .app (HooksInstaller
 # resolves these via Bundle.main, dev-fallback to the repo). Keep the shim executable (+x) on copy.
@@ -120,6 +135,8 @@ cp build-app.sh "$APP/Contents/Resources/"
 cp claude-code-settings.snippet.json "$APP/Contents/Resources/"
 cp statusline-shim/beacon-statusline "$APP/Contents/Resources/"
 chmod +x "$APP/Contents/Resources/beacon-statusline"
+cp statusline-shim/beacon-session "$APP/Contents/Resources/"
+chmod +x "$APP/Contents/Resources/beacon-session"
 
 # BEACON_SIGN_IDENTITY (a "Developer ID Application: ..." cert, set by release CI) gets a real
 # signature with hardened runtime + timestamp, which notarization requires. Unset (local dev),

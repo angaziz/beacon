@@ -23,6 +23,12 @@ void ds_set_buddy(const buddy_rec_t* r);
 // the new id + ST_LOADING with value/change zeroed. Called after a validated hub config swap.
 void ds_reseed_finance(const char ids[][FIN_ID_LEN], int count);
 
+// Merge-only update for the sessions sub-record (sessions frame is independent of the buddy frame).
+// Copies ONLY sessions[]/session_count into the stored buddy record; leaves all other fields (prompt,
+// running, waiting, tokens, ...) intact. Stamps hdr.last_updated = now, sets ST_LIVE / ERR_NONE.
+// count is clamped to BUDDY_SESSIONS_MAX.
+void ds_apply_sessions(const buddy_session_t* s, uint8_t count, uint32_t now);
+
 // Explicit failure/transport transitions (do NOT touch the value payload).
 void ds_set_state_weather(screen_state_t s, data_err_t e);
 void ds_set_state_finance(uint8_t idx, screen_state_t s, data_err_t e);
@@ -45,3 +51,11 @@ void ds_tick_staleness(uint32_t now);
 // a SENT_OK beat past BUDDY_CONFIRM_HOLD_S clears (present=false); an undecided (IDLE) prompt past
 // BUDDY_PROMPT_EXPIRY_S becomes PROMPT_TOO_LATE (reuses the dismiss affordance, no new state).
 void ds_tick_buddy_prompt(uint32_t now);
+
+// Tap-to-open feedback (issue #110, Phase 2). All three are device-local; NOT serialized.
+// ds_set_open_pending: record that an "open" command was sent for session `id`.
+// ds_apply_open_ack:   apply the hub's ack/err for `id`; no-ops if id doesn't match or state wrong.
+// ds_tick_open:        advance feedback timeout; call alongside ds_tick_buddy_prompt each ~1s.
+void ds_set_open_pending(const char* id, uint32_t now);
+void ds_apply_open_ack(const char* id, bool ok, uint32_t now);
+void ds_tick_open(uint32_t now);

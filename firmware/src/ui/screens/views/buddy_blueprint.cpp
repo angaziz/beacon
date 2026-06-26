@@ -11,21 +11,41 @@
 #include "config/layout.h"
 #include "core/datastore.h"
 #include "core/hub_task.h"
+#include "ui/idle_glue.h"
 #include <Arduino.h>
+
+#define SESSION_ROWS    4
+#define SESSION_ROW_H   64
+#define SESSION_LIST_Y  (SAFE_INSET + 72)
+// Tick heights: SHORT brackets the folder line; TALL spans down to the branch line.
+#define TICK_SHORT      20
+#define TICK_TALL       42
 
 static lv_obj_t *s_status, *s_stat;          // header chip + status dimension line
 static lv_obj_t *s_eyebrow, *s_tool, *s_hintbox, *s_hint;
 static lv_obj_t *s_deny, *s_approve, *s_actrule;
-static lv_obj_t *s_idle;                      // idle entries label
+static lv_obj_t *s_row_folder[SESSION_ROWS];
+static lv_obj_t *s_row_sub[SESSION_ROWS];
+static lv_obj_t *s_row_tick[SESSION_ROWS];    // leading state bar
+static lv_obj_t *s_row_state[SESSION_ROWS];   // right-aligned state word
+static lv_obj_t *s_row_age[SESSION_ROWS];     // right-aligned age
+static lv_obj_t *s_row_btn[SESSION_ROWS];     // transparent tap target (issue #110 Phase 2)
 
 static bool actions_locked(screen_state_t st) {
   return st == ST_HUB_OFFLINE;
 }
 
 static void decide_cb(lv_event_t* e) {
+  if (idle_take_wake_tap()) return;
   bool approve = (bool)(intptr_t)lv_event_get_user_data(e);
   if (!approve && buddy_dismiss()) return;   // deny doubles as dismiss for a "too late" warning
   buddy_decide(approve);
+}
+static void on_row_tap(lv_event_t* e) {
+  if (idle_take_wake_tap()) return;
+  uint8_t idx = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+  buddy_rec_t b = ds_get_buddy();
+  if (idx < b.session_count) buddy_open(b.sessions[idx].id);
 }
 
 static void build(lv_obj_t* page) {
@@ -106,12 +126,63 @@ static void build(lv_obj_t* page) {
   lv_obj_set_ext_click_area(s_approve, BUDDY_HIT_SLOP);
   lv_obj_add_event_cb(s_approve, decide_cb, LV_EVENT_CLICKED, (void*)(intptr_t)true);
 
-  // Idle layout (recent entries / "idle"), hidden when a prompt is present.
-  s_idle = lv_label_create(page);
-  lv_label_set_text(s_idle, "idle");
-  lv_obj_set_style_text_color(s_idle, t->ink_dim, 0);
-  lv_obj_set_style_text_font(s_idle, t->f_mono, 0);
-  lv_obj_align(s_idle, LV_ALIGN_LEFT_MID, SAFE_INSET, 0);
+  // Session list rows (idle state). Hidden when a prompt is present.
+  for (uint8_t i = 0; i < SESSION_ROWS; i++) {
+    lv_coord_t y = SESSION_LIST_Y + (lv_coord_t)(i * SESSION_ROW_H);
+
+    // Transparent tap button created first (below labels in z-order) — issue #110 Phase 2.
+    s_row_btn[i] = lv_obj_create(page);
+    lv_obj_remove_style_all(s_row_btn[i]);
+    lv_obj_set_size(s_row_btn[i], SCREEN_W - 2 * SAFE_INSET, SESSION_ROW_H);
+    lv_obj_align(s_row_btn[i], LV_ALIGN_TOP_LEFT, SAFE_INSET, y);
+    lv_obj_set_style_bg_opa(s_row_btn[i], LV_OPA_TRANSP, 0);
+    lv_obj_add_flag(s_row_btn[i], LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(s_row_btn[i], LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(s_row_btn[i], on_row_tap, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
+
+    // Tick bar: 3px wide; top-anchored to the folder line. Height set per row in update()
+    // (TICK_SHORT = folder line only; TICK_TALL = spans down to the branch line).
+    s_row_tick[i] = lv_obj_create(page);
+    lv_obj_remove_style_all(s_row_tick[i]);
+    lv_obj_set_size(s_row_tick[i], 3, TICK_SHORT);
+    lv_obj_set_style_bg_opa(s_row_tick[i], LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_row_tick[i], t->ink_dim, 0);
+    lv_obj_set_style_radius(s_row_tick[i], 1, 0);
+
+    s_row_folder[i] = lv_label_create(page);
+    lv_label_set_text(s_row_folder[i], "");
+    lv_obj_set_style_text_font(s_row_folder[i], t->f_mono, 0);
+    lv_obj_set_style_text_color(s_row_folder[i], t->ink, 0);
+    lv_obj_set_width(s_row_folder[i], SCREEN_W - 2 * SAFE_INSET - 12 - 90);
+    lv_label_set_long_mode(s_row_folder[i], LV_LABEL_LONG_DOT);
+    lv_obj_align(s_row_folder[i], LV_ALIGN_TOP_LEFT, SAFE_INSET + 12, y);
+    // Top-align the tick to the folder line; small +y nudge brackets the folder cap-height.
+    lv_obj_align_to(s_row_tick[i], s_row_folder[i], LV_ALIGN_OUT_LEFT_TOP, -9, 4);
+
+    s_row_sub[i] = lv_label_create(page);
+    lv_label_set_text(s_row_sub[i], "");
+    lv_obj_set_style_text_font(s_row_sub[i], t->f_mono, 0);
+    lv_obj_set_style_text_color(s_row_sub[i], t->ink_dim, 0);
+    lv_obj_set_width(s_row_sub[i], SCREEN_W - 2 * SAFE_INSET - 12 - 90);
+    lv_label_set_long_mode(s_row_sub[i], LV_LABEL_LONG_DOT);
+    lv_obj_align(s_row_sub[i], LV_ALIGN_TOP_LEFT, SAFE_INSET + 12, y + 26);
+
+    s_row_state[i] = lv_label_create(page);
+    lv_label_set_text(s_row_state[i], "");
+    lv_obj_set_style_text_font(s_row_state[i], t->f_mono, 0);
+    lv_obj_set_style_text_color(s_row_state[i], t->ink_dim, 0);
+    lv_obj_set_width(s_row_state[i], 88);
+    lv_label_set_long_mode(s_row_state[i], LV_LABEL_LONG_DOT);
+    lv_obj_align(s_row_state[i], LV_ALIGN_TOP_RIGHT, -SAFE_INSET, y);
+
+    s_row_age[i] = lv_label_create(page);
+    lv_label_set_text(s_row_age[i], "");
+    lv_obj_set_style_text_font(s_row_age[i], t->f_mono, 0);
+    lv_obj_set_style_text_color(s_row_age[i], t->ink_dim, 0);
+    lv_obj_set_width(s_row_age[i], 88);
+    lv_label_set_long_mode(s_row_age[i], LV_LABEL_LONG_DOT);
+    lv_obj_align(s_row_age[i], LV_ALIGN_TOP_RIGHT, -SAFE_INSET, y + 26);
+  }
 }
 
 static void show_prompt(bool on) {
@@ -120,8 +191,22 @@ static void show_prompt(bool on) {
     if (on) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
     else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
   }
-  if (on) lv_obj_add_flag(s_idle, LV_OBJ_FLAG_HIDDEN);
-  else    lv_obj_clear_flag(s_idle, LV_OBJ_FLAG_HIDDEN);
+  for (uint8_t i = 0; i < SESSION_ROWS; i++) {
+    if (on) {
+      lv_obj_add_flag(s_row_btn[i],    LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_tick[i],   LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_folder[i], LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_sub[i],    LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_state[i],  LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_age[i],    LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_clear_flag(s_row_btn[i],    LV_OBJ_FLAG_HIDDEN);
+      lv_obj_clear_flag(s_row_folder[i], LV_OBJ_FLAG_HIDDEN);
+      lv_obj_clear_flag(s_row_sub[i],    LV_OBJ_FLAG_HIDDEN);
+      lv_obj_clear_flag(s_row_state[i],  LV_OBJ_FLAG_HIDDEN);
+      lv_obj_clear_flag(s_row_age[i],    LV_OBJ_FLAG_HIDDEN);
+    }
+  }
 }
 
 static void update(void) {
@@ -197,8 +282,82 @@ static void update(void) {
     }
     }
   } else {
-    if (r.entry_count > 0) lv_label_set_text(s_idle, r.entries[0]);
-    else lv_label_set_text(s_idle, "idle");
+    uint8_t n = (r.session_count < SESSION_ROWS) ? r.session_count : SESSION_ROWS;
+    if (n == 0) {
+      lv_obj_add_flag(s_row_btn[0],  LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_row_tick[0], LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_text(s_row_folder[0], "IDLE");
+      lv_obj_set_style_text_color(s_row_folder[0], t->ink_dim, 0);
+      lv_label_set_text(s_row_sub[0], "");
+      lv_label_set_text(s_row_state[0], "");
+      lv_label_set_text(s_row_age[0], "");
+      for (uint8_t i = 1; i < SESSION_ROWS; i++) {
+        lv_obj_add_flag(s_row_btn[i],  LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_row_tick[i], LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(s_row_folder[i], "");
+        lv_label_set_text(s_row_sub[i], "");
+        lv_label_set_text(s_row_state[i], "");
+        lv_label_set_text(s_row_age[i], "");
+      }
+    } else {
+      for (uint8_t i = 0; i < SESSION_ROWS; i++) {
+        if (i < n) {
+          const buddy_session_t* s = &r.sessions[i];
+          lv_obj_clear_flag(s_row_btn[i], LV_OBJ_FLAG_HIDDEN);
+
+          char folder[BUDDY_LABEL_LEN], branch[BUDDY_LABEL_LEN];
+          buddy_session_split_label(s->label, folder, sizeof(folder), branch, sizeof(branch));
+
+          char age[12];
+          buddy_session_age(s->ts, age, sizeof(age));
+
+          bool has_branch = branch[0] != '\0';
+          lv_color_t tick_col = buddy_session_state_color(t, s->state);
+          lv_obj_set_style_bg_color(s_row_tick[i], tick_col, 0);
+          lv_obj_set_height(s_row_tick[i], has_branch ? TICK_TALL : TICK_SHORT);
+          lv_obj_clear_flag(s_row_tick[i], LV_OBJ_FLAG_HIDDEN);
+
+          lv_label_set_text(s_row_folder[i], folder[0] ? folder : s->id);
+          lv_obj_set_style_text_color(s_row_folder[i], t->ink, 0);
+
+          lv_label_set_text(s_row_sub[i], branch);
+
+          if (r.open_state != OPEN_NONE &&
+              strncmp(r.open_id, s->id, BUDDY_SID_LEN) == 0) {
+            if (r.open_state == OPEN_SENDING) {
+              lv_label_set_text(s_row_state[i], "OPENING...");
+              lv_obj_set_style_text_color(s_row_state[i], t->ink_dim, 0);
+            } else if (r.open_state == OPEN_OK) {
+              lv_label_set_text(s_row_state[i], "OPENED");
+              lv_obj_set_style_text_color(s_row_state[i], t->up, 0);
+            } else {
+              lv_label_set_text(s_row_state[i], "COULDN'T");
+              lv_obj_set_style_text_color(s_row_state[i], t->down, 0);
+            }
+          } else {
+            const char* sw = buddy_session_state_word(s->state);
+            char sw_up[16]; size_t k=0;
+            for(;sw[k]&&k<sizeof(sw_up)-1;k++) sw_up[k]=(char)toupper((unsigned char)sw[k]);
+            sw_up[k]='\0';
+            lv_label_set_text(s_row_state[i], sw_up);
+            lv_color_t sc;
+            if (s->state == BST_ATTENTION)     sc = t->accent;
+            else if (s->state == BST_WAITING)  sc = t->down;
+            else                               sc = t->ink_dim;
+            lv_obj_set_style_text_color(s_row_state[i], sc, 0);
+          }
+
+          lv_label_set_text(s_row_age[i], age);
+        } else {
+          lv_obj_add_flag(s_row_btn[i],  LV_OBJ_FLAG_HIDDEN);
+          lv_obj_add_flag(s_row_tick[i], LV_OBJ_FLAG_HIDDEN);
+          lv_label_set_text(s_row_folder[i], "");
+          lv_label_set_text(s_row_sub[i], "");
+          lv_label_set_text(s_row_state[i], "");
+          lv_label_set_text(s_row_age[i], "");
+        }
+      }
+    }
   }
 }
 

@@ -27,6 +27,11 @@ bool buddy_decide(bool approve);
 // goes away. No-op for any other state. Returns true if a prompt was dismissed.
 bool buddy_dismiss(void);
 
+// Tap-to-open: ask the hub to focus the terminal/editor for session `id` (issue #110, P2-b). Builds
+// the §7.1 "open" command frame and enqueues it via HubLink::send. Returns true if accepted for
+// transport. With no hub link (BEACON_DEV) returns true so the UI path can still be exercised.
+bool buddy_open(const char* id);
+
 #ifdef __cplusplus
 }
 #endif
