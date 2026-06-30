@@ -5,6 +5,7 @@
 [![Hub release](https://img.shields.io/github/v/release/angaziz/beacon?include_prereleases&filter=hub-*&label=hub)](https://github.com/angaziz/beacon/releases)
 [![macOS](https://img.shields.io/badge/macOS-13+_Apple_Silicon-000?logo=apple&logoColor=white)](#the-macos-hub)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/angaziz/beacon)
 
 A dark and futuristic companion on a 2.16" AMOLED touch device — built on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**. It sits next to your keyboard and, at a glance, shows your Claude Code / Codex usage, live markets, weather, and a Claude coding "buddy" you can approve tool-prompts on — without breaking focus on your Mac.
 
