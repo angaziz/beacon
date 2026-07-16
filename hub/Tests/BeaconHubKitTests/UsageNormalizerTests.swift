@@ -193,24 +193,59 @@ final class UsageNormalizerEdgeCaseTests: XCTestCase {
         XCTAssertNil(UsageNormalizer.codex(json))
     }
 
-    func testCodexMissingPrimaryWindowReturnsNil() {
-        let json = """
-        {
-            "rate_limit": {
-                "secondary_window": {"used_percent": 10, "reset_at": 1000}
-            }
+    // Plans without a 5h window (e.g. Plus, observed 2026-07-16) send secondary_window:null and a
+    // primary_window that is the 7d window; the normalizer routes by limit_window_seconds.
+    func testCodexSingleWindowPlans() {
+        let cases: [(name: String, json: String, h5: Int?, d7: Int?, d7Reset: Int)] = [
+            (
+                "plus: null secondary, primary is 7d",
+                """
+                {
+                    "rate_limit": {
+                        "allowed": true,
+                        "primary_window": {"used_percent": 1, "limit_window_seconds": 604800,
+                                           "reset_after_seconds": 517317, "reset_at": 1784689875},
+                        "secondary_window": null
+                    }
+                }
+                """,
+                nil, 1, 1784689875
+            ),
+            (
+                "missing secondary, primary is 5h",
+                """
+                {
+                    "rate_limit": {
+                        "primary_window": {"used_percent": 10, "limit_window_seconds": 18000, "reset_at": 1000}
+                    }
+                }
+                """,
+                10, nil, 0
+            ),
+            (
+                "only secondary present, no window seconds (positional fallback => 7d)",
+                """
+                {
+                    "rate_limit": {
+                        "secondary_window": {"used_percent": 10, "reset_at": 1000}
+                    }
+                }
+                """,
+                nil, 10, 1000
+            ),
+        ]
+        for c in cases {
+            let result = UsageNormalizer.codex(c.json.data(using: .utf8)!)
+            XCTAssertNotNil(result, c.name)
+            XCTAssertEqual(result?.h5.pct, c.h5, c.name)
+            XCTAssertEqual(result?.d7.pct, c.d7, c.name)
+            XCTAssertEqual(result?.d7.reset, c.d7Reset, c.name)
         }
-        """.data(using: .utf8)!
-        XCTAssertNil(UsageNormalizer.codex(json))
     }
 
-    func testCodexMissingSecondaryWindowReturnsNil() {
+    func testCodexNoWindowsReturnsNil() {
         let json = """
-        {
-            "rate_limit": {
-                "primary_window": {"used_percent": 10, "reset_at": 1000}
-            }
-        }
+        {"rate_limit": {"allowed": true, "primary_window": null, "secondary_window": null}}
         """.data(using: .utf8)!
         XCTAssertNil(UsageNormalizer.codex(json))
     }
