@@ -18,14 +18,26 @@ public enum UsageNormalizer {
     }
 
     // Codex: GET chatgpt.com/backend-api/wham/usage
-    //   { rate_limit:{ primary_window:{used_percent,reset_at(epoch)}, secondary_window:{...} } }
+    //   { rate_limit:{ primary_window:{used_percent,limit_window_seconds,reset_at(epoch)},
+    //                  secondary_window:{...}|null } }
+    // Plans without a 5h limit (observed on Plus, 2026-07-16) send secondary_window:null and a
+    // primary_window that is the 7d window -- so windows are routed by limit_window_seconds, not
+    // position. Positional fallback (primary=5h, secondary=7d) covers responses lacking that key.
+    // A missing window normalizes to pct:nil (device renders "--"); no windows at all => nil.
     public static func codex(_ raw: Data) -> ProviderUsage? {
         guard let obj = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
               let rl = obj["rate_limit"] as? [String: Any] else { return nil }
-        guard let h5 = window(rl["primary_window"], pctKey: "used_percent", resetKey: "reset_at"),
-              let d7 = window(rl["secondary_window"], pctKey: "used_percent", resetKey: "reset_at")
-        else { return nil }
-        return ProviderUsage(h5: h5, d7: d7)
+        var h5: UsageWindow?
+        var d7: UsageWindow?
+        for (key, fallbackIsH5) in [("primary_window", true), ("secondary_window", false)] {
+            guard let dict = rl[key] as? [String: Any],
+                  let w = window(dict, pctKey: "used_percent", resetKey: "reset_at") else { continue }
+            let isH5 = number(dict["limit_window_seconds"]).map { $0 <= 6 * 3600 } ?? fallbackIsH5
+            if isH5 { h5 = h5 ?? w } else { d7 = d7 ?? w }
+        }
+        guard h5 != nil || d7 != nil else { return nil }
+        let absent = UsageWindow(pct: nil, reset: 0)
+        return ProviderUsage(h5: h5 ?? absent, d7: d7 ?? absent)
     }
 
     // --- helpers ---
