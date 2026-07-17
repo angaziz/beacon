@@ -232,8 +232,12 @@ HTTP 2xx + body, no outer envelope. Hook `timeout` is in **seconds** (config: 60
 `deny` within the hold window; never let it hang.
 
 ### C.4 Session / statusline — CONFIRMED (CC v2.1.x docs)
-`SessionStart`(matcher startup/resume/clear/compact)/`Stop`/`Notification`/`SessionEnd` http hooks =>
-buddy idle. Stop body has `stop_reason`; Notification has `message`; SessionEnd carries `session_id`
+`SessionStart`(matcher startup/resume/clear/compact)/`UserPromptSubmit`/`Stop`/`Notification`/
+`SessionEnd` http hooks => buddy idle. `UserPromptSubmit` fires once per user turn, right as the agent
+starts working — the hub treats it exactly like `SessionStart` (`registry.touchActivity`), so a session
+flips from `attention` (last turn's `Stop`) back to `working` immediately instead of waiting on the
+statusline's own refresh cadence (which Beacon doesn't control and can lag several seconds). Stop body
+has `stop_reason`; Notification has `message`; SessionEnd carries `session_id`
 (clean per-session removal). **Statusline** (`statusLine` = `type:command`)
 receives JSON with `session_id` (per-session TOK/CTX aggregation key), `cwd` (attribution basename),
 `context_window.{used_percentage,total_input_tokens,total_output_tokens}` (=> buddy

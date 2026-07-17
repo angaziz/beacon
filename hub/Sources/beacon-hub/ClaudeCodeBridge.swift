@@ -293,7 +293,7 @@ final class ClaudeCodeBridge {
         switch event {
         case "PreToolUse", "PermissionRequest":
             handlePermission(conn, body: body)
-        case "SessionStart", "Stop", "Notification", "SessionEnd":
+        case "SessionStart", "UserPromptSubmit", "Stop", "Notification", "SessionEnd":
             applySessionHook(event: event, body: body)
             respondJSON(conn, ["ok": true])
         default:
@@ -502,7 +502,9 @@ final class ClaudeCodeBridge {
                 sessionStats.removeValue(forKey: sid)
                 registry.end(sessionId: sid)
             }
-        default:   // SessionStart + any: activity establishes the session as working.
+        default:   // SessionStart, UserPromptSubmit + any other: activity establishes the session as working.
+            // UserPromptSubmit specifically is what re-arms .working the instant the user submits the next
+            // turn, rather than waiting on the statusline's own refresh cadence to touch the session again.
             if let sid { registry.touchActivity(sessionId: sid, cwd: cwd, now: Date()); ensureBranch(sessionId: sid, cwd: cwd) }
         }
         buddy.running = sessions.count

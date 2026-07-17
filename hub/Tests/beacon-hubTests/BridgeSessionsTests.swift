@@ -22,6 +22,21 @@ final class BridgeSessionsTests: XCTestCase {
         XCTAssertEqual(last.first(where: { $0.label.hasPrefix("api") })?.state, .working)
     }
 
+    // UserPromptSubmit must re-arm .working the instant the next turn starts, without relying on a
+    // statusline POST (which CC's own refresh cadence -- outside Beacon's control -- may delay).
+    func testUserPromptSubmitProducesWorkingAfterStop() {
+        let b = ClaudeCodeBridge()
+        var last: [Session] = []
+        b.onSessionsUpdate = { last = $0 }
+        b.applySessionHookForTest(event: "SessionStart", sessionId: "A", cwd: "/x/api")
+        b.applySessionHookForTest(event: "Stop", sessionId: "A", cwd: "/x/api")
+        drainMain()
+        XCTAssertEqual(last.first(where: { $0.label.hasPrefix("api") })?.state, .attention)
+        b.applySessionHookForTest(event: "UserPromptSubmit", sessionId: "A", cwd: "/x/api")
+        drainMain()
+        XCTAssertEqual(last.first(where: { $0.label.hasPrefix("api") })?.state, .working)
+    }
+
     func testNotificationNoLongerForcesWaiting() {
         let b = ClaudeCodeBridge()
         var last: [Session] = []
