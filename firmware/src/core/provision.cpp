@@ -121,6 +121,11 @@ bool provision_needed(void) { return !nvs_has_wifi(); }
 void provision_begin(void) {
   WiFi.mode(WIFI_AP_STA);     // AP for the portal; STA side enables the network scan
   WiFi.softAP(AP_SSID);
+  feedLoopWDT();               // scan_networks() blocks ~2-4s; give the loop-task WDT (setup() runs on
+                                // it, per main.cpp's enableLoopWDT()) a fresh window before it (issue: a
+                                // first-boot/post-erase device with no saved WiFi hits this path from
+                                // setup() and was tripping the WDT here, panic-looping before the portal
+                                // ever came up)
   scan_networks();            // cache the visible-network list once
   IPAddress ip = WiFi.softAPIP();
   s_dns.start(53, "*", ip);   // resolve every name to the portal (captive)
