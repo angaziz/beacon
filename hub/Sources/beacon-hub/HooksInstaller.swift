@@ -11,6 +11,7 @@ enum HooksInstaller {
     // build-app.sh only warns about and writes into an unquoted statusLine command that won't parse at
     // the CC layer. We copy the shim here and pass it via BEACON_SHIM so install + detection agree.
     static let shimInstallPath = NSString(string: "~/.beacon/beacon-statusline").expandingTildeInPath
+    static let sessionShimInstallPath = NSString(string: "~/.beacon/beacon-session").expandingTildeInPath
 
     private static var defaultSettingsURL: URL {
         URL(fileURLWithPath: NSString(string: "~/.claude/settings.json").expandingTildeInPath)
@@ -41,12 +42,18 @@ enum HooksInstaller {
         try fm.copyItem(atPath: bundledShim, toPath: shimInstallPath)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shimInstallPath)
 
+        let bundledSessionShim = try resolve(resource: "beacon-session", devPath: "statusline-shim/beacon-session")
+        if fm.fileExists(atPath: sessionShimInstallPath) { try fm.removeItem(atPath: sessionShimInstallPath) }
+        try fm.copyItem(atPath: bundledSessionShim, toPath: sessionShimInstallPath)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sessionShimInstallPath)
+
         let script = try resolve(resource: "build-app.sh", devPath: "build-app.sh")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [script, "install-hooks"]
         var env = ProcessInfo.processInfo.environment
         env["BEACON_SHIM"] = shimInstallPath
+        env["BEACON_SESSION"] = sessionShimInstallPath
         process.environment = env
         let stderr = Pipe()
         process.standardError = stderr
