@@ -19,6 +19,7 @@ typedef enum {
   PAL_ANIM_DANCE_BOUNCE,
   PAL_ANIM_WORK_CODING,
   PAL_ANIM_WORK_THINK,
+  PAL_ANIM_DANCE_DJMIX,
   PAL_ANIM_COUNT,
 } pal_anim_id_t;
 

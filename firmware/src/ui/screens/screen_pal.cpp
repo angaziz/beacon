@@ -1,6 +1,7 @@
 #include "ui/screens/screen_pal.h"
 #include "ui/screens/pal_state.h"
 #include "ui/theme.h"
+#include "ui/styles.h"
 #include "ui/carousel.h"
 #include "ui/idle_glue.h"
 #include "config/layout.h"
@@ -21,11 +22,12 @@ namespace {
 constexpr int PAL_SCREEN_INDEX = 5;
 
 constexpr int32_t  ZOOM             = 3072;   // 20px source -> 240px on screen (256 = 1x, LVGL zoom units)
-constexpr uint32_t IDLE_ROTATE_S    = 20;     // seconds between idle-pool animation switches
+constexpr uint32_t IDLE_ROTATE_S    = 8;      // seconds between idle-pool animation switches
 constexpr uint32_t BORDER_PULSE_MS  = 1100;   // one breathe cycle of the notification ring
 
 lv_obj_t*   s_img          = nullptr;
 lv_obj_t*   s_border       = nullptr;
+lv_obj_t*   s_label        = nullptr;
 lv_timer_t* s_frame_timer  = nullptr;
 lv_anim_t   s_border_anim;
 bool        s_border_anim_running = false;
@@ -35,6 +37,28 @@ pal_anim_id_t s_cur_anim_id  = PAL_ANIM_EXPRESSION_SLEEP;
 uint16_t      s_cur_frame    = 0;
 uint8_t       s_idle_rot_idx = 0;
 uint32_t      s_idle_rotated_at = 0;
+bool          s_one_shot     = false;   // playing a tap-triggered reaction, not the looped state animation
+
+const char* status_text(pal_state_t s) {
+  switch (s) {
+    case PAL_STATE_SLEEP:  return "SLEEPING";
+    case PAL_STATE_NOTIFY: return "NEEDS YOU";
+    case PAL_STATE_ACTIVE: return "THINKING";
+    default:                return "WAITING";   // PAL_STATE_IDLE
+  }
+}
+
+// Tap reaction per base state -- a little easter egg, distinct from the looped state
+// animation. Returns false for states with no defined reaction (NOTIFY: the pulsing
+// border already has the user's attention, no need to interrupt dance_bounce).
+bool reaction_for_state(pal_state_t s, pal_anim_id_t* out) {
+  switch (s) {
+    case PAL_STATE_IDLE:   *out = PAL_ANIM_EXPRESSION_SURPRISE; return true;
+    case PAL_STATE_ACTIVE: *out = PAL_ANIM_DANCE_DJMIX;         return true;
+    case PAL_STATE_SLEEP:  *out = PAL_ANIM_WORK_THINK;          return true;
+    default:                return false;                        // PAL_STATE_NOTIFY
+  }
+}
 
 // One lv_img_dsc_t whose .data we repoint at the current animation's current frame -- each
 // frame is a distinct const array in flash (pal_frames.c), no per-frame copy needed. Safe
@@ -56,7 +80,15 @@ void set_animation(pal_anim_id_t id) {
 
 void advance_frame(void) {
   const pal_anim_t& a = PAL_ANIMS[s_cur_anim_id];
-  s_cur_frame = (uint16_t)((s_cur_frame + 1) % a.frame_count);
+  uint16_t next = (uint16_t)((s_cur_frame + 1) % a.frame_count);
+  if (s_one_shot && next == 0) {
+    // The one-shot reaction played through exactly once -- hand back to whatever the
+    // mascot's actual state animation is now (may have changed while the reaction played).
+    s_one_shot = false;
+    set_animation(pal_anim_for_state(s_last_state, s_idle_rot_idx));
+    return;
+  }
+  s_cur_frame = next;
   set_frame(a, s_cur_frame);
 }
 
@@ -66,6 +98,13 @@ void advance_frame(void) {
 void frame_timer_cb(lv_timer_t*) {
   if (carousel_current() != PAL_SCREEN_INDEX || idle_is_inactive()) return;
   advance_frame();
+}
+
+void click_cb(lv_event_t*) {
+  pal_anim_id_t reaction;
+  if (!reaction_for_state(s_last_state, &reaction)) return;
+  set_animation(reaction);
+  s_one_shot = true;
 }
 
 void border_opa_cb(void* obj, int32_t v) {
@@ -129,11 +168,27 @@ lv_obj_t* build(lv_obj_t* page) {
   lv_img_set_antialias(s_img, false);   // nearest-neighbor: keep pixel-art edges crisp at this zoom
   lv_obj_center(s_img);
 
+  // Tap the mascot for a one-shot reaction animation (see reaction_for_state); it plays
+  // through once then hands back to the normal state animation in advance_frame().
+  // ADV_HITTEST is required here: lv_img's default click area is its *unscaled* source
+  // size (20x20, per lv_img_set_src's lv_obj_refresh_self_size) -- zoom only expands the
+  // draw area, not the hit box, so without this flag almost every tap on the visually
+  // ~240px-wide mascot misses. With it, LV_EVENT_HIT_TEST uses the actual zoomed area.
+  lv_obj_add_flag(s_img, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_ADV_HITTEST);
+  lv_obj_add_event_cb(s_img, click_cb, LV_EVENT_CLICKED, NULL);
+
+  // Status word, above the carousel's dot bar (bar sits at -(SAFE_INSET-22) from bottom mid).
+  s_label = lv_label_create(page);
+  lv_obj_add_style(s_label, &S.slot, 0);
+  lv_obj_align(s_label, LV_ALIGN_BOTTOM_MID, 0, -(SAFE_INSET + 8));
+
   // Must exist before set_animation() below -- it calls lv_timer_set_period() on this.
   if (!s_frame_timer) s_frame_timer = lv_timer_create(frame_timer_cb, 100, NULL);
 
   s_last_state = (pal_state_t)-1;   // force update() to (re)pick + animate on the next tick
+  s_one_shot = false;
   set_animation(PAL_ANIM_EXPRESSION_SLEEP);
+  lv_label_set_text(s_label, status_text(PAL_STATE_SLEEP));
 
   return page;
 }
@@ -147,9 +202,11 @@ void update(void) {
     s_last_state = st;
     s_idle_rot_idx = 0;
     s_idle_rotated_at = now;
+    s_one_shot = false;   // a real state change pre-empts any in-flight tap reaction
     set_animation(pal_anim_for_state(st, s_idle_rot_idx));
+    lv_label_set_text(s_label, status_text(st));
     if (st == PAL_STATE_NOTIFY) start_border_pulse(); else stop_border_pulse();
-  } else if (st == PAL_STATE_IDLE && (now - s_idle_rotated_at) >= IDLE_ROTATE_S) {
+  } else if (!s_one_shot && st == PAL_STATE_IDLE && (now - s_idle_rotated_at) >= IDLE_ROTATE_S) {
     s_idle_rot_idx++;
     s_idle_rotated_at = now;
     set_animation(pal_anim_for_state(st, s_idle_rot_idx));

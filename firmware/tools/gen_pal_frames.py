@@ -34,6 +34,7 @@ ANIMS = [
     ("dance_bounce", "DANCE_BOUNCE"),
     ("work_coding", "WORK_CODING"),
     ("work_think", "WORK_THINK"),
+    ("dance_djmix", "DANCE_DJMIX"),
 ]
 
 FRAME_W = 20

@@ -24,11 +24,45 @@ Computed from `ds_get_buddy()` (`buddy_rec_t`, `firmware/src/core/records.h`) by
 | 1 | `prompt.present` | NOTIFY | `dance_bounce`, looped + pulsing 70px-radius `alert`-color border |
 | 2 | `hdr.state == ST_HUB_OFFLINE` or `session_count == 0` | SLEEP | `expression_sleep`, looped |
 | 3 | any `sessions[i].state == BST_WORKING` | ACTIVE | `work_coding`, looped |
-| 4 | otherwise (has agent, nothing pending/working) | IDLE | rotates every 20s through `expression_surprise → idle_breathe → idle_blink → idle_look_around → expression_wink → dance_sway → work_think` |
+| 4 | otherwise (has agent, nothing pending/working) | IDLE | rotates every 8s through `idle_breathe → idle_blink → idle_look_around → expression_wink → dance_sway` |
 
 A pending prompt outranks an actively-working session because it needs the user's
 response right now — the mascot shouldn't look "business as usual" while something is
-blocked on them.
+blocked on them. `expression_surprise` and `work_think` are intentionally excluded from
+the idle rotation pool — they're reserved as tap reactions (see below).
+
+## Tap reaction (one-shot)
+
+Tapping the mascot plays a one-shot animation on top of whatever's currently looping,
+then hands back control to the normal state animation once it finishes a single pass
+(`s_one_shot` flag in `screen_pal.cpp`, checked in `advance_frame()`). Mapped per base
+state at the moment of the tap:
+
+| Base state | Reaction |
+|---|---|
+| IDLE | `expression_surprise` |
+| ACTIVE | `dance_djmix` |
+| SLEEP | `work_think` |
+| NOTIFY | none (tap ignored — the pulsing border already has the user's attention) |
+
+If the mascot's real state changes while a reaction is still playing (e.g. a session
+starts working mid-reaction), the state change wins immediately (`update()` clears
+`s_one_shot` on any `st != s_last_state` transition).
+
+**Hit-test gotcha:** `lv_img`'s default click area is its *unscaled* source size
+(20×20px, set in `lv_img_set_src`'s `lv_obj_refresh_self_size`) — `lv_img_set_zoom` only
+expands the *draw* area, not the input hit box. Without `LV_OBJ_FLAG_ADV_HITTEST`, taps
+anywhere on the visually ~240px mascot outside that tiny centered 20×20 box are silently
+ignored. `s_img` sets `LV_OBJ_FLAG_ADV_HITTEST` alongside `LV_OBJ_FLAG_CLICKABLE` so
+LVGL's `LV_EVENT_HIT_TEST` path (`lv_img.c`) uses the actual zoomed/rotated area instead.
+
+## Status label
+
+A short status word renders bottom-center, above the carousel's dot indicator:
+`SLEEPING` / `WAITING` / `THINKING` / `NEEDS YOU` (for SLEEP/IDLE/ACTIVE/NOTIFY
+respectively). Uses the shared `S.slot` style (mono font, `ink_dim`) like other
+screens' status text. Only updated on state transitions, not on tap reactions or idle
+rotation ticks.
 
 ## Rendering
 
@@ -76,5 +110,6 @@ across all screens (a possible future enhancement, not this one).
 ## Regenerating the sprite data
 
 `firmware/src/ui/screens/pal_frames.h`/`.c` are generated, not hand-written. See
-`firmware/tools/gen_pal_frames.py`'s docstring: fetch the 10 relevant JSON files from
+`firmware/tools/gen_pal_frames.py`'s docstring: fetch the 11 relevant JSON files (the
+original 10 plus `dance_djmix`, used for the ACTIVE-state tap reaction) from
 Clawdmeter's `tools/claudepix_data/`, then run the script against that directory.
