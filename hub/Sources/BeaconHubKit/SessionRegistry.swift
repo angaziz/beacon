@@ -40,6 +40,27 @@ public final class SessionRegistry {
         }
     }
 
+    // Statusline liveness: a statusline render is a UI event, NOT proof the agent is working, so
+    // unlike touchActivity this must NOT clear `stopped`/`needsInput`. Claude Code emits a final
+    // statusline at/after a turn ends (to show the ending token/context count), firing ~3x/s while
+    // active; if that trailing render cleared `stopped`, it would resurrect a just-Stopped session
+    // back to .working and freeze it there once CC goes quiet (the "stuck on Working 2m" bug). We
+    // still bump updatedAt so a long, permission-free turn doesn't cross idleTTL and wrongly go
+    // .idle mid-work, and we still create the entry if statusline is the first signal we've seen.
+    // The working transition now comes from real work signals only: UserPromptSubmit (per turn),
+    // SessionStart, and permission requests -- all via touchActivity.
+    public func touchStatusline(sessionId: String, cwd: String?, now: Date) {
+        guard !sessionId.isEmpty else { return }
+        if var e = entries[sessionId] {
+            if let cwd, !cwd.isEmpty { e.cwd = cwd }
+            e.updatedAt = now   // keep alive; preserve stopped/needsInput
+            entries[sessionId] = e
+        } else {
+            entries[sessionId] = Entry(shortId: mintId(), cwd: cwd ?? "", branch: nil,
+                                       updatedAt: now, stopped: false)
+        }
+    }
+
     // Mark a session as waiting on user input (CC Notification hook). Does NOT bump updatedAt so the
     // entry's sort position is preserved. Cleared by touchActivity (any new activity moves it on).
     public func markNeedsInput(sessionId: String) {

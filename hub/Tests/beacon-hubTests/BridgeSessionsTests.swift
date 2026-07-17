@@ -9,7 +9,11 @@ final class BridgeSessionsTests: XCTestCase {
         wait(for: [e], timeout: 1)
     }
 
-    func testStopProducesAttentionThenActivityClears() {
+    // A statusline render after a turn ends must NOT resurrect the session to .working: Claude Code
+    // emits a final statusline at/after Stop, and treating it as work froze finished sessions on
+    // "Working" (the bug this guards). Real work signals (UserPromptSubmit, SessionStart, permission)
+    // clear attention -- statusline only keeps the session alive + refreshes stats.
+    func testStatuslineDoesNotResurrectStoppedSession() {
         let b = ClaudeCodeBridge()
         var last: [Session] = []
         b.onSessionsUpdate = { last = $0 }
@@ -19,7 +23,7 @@ final class BridgeSessionsTests: XCTestCase {
         XCTAssertEqual(last.first(where: { $0.label.hasPrefix("api") })?.state, .attention)
         b.handleStatusline(["session_id": "A", "context_window": ["used_percentage": 10]])   // already internal
         drainMain()
-        XCTAssertEqual(last.first(where: { $0.label.hasPrefix("api") })?.state, .working)
+        XCTAssertEqual(last.first(where: { $0.label.hasPrefix("api") })?.state, .attention)   // still done, not working
     }
 
     // UserPromptSubmit must re-arm .working the instant the next turn starts, without relying on a
@@ -92,7 +96,11 @@ final class BridgeSessionsTests: XCTestCase {
         XCTAssertEqual(last.first(where: { $0.label.hasPrefix("api") })?.state, .question)
     }
 
-    func testStatuslineAfterNotificationClearsQuestion() {
+    // A statusline render must NOT clear a pending question (same reasoning as .attention): the
+    // question stands until the user actually responds, which fires UserPromptSubmit. Statusline is
+    // just a UI render firing ~3x/s and would otherwise wipe the "asking a question" indicator
+    // almost immediately.
+    func testStatuslineDoesNotClearQuestionButUserPromptDoes() {
         let b = ClaudeCodeBridge()
         var last: [Session] = []
         b.onSessionsUpdate = { last = $0 }
@@ -100,8 +108,10 @@ final class BridgeSessionsTests: XCTestCase {
         b.applySessionHookForTest(event: "Notification", sessionId: "A", cwd: "/x/api")
         drainMain()
         XCTAssertEqual(last.first(where: { $0.label.hasPrefix("api") })?.state, .question)
-        // A statusline POST signals Claude is active again — clears the question.
         b.handleStatusline(["session_id": "A", "context_window": ["used_percentage": 20]])
+        drainMain()
+        XCTAssertEqual(last.first(where: { $0.label.hasPrefix("api") })?.state, .question)   // still asking
+        b.applySessionHookForTest(event: "UserPromptSubmit", sessionId: "A", cwd: "/x/api")   // user answered
         drainMain()
         XCTAssertEqual(last.first(where: { $0.label.hasPrefix("api") })?.state, .working)
     }

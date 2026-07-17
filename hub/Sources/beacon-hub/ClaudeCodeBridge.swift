@@ -528,7 +528,9 @@ final class ClaudeCodeBridge {
         // path to Claude usage without the Keychain/oauth call.)
         let sid = body["session_id"] as? String
         touch(sid)   // statusline traffic is the most frequent liveness signal.
-        if let sid { registry.touchActivity(sessionId: sid, cwd: body["cwd"] as? String, now: Date()); ensureBranch(sessionId: sid, cwd: body["cwd"] as? String) }
+        // touchStatusline, NOT touchActivity: a statusline render must not clear `stopped`, or the
+        // final render after a turn ends resurrects the session to .working (see SessionRegistry).
+        if let sid { registry.touchStatusline(sessionId: sid, cwd: body["cwd"] as? String, now: Date()); ensureBranch(sessionId: sid, cwd: body["cwd"] as? String) }
         if let cw = body["context_window"] as? [String: Any] {
             let pct = Self.double(cw["used_percentage"]).map { max(0, min(100, Int($0.rounded()))) } ?? 0
             let inTok = Self.int(cw["total_input_tokens"]) ?? 0

@@ -238,7 +238,13 @@ starts working — the hub treats it exactly like `SessionStart` (`registry.touc
 flips from `attention` (last turn's `Stop`) back to `working` immediately instead of waiting on the
 statusline's own refresh cadence (which Beacon doesn't control and can lag several seconds). Stop body
 has `stop_reason`; Notification has `message`; SessionEnd carries `session_id`
-(clean per-session removal). **Statusline** (`statusLine` = `type:command`)
+(clean per-session removal). **The session working/idle state is derived only from these hooks** — a
+statusline render is explicitly NOT a "working" signal (`registry.touchStatusline`, which preserves
+`stopped`/`needsInput`): CC emits a final statusline at/after `Stop`, so treating it as work would
+resurrect a just-finished session back to `working` and freeze it there. `working` therefore requires
+`UserPromptSubmit`/`SessionStart`/a permission request; without the `UserPromptSubmit` hook installed,
+a resumed turn won't leave `attention` until the next permission prompt. **Statusline**
+(`statusLine` = `type:command`)
 receives JSON with `session_id` (per-session TOK/CTX aggregation key), `cwd` (attribution basename),
 `context_window.{used_percentage,total_input_tokens,total_output_tokens}` (=> buddy
 `context_pct`/`tokens`) and `rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}` (=> **Claude
