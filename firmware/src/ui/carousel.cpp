@@ -12,12 +12,9 @@
 #include "ui/screens/screen_usage.h"
 #include "ui/screens/screen_buddy.h"
 #include "ui/screens/screen_settings.h"
-#include "ui/screens/screen_pal.h"
 
-// pal_module MUST stay last: screen_pal.cpp hardcodes its own carousel index (PAL_SCREEN_INDEX)
-// rather than looking it up, mirroring carousel_goto_buddy()'s index-3 assumption below.
 static const screen_module_t* MODULES[] = {
-  &home_module, &finance_module, &usage_module, &buddy_module, &settings_module, &pal_module,
+  &home_module, &finance_module, &usage_module, &buddy_module, &settings_module,
 };
 static const int COUNT = (int)(sizeof(MODULES) / sizeof(MODULES[0]));
 

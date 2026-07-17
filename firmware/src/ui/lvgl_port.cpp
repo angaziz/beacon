@@ -91,6 +91,13 @@ bool lvgl_port_begin() {
   lv_indev_drv_init(&indev_drv);
   indev_drv.type = LV_INDEV_TYPE_POINTER;
   indev_drv.read_cb = indev_read_cb;
+  // LVGL's default scroll_limit (10px) is too tight for this panel: every page sits inside the
+  // horizontally-scrollable carousel (carousel.cpp), so any tap with >10px of ordinary finger
+  // jitter gets captured by lv_indev_scroll's find_scroll_obj() as the start of a page-swipe
+  // instead of delivering LV_EVENT_CLICKED to whatever was tapped (e.g. pal_panel.cpp's mascot,
+  // or buddy screen's approve/deny) -- the click is silently dropped, not just delayed. Widen the
+  // tap-vs-swipe threshold; still tiny relative to the 466px panel, so deliberate swipes are unaffected.
+  indev_drv.scroll_limit = 20;
   lv_indev_drv_register(&indev_drv);
 
   free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);

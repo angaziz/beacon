@@ -23,9 +23,9 @@ static inline pal_state_t pal_pick_state(const buddy_rec_t* b) {
   return PAL_STATE_IDLE;
 }
 
-// Idle-state rotation pool, in rotation order (~8s/animation, see screen_pal.cpp).
+// Idle-state rotation pool, in rotation order (~8s/animation, see pal_panel.cpp).
 // expression_surprise and work_think are deliberately excluded here -- they're reserved
-// as one-shot tap reactions (idle and sleep respectively; see screen_pal.cpp's click handler).
+// as one-shot tap reactions (idle and sleep respectively; see pal_panel.cpp's click handler).
 static const pal_anim_id_t PAL_IDLE_POOL[] = {
   PAL_ANIM_IDLE_BREATHE,     PAL_ANIM_IDLE_BLINK,
   PAL_ANIM_IDLE_LOOK_AROUND, PAL_ANIM_EXPRESSION_WINK,  PAL_ANIM_DANCE_SWAY,
