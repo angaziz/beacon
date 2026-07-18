@@ -216,6 +216,11 @@ final class MenubarController: NSObject {
     }
     func playAttentionSoundIfEnabled() { guard !promptSoundMuted else { return }; attentionSound?.stop(); attentionSound?.play() }
 
+    // A session asked a question (CC Notification hook). Shares the prompt chime: both mean "you are
+    // needed now", unlike the attention chime which means "the turn is done". Give it its own asset
+    // here if the two should be distinguishable by ear.
+    func playQuestionSoundIfEnabled() { playPromptSoundIfEnabled() }
+
     private func openLink() {
         SettingsLinks.open(fixURL ?? SettingsLinks.fallback)
     }

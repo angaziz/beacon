@@ -205,6 +205,12 @@ oscilloscope}.cpp`. All updated atomically.
   `0→>0` transition per state bucket; suppress same-session repeats within a **1.5 s** global
   window; a session re-entering a state it just left does not re-chime until it has left that
   state. Mutable via the existing prompt-mute pref.
+  - **Amended 2026-07-18:** this bullet predates issue #110, which split `question` out of
+    `attention` into its own state ranked *above* it. That silently removed the chime from asking
+    sessions — they no longer reached the `attention` bucket. `question` now has its own bucket edge
+    under the same aggregate `0→>0` rule, reusing `beacon-prompt.wav` (both mean "you are needed
+    now"; `attention` means "the turn is done"). The row for `attention` below still reads "question
+    or done; not differentiated" — that is now only true of the *sound*, not the state.
 - **Host-context capture (Phase 2):** new `SessionStart` POST carries `$TERM_PROGRAM`,
   `$TERM_SESSION_ID`/`tty`, `pid`. Installer adds `clear|compact` matchers (today: only
   `startup|resume`). **Gated by a spike** (§7).

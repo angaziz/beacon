@@ -22,6 +22,7 @@ final class ClaudeCodeBridge {
     var onPromptUndeliverable: ((String) -> Void)?  // a prompt couldn't be shown (device offline)
     var onPromptArrived: (() -> Void)?              // a deliverable prompt was shown on the device (cue the user)
     var onAttention: (() -> Void)?                  // fires on aggregate 0->non-0 attention-bucket transition (spec §6)
+    var onQuestion: (() -> Void)?                   // same rule for the question bucket (CC Notification hook)
     var onBridgeStatus: ((String?) -> Void)?        // non-nil = bind failed (loud); nil = recovered
     var onSessionsUpdate: (([Session]) -> Void)?
 
@@ -653,10 +654,25 @@ final class ClaudeCodeBridge {
         let (front, queued) = waitingSessionSets()
         let snap = registry.snapshot(now: Date(), waitingFront: front, waitingQueued: queued)
         guard snap != lastPublishedSessions else { return }
+
+        // Per spec §6: chime on the aggregate 0 -> >0 transition PER STATE BUCKET. Deliberately not
+        // per-session -- with 2-3 parallel sessions that would be a chime storm, which is exactly what
+        // the spec's debounce exists to prevent. A second session entering a bucket that is already
+        // non-empty is silent by design.
         let prevAttention = lastPublishedSessions.contains { $0.state == .attention }
         let nowAttention  = snap.contains { $0.state == .attention }
-        if !prevAttention && nowAttention {     // bucket went 0 -> >0
+        if !prevAttention && nowAttention {
             let cb = onAttention
+            DispatchQueue.main.async { cb?() }
+        }
+        // .question is the same bucket rule, and it had NO cue at all before this. Spec §6 folded
+        // questions into `attention` ("question or done; not differentiated"), but issue #110 split
+        // .question out as its own state ranked ABOVE .attention -- so an asking session stopped
+        // reaching the attention branch and silently lost its sound. This restores it.
+        let prevQuestion = lastPublishedSessions.contains { $0.state == .question }
+        let nowQuestion  = snap.contains { $0.state == .question }
+        if !prevQuestion && nowQuestion {
+            let cb = onQuestion
             DispatchQueue.main.async { cb?() }
         }
         lastPublishedSessions = snap

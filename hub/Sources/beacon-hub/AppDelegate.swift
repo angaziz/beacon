@@ -184,6 +184,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         b.onAttention = { [weak self] in
             Task { @MainActor in self?.menubar.playAttentionSoundIfEnabled() }
         }
+        b.onQuestion = { [weak self] in
+            Task { @MainActor in self?.menubar.playQuestionSoundIfEnabled() }
+        }
         b.onBridgeStatus = { [weak self] msg in
             Task { @MainActor in self?.menubar.setBridgeAlert(msg) }
         }

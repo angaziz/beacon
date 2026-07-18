@@ -86,6 +86,24 @@ final class BridgeSessionsTests: XCTestCase {
         XCTAssertEqual(fires, 1)   // aggregate per-bucket, not per-session (spec §6)
     }
 
+    func testQuestionFiresItsOwnBucketTransition() {
+        // Regression: spec §6 folded questions into `attention`, but #110 split .question out as a
+        // state ranked above .attention -- an asking session stopped reaching the attention branch and
+        // lost its chime entirely. .question now has its own bucket edge, on the same aggregate rule.
+        let b = ClaudeCodeBridge()
+        var questions = 0
+        var attentions = 0
+        b.onQuestion = { questions += 1 }
+        b.onAttention = { attentions += 1 }
+        b.applySessionHookForTest(event: "SessionStart", sessionId: "A", cwd: "/x/api")
+        b.applySessionHookForTest(event: "SessionStart", sessionId: "B", cwd: "/x/api")
+        b.applySessionHookForTest(event: "Notification", sessionId: "A", cwd: "/x/api")  // 0 -> >0: fire
+        b.applySessionHookForTest(event: "Notification", sessionId: "B", cwd: "/x/api")  // already >0: silent
+        drainMain()
+        XCTAssertEqual(questions, 1)
+        XCTAssertEqual(attentions, 0, "a question must not also fire the turn-finished chime")
+    }
+
     func testNotificationProducesQuestion() {
         let b = ClaudeCodeBridge()
         var last: [Session] = []
