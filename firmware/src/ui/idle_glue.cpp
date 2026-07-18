@@ -33,7 +33,19 @@ void idle_init(void) {
 
 bool idle_is_inactive(void) { return s_phase != IDLE_ACTIVE; }
 
+// Keep-awake while PAL is watching a running agent: an agent can work for many minutes without
+// any touch, and letting the panel sleep under it defeats the point of leaving the mascot open.
+// Scoped to the open overlay so a background session never holds the whole device awake.
+static bool pal_holds_awake(void) {
+  if (!pal_panel_is_open()) return false;
+  buddy_rec_t b = ds_get_buddy();
+  for (uint8_t i = 0; i < b.session_count; i++)
+    if (b.sessions[i].state == BST_WORKING) return true;
+  return false;
+}
+
 void idle_service(void) {
+  if (pal_holds_awake()) lv_disp_trig_activity(NULL);
   uint32_t inact = lv_disp_get_inactive_time(NULL);
   idle_phase_t p = idle_eval(inact, s_dim_ms, s_sleep_ms);
   if (p == s_phase) return;
