@@ -33,6 +33,7 @@ lv_obj_t*   s_label        = nullptr;
 lv_timer_t* s_frame_timer  = nullptr;
 lv_anim_t   s_border_anim;
 bool        s_border_anim_running = false;
+bool        s_paused              = false;   // held across a screen rotation (ui/rotation.cpp)
 
 pal_state_t   s_last_state      = (pal_state_t)-1;
 pal_anim_id_t s_cur_anim_id     = PAL_ANIM_EXPRESSION_SLEEP;
@@ -147,7 +148,7 @@ void check_state(void) {
 // Re-armed each frame to that frame's hold_ms. No-ops while dimmed/asleep so the panel can
 // actually sleep (same #60 rationale as the rest of the app: no invalidation => no QSPI flush).
 void frame_timer_cb(lv_timer_t*) {
-  if (idle_is_inactive()) return;
+  if (s_paused || idle_is_inactive()) return;
   check_state();
   advance_frame();
 }
@@ -243,3 +244,8 @@ void pal_panel_close(void) {
 }
 
 bool pal_panel_is_open(void) { return s_root != nullptr; }
+
+// Freeze the mascot without tearing down its state: the frame timer keeps running but no-ops, so the
+// current frame stays on screen and animation resumes from where it left off. Used by ui/rotation.cpp
+// so the mascot does not step mid-repaint while the screen turns.
+void pal_panel_set_paused(bool paused) { s_paused = paused; }

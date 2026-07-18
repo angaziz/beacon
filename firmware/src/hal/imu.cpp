@@ -1,5 +1,6 @@
 #include "hal/imu.h"
 #include "core/imu_detect.h"
+#include "core/orientation.h"
 #include <Arduino.h>
 #include <Wire.h>
 #include <SensorQMI8658.hpp>
@@ -32,5 +33,6 @@ uint8_t imu_poll(void) {
   IMUdata acc;
   if (!s_qmi.getAccelerometer(acc.x, acc.y, acc.z)) return IMU_NONE;
   imu_detect_feed(acc.x, acc.y, acc.z, now);   // SensorLib reports accel in g
+  orient_feed(acc.x, acc.y, acc.z, now);       // same samples drive screen-orientation detection
   return imu_detect_poll();
 }

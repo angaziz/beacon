@@ -25,6 +25,7 @@
 #include "hal/imu.h"
 #include "core/imu_detect.h"
 #include "ui/overlays.h"
+#include "ui/rotation.h"
 #if defined(BEACON_AUDIO_SPIKE)
 #include "hal/audio.h"
 #endif
@@ -119,6 +120,7 @@ void setup() {
   datastore_init();   // seeds finance_count + ids (screens read these at build time)
   styles_init();
   carousel_init();
+  rotation_init();   // after carousel_init: ui_busy() reads carousel_root(), and apply() repaints it
   idle_init();
 #if !BEACON_CAPTURE
   if (provision_needed() || force_provision) {   // first boot OR touch-hold recovery: host the setup AP
@@ -159,8 +161,9 @@ void loop() {
 #endif
   idle_service();
   buddy_wake_service();
-  uint8_t g = imu_poll();
+  uint8_t g = imu_poll();          // also feeds core/orientation for rotation_service() below
   if (g & IMU_RAISE) lv_disp_trig_activity(NULL);   // wake from dim/sleep
   if (g & IMU_SHAKE) ui_dismiss_top_overlay();
+  rotation_service();
   delay(5);
 }

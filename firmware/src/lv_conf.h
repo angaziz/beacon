@@ -171,7 +171,11 @@
 
 /*Maximum buffer size to allocate for rotation.
  *Only used if software rotation is enabled in the display driver.*/
-#define LV_DISP_ROT_MAX_BUF (10*1024)
+/*Beacon: MUST stay >= 2 bytes * the draw buffer's pixel count (466 * 47), so every invalidated area
+ *rotates in a single chunk and the CO5300's even-window requirement survives the rotation splitter.
+ *Full rationale in ui/lvgl_port.cpp (lvgl_port_set_rotation). Allocated once, lazily, from the LVGL
+ *heap (PSRAM) and only when a non-zero rotation is actually used.*/
+#define LV_DISP_ROT_MAX_BUF (466*48*2)
 
 /*-------------
  * GPU

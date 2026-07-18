@@ -13,6 +13,7 @@ extern "C" {
 void pal_panel_open(void);
 void pal_panel_close(void);
 bool pal_panel_is_open(void);
+void pal_panel_set_paused(bool paused);   // freeze/resume frame stepping (held across screen rotation)
 #ifdef __cplusplus
 }
 #endif
