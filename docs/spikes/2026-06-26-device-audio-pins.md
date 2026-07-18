@@ -2,6 +2,11 @@
 
 **Date:** 2026-06-26  **Status:** pins confirmed; heap-under-load measurement pending the build.
 
+> **Superseded 2026-07-18.** The pin map below is still authoritative; the NO-GO verdict is not.
+> Current position, later measurements and open work: [plans/110-device-audio.md](../plans/110-device-audio.md).
+> This document is left as the record of what was measured and decided on 2026-06-26 — do not edit
+> its findings in place.
+
 ## Authoritative pin map (Waveshare ESP32-S3-Touch-AMOLED-2.16 official docs)
 Source: https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16 (GPIO Pin Assignments + Peripheral Quick Reference)
 
