@@ -5,6 +5,7 @@
 #include "core/records.h"
 #include "ui/durations.h"
 #include "ui/carousel.h"
+#include "ui/pal_panel.h"
 #include "hal/display.h"
 #include <lvgl.h>
 #include <string.h>
@@ -101,4 +102,27 @@ void buddy_wake_service(void) {
   } else {
     s_prev_prompt[0] = '\0';
   }
+
+  // If the user left the PAL mascot overlay open when the device slept, a brand-new session
+  // (any state, not just waiting/attention) should wake the screen so PAL can react -- but only
+  // then: this must not wake the device onto the CLAUDE screen when PAL isn't the thing on top.
+  static bool    s_ids_primed = false;
+  static char    s_prev_ids[BUDDY_SESSIONS_MAX][BUDDY_SID_LEN];
+  static uint8_t s_prev_id_count = 0;
+
+  if (s_ids_primed && idle_is_inactive() && pal_panel_is_open()) {
+    bool new_session = false;
+    for (uint8_t i = 0; !new_session && i < b.session_count; i++) {
+      bool seen = false;
+      for (uint8_t j = 0; !seen && j < s_prev_id_count; j++)
+        seen = strncmp(s_prev_ids[j], b.sessions[i].id, BUDDY_SID_LEN) == 0;
+      new_session = !seen;
+    }
+    if (new_session) lv_disp_trig_activity(NULL);
+  }
+
+  s_prev_id_count = b.session_count;
+  for (uint8_t i = 0; i < b.session_count; i++)
+    memcpy(s_prev_ids[i], b.sessions[i].id, BUDDY_SID_LEN);
+  s_ids_primed = true;
 }

@@ -75,6 +75,75 @@ static void test_session_needs_rising_edge(void) {
   TEST_ASSERT_FALSE(wake_check(&s, true, ""));
 }
 
+// Mirror of the session-id diff added to buddy_wake_service: wakes on a brand-new session id
+// while the PAL mascot overlay is left open across sleep (gating on idle_is_inactive() +
+// pal_panel_is_open() is a trivial AND at the call site, not worth mirroring here).
+#define SID_LEN 8
+#define SESSIONS_MAX 5
+
+typedef struct {
+  bool primed;
+  char prev_ids[SESSIONS_MAX][SID_LEN];
+  int  prev_count;
+} session_wake_state_t;
+
+static bool session_wake_check(session_wake_state_t* s, const char ids[][SID_LEN], int count) {
+  bool new_session = false;
+  if (s->primed) {
+    for (int i = 0; i < count && !new_session; i++) {
+      bool seen = false;
+      for (int j = 0; j < s->prev_count && !seen; j++)
+        seen = strncmp(s->prev_ids[j], ids[i], SID_LEN) == 0;
+      new_session = !seen;
+    }
+  }
+  s->prev_count = count;
+  for (int i = 0; i < count; i++) strncpy(s->prev_ids[i], ids[i], SID_LEN);
+  s->primed = true;
+  return new_session;
+}
+
+// The very first call only primes the snapshot -- it must never itself report "new" (that
+// would wake the device on every boot/reconnect, not just on a session that starts afterward).
+static void test_no_wake_on_first_frame(void) {
+  session_wake_state_t s = {};
+  const char ids[][SID_LEN] = {"s1"};
+  TEST_ASSERT_FALSE(session_wake_check(&s, ids, 1));
+}
+
+// A session id absent from the primed snapshot is a new session.
+static void test_new_session_after_priming(void) {
+  session_wake_state_t s = {};
+  const char first[][SID_LEN] = {"s1"};
+  session_wake_check(&s, first, 1);
+  const char second[][SID_LEN] = {"s1", "s2"};
+  TEST_ASSERT_TRUE(session_wake_check(&s, second, 2));
+}
+
+// Same id set on the next poll is not a new session.
+static void test_no_new_session_same_ids(void) {
+  session_wake_state_t s = {};
+  const char ids[][SID_LEN] = {"s1"};
+  session_wake_check(&s, ids, 1);
+  TEST_ASSERT_FALSE(session_wake_check(&s, ids, 1));
+}
+
+// s1 finishing while s2 starts still counts as new (s2 wasn't in the previous snapshot).
+static void test_session_replaced_counts_as_new(void) {
+  session_wake_state_t s = {};
+  const char first[][SID_LEN] = {"s1"};
+  session_wake_check(&s, first, 1);
+  const char second[][SID_LEN] = {"s2"};
+  TEST_ASSERT_TRUE(session_wake_check(&s, second, 1));
+}
+
+// No sessions before or after: nothing to wake for.
+static void test_empty_to_empty_no_wake(void) {
+  session_wake_state_t s = {};
+  TEST_ASSERT_FALSE(session_wake_check(&s, NULL, 0));
+  TEST_ASSERT_FALSE(session_wake_check(&s, NULL, 0));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_no_edge_when_idle);
@@ -83,5 +152,10 @@ int main(int, char**) {
   RUN_TEST(test_edge_after_clear);
   RUN_TEST(test_new_prompt_id_while_needing);
   RUN_TEST(test_session_needs_rising_edge);
+  RUN_TEST(test_no_wake_on_first_frame);
+  RUN_TEST(test_new_session_after_priming);
+  RUN_TEST(test_no_new_session_same_ids);
+  RUN_TEST(test_session_replaced_counts_as_new);
+  RUN_TEST(test_empty_to_empty_no_wake);
   return UNITY_END();
 }
