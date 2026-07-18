@@ -34,6 +34,7 @@ lv_timer_t* s_frame_timer  = nullptr;
 lv_anim_t   s_border_anim;
 bool        s_border_anim_running = false;
 bool        s_paused              = false;   // held across a screen rotation (ui/rotation.cpp)
+bool        s_border_parked       = false;   // pulse was stopped by dim/sleep; restart it on wake
 
 pal_state_t   s_last_state      = (pal_state_t)-1;
 pal_anim_id_t s_cur_anim_id     = PAL_ANIM_EXPRESSION_SLEEP;
@@ -147,8 +148,24 @@ void check_state(void) {
 
 // Re-armed each frame to that frame's hold_ms. No-ops while dimmed/asleep so the panel can
 // actually sleep (same #60 rationale as the rest of the app: no invalidation => no QSPI flush).
+//
+// Returning early is enough for the sprite (its only invalidation source is set_frame(), below us)
+// but NOT for the notification ring: start_border_pulse() runs as an lv_anim, which LVGL drives
+// from its own timer handler and which therefore never sees this gate. Left alone it repaints a
+// full-screen 466x466 border forever -- a whole-frame QSPI flush per step, all night, at
+// brightness 0 where nothing is even visible. So park it on the way into dim/sleep and re-arm it
+// on wake. check_state() alone can't do the re-arm: s_last_state is still NOTIFY across the sleep,
+// so it sees no transition and never calls start_border_pulse() again.
 void frame_timer_cb(lv_timer_t*) {
-  if (s_paused || idle_is_inactive()) return;
+  if (s_paused) return;
+  if (idle_is_inactive()) {
+    if (s_border_anim_running) { stop_border_pulse(); s_border_parked = true; }
+    return;
+  }
+  if (s_border_parked) {
+    s_border_parked = false;
+    if (s_last_state == PAL_STATE_NOTIFY) start_border_pulse();
+  }
   check_state();
   advance_frame();
 }
@@ -202,6 +219,7 @@ void pal_panel_open(void) {
   lv_obj_clear_flag(s_border, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_flag(s_border, LV_OBJ_FLAG_HIDDEN);
   s_border_anim_running = false;
+  s_border_parked       = false;
 
   memset(&s_img_dsc, 0, sizeof(s_img_dsc));
   s_img_dsc.header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA;
@@ -237,6 +255,7 @@ void pal_panel_open(void) {
 void pal_panel_close(void) {
   if (!s_root) return;
   stop_border_pulse();
+  s_border_parked = false;
   if (s_frame_timer) { lv_timer_del(s_frame_timer); s_frame_timer = nullptr; }
   lv_obj_del(s_root);   // cascades to s_border/s_img/s_label
   s_root = s_img = s_border = s_label = nullptr;

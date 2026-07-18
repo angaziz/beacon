@@ -37,9 +37,25 @@ void idle_service(void) {
   idle_phase_t p = idle_eval(inact, s_dim_ms, s_sleep_ms);
   if (p == s_phase) return;
   switch (p) {
-    case IDLE_ACTIVE: display_brightness(nvs_get_brightness(204)); break;
-    case IDLE_DIM:    display_brightness(IDLE_DIM_RAW);            break;
-    case IDLE_SLEEP:  display_brightness(0);                       break;
+    case IDLE_ACTIVE:
+      // Wake the panel BEFORE restoring brightness: 0x51 written while the driver is in sleep-in is
+      // not guaranteed to stick, which would leave the screen black after a wake tap.
+      if (display_is_asleep()) {
+        display_sleep(false);
+        // GRAM content is not trusted across a sleep cycle, and any invalidation that happened while
+        // we were asleep was flushed into a panel that wasn't scanning. Repaint everything once:
+        // invalidation is area-based, so the full screen area also covers lv_layer_top overlays.
+        lv_obj_invalidate(lv_scr_act());
+      }
+      display_brightness(nvs_get_brightness(204));
+      break;
+    case IDLE_DIM:
+      display_brightness(IDLE_DIM_RAW);   // still awake: dim is the "about to sleep" warning
+      break;
+    case IDLE_SLEEP:
+      display_brightness(0);   // blank first so the scan-out stop below is not visible as a flash
+      display_sleep(true);
+      break;
   }
   // #60: stop the carousel repaint tick while dim/asleep (no invalidations => no flushes => the panel
   // can sleep); resume + immediately refresh on wake. The brightness write above still runs first.
