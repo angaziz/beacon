@@ -15,6 +15,7 @@ static lv_obj_t*   s_list    = nullptr;
 static lv_obj_t*   s_toggle  = nullptr;
 static lv_obj_t*   s_add     = nullptr;   // add-network portal sub-overlay (or null)
 static lv_obj_t*   s_add_status = nullptr;
+static lv_obj_t*   s_empty_status = nullptr;   // inline empty-state portal status (no overlay)
 static bool        s_add_done = false;    // latch the "added" state so the tick stops overwriting it
 static lv_obj_t*   s_confirm = nullptr;   // forget-confirm sub-overlay (or null)
 static lv_timer_t* s_timer   = nullptr;
@@ -86,11 +87,29 @@ static void build_list(void) {
   lv_obj_clean(s_list);
   s_row_n = nvs_wifi_count();
   if (s_row_n > WIFI_MAX_SAVED) s_row_n = WIFI_MAX_SAVED;
+  s_empty_status = nullptr;             // lv_obj_clean above deleted any previous one
   if (s_row_n == 0) {
+    // Empty state carries the setup instructions INLINE rather than behind the blocking ADD overlay:
+    // with no networks saved, "add one" is the only thing this screen can be for, and the user must
+    // still be able to swipe away (Wi-Fi is optional -- the hub covers everything except markets).
     lv_obj_t* empty = lv_label_create(s_list); mklabel(empty, t->f_body, t->ink_dim);
     lv_label_set_text(empty, "no saved networks");
+
+    lv_obj_t* step = lv_label_create(s_list); mklabel(step, t->f_body, t->ink_dim);
+    lv_label_set_text(step, "on a phone, open Wi-Fi settings and join:");
+
+    lv_obj_t* ap = lv_label_create(s_list); mklabel(ap, t->f_display, t->accent);
+    lv_label_set_text(ap, provision_ap_ssid());
+
+    s_empty_status = lv_label_create(s_list); mklabel(s_empty_status, t->f_body, t->ink);
+    lv_label_set_long_mode(s_empty_status, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_empty_status, SCREEN_W - 4 * SAFE_INSET);
+    lv_label_set_text(s_empty_status, "starting setup...");
+
+    net_request_provision(true);        // net (Core-0) owns the radio; torn down when the panel closes
     return;
   }
+  net_request_provision(false);         // networks exist: never leave the setup AP up behind the list
   for (uint8_t i = 0; i < s_row_n; i++) {
     nvs_wifi_get_ssid(i, s_row_ssid[i], WIFI_SSID_CAP);
     lv_obj_t* row = lv_obj_create(s_list);
@@ -189,7 +208,22 @@ static void open_add(void) {
   lv_obj_add_event_cb(close, add_close_cb, LV_EVENT_CLICKED, NULL);
 }
 
-static void tick_cb(lv_timer_t*) { refresh(); add_tick(); }
+// Same portal lifecycle as add_tick, but for the inline empty state (no overlay, panel stays usable).
+static void empty_tick(void) {
+  if (!s_empty_status || s_add) return;   // the ADD overlay, when open, owns the portal instead
+  const beacon_theme_t* t = theme_active();
+  if (provision_runtime_saved()) {
+    provision_runtime_clear_saved();
+    build_list();                          // now non-empty: rebuild drops the instructions + AP
+    refresh();
+    return;
+  }
+  txt_set(s_empty_status, provision_active() ? "join \"Beacon-setup\", then enter your Wi-Fi"
+                                             : "starting setup...");
+  txt_color(s_empty_status, t->ink);
+}
+
+static void tick_cb(lv_timer_t*) { refresh(); add_tick(); empty_tick(); }
 
 // --- controls ---------------------------------------------------------------
 static void back_cb(lv_event_t*)   { close_panel(); }
@@ -199,10 +233,12 @@ static void add_cb(lv_event_t*)    { open_add(); }
 static void close_panel(void) {
   if (!s_root) return;
   if (s_timer) { lv_timer_del(s_timer); s_timer = nullptr; }
-  if (s_add) net_request_provision(false);   // never leave the setup AP up after the panel closes
+  // Unconditional: the empty state brings the portal up too, so gating this on s_add would strand the
+  // AP running after the panel closes.
+  net_request_provision(false);
   lv_obj_del(s_root);                         // also deletes the s_add / s_confirm children
   s_root = s_status = s_list = s_toggle = s_confirm = nullptr;
-  s_add = s_add_status = nullptr;
+  s_add = s_add_status = s_empty_status = nullptr;
   s_row_n = 0;
   carousel_set_swipe_enabled(true);   // unconditional restore — never leave the carousel frozen
 }

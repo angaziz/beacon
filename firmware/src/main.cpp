@@ -39,10 +39,8 @@ static lv_obj_t* setup_step(lv_obj_t* card, const beacon_theme_t* t, const char*
   return l;
 }
 
-// First-boot / re-provision setup card: a clear, step-by-step instruction. The SSID is framed as a
-// network (accent pill) so it reads as a Wi-Fi name to join from another device, not a label.
-static void show_provision_overlay(void) {
-  const beacon_theme_t* t = theme_active();
+// Shared card chrome for the two first-boot overlays below.
+static lv_obj_t* make_setup_card(const beacon_theme_t* t) {
   lv_obj_t* card = lv_obj_create(lv_layer_top());
   lv_obj_remove_style_all(card);
   lv_obj_set_width(card, 344);
@@ -59,12 +57,51 @@ static void show_provision_overlay(void) {
   lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
   lv_obj_set_style_pad_row(card, 11, 0);
+  return card;
+}
 
+static lv_obj_t* card_eyebrow(lv_obj_t* card, const beacon_theme_t* t, const char* txt) {
   lv_obj_t* eb = lv_label_create(card);
   lv_obj_set_style_text_color(eb, t->ink_dim, 0);
   lv_obj_set_style_text_letter_space(eb, 3, 0);
-  lv_label_set_text(eb, "WI-FI SETUP");
+  lv_label_set_text(eb, txt);
+  return eb;
+}
 
+// First-boot card when no Wi-Fi is saved. Wi-Fi is OPTIONAL: usage, sessions, permission prompts and
+// (since the hub weather frame) weather all arrive over BLE, and the clock runs off the RTC. So the
+// first thing to tell a new user is to pair the hub -- not to go set up Wi-Fi they may never need.
+// Wi-Fi provisioning now lives in Settings > Wi-Fi, on demand.
+static lv_obj_t* s_hub_card = nullptr;
+
+static void show_hub_overlay(void) {
+  const beacon_theme_t* t = theme_active();
+  lv_obj_t* card = make_setup_card(t);
+  s_hub_card = card;
+
+  card_eyebrow(card, t, "CONNECT THE HUB");
+  setup_step(card, t, "1  On your Mac, install and open the Beacon Hub app");
+  setup_step(card, t, "2  Bluetooth pairing starts automatically -- confirm the passkey shown on the Mac");
+  setup_step(card, t, "3  That's it. Usage, sessions and weather arrive over Bluetooth.");
+  setup_step(card, t, "Wi-Fi is optional and only adds the markets screen. Add it any time in Settings > Wi-Fi.");
+}
+
+// Drop the card once the hub is actually connected -- that IS the success signal it was asking for.
+static void hub_card_tick(lv_timer_t* tm) {
+  if (!s_hub_card) { lv_timer_del(tm); return; }
+  if (!hub_is_connected()) return;
+  lv_obj_del(s_hub_card);
+  s_hub_card = nullptr;
+  lv_timer_del(tm);
+}
+
+// Touch-hold recovery only: host the AP and show how to reach it. The SSID is framed as a network
+// (accent pill) so it reads as a Wi-Fi name to join from another device, not a label.
+static void show_provision_overlay(void) {
+  const beacon_theme_t* t = theme_active();
+  lv_obj_t* card = make_setup_card(t);
+
+  card_eyebrow(card, t, "WI-FI SETUP");
   setup_step(card, t, "1  On a phone, tablet, or laptop, open its Wi-Fi settings");
   setup_step(card, t, "2  Join this Wi-Fi network:");
 
@@ -123,10 +160,17 @@ void setup() {
   rotation_init();   // after carousel_init: ui_busy() reads carousel_root(), and apply() repaints it
   idle_init();
 #if !BEACON_CAPTURE
-  if (provision_needed() || force_provision) {   // first boot OR touch-hold recovery: host the setup AP
+  if (force_provision) {           // touch-hold recovery: host the setup AP right away
     provision_begin();
     show_provision_overlay();
   } else {
+    // No saved Wi-Fi is NOT a provisioning emergency any more: point the user at the hub instead and
+    // leave the setup AP down (an idle AP is pure battery cost on a device that may never need Wi-Fi).
+    // net_begin() runs either way so a network added later in Settings > Wi-Fi connects without a reboot.
+    if (provision_needed()) {
+      show_hub_overlay();
+      lv_timer_create(hub_card_tick, 500, NULL);
+    }
     net_begin();                   // WiFi STA from NVS creds; starts NTP on GOT_IP (non-blocking)
   }
 #endif
