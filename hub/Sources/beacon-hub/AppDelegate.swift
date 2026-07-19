@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let firstRun = FirstRunWindowController()
     private let forgetWindow = ForgetWindowController()
     private let location = LocationProvider()
+    private let weather = WeatherPoller()   // Open-Meteo on the device's behalf, so its radio can stay down
     private let tickerStore = TickerConfigStore()   // desired ticker list + monotonic rev (issue #92)
     private var reportAssembler = ReportAssembler()   // reassembles device->hub ticker report chunks (#105)
     private let tickerSearch = TickerSearch()        // Binance(cached) + Yahoo(live) discovery (issue #92 B4)
@@ -53,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startFirstRun()
         startLoginItem()
         startLocation()
+        startWeather()
         startTickerEditor()
 
         // Heartbeat resends the full frame WITHOUT loc (issue #54): location rides the (re)connect frame
@@ -215,6 +217,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.reportAssembler.reset()   // discard any partial device report from a prior connection (#105)
                 self?.sendFullFrame(includeLocation: true)
                 if let data = try? SessionsFrame(self?.sessions ?? []).encoded() { self?.central.send(data) }
+                // Replay the cached reading so a freshly-connected device does not wait out a full
+                // 10-minute cadence for its first weather.
+                if let w = self?.weather.last { self?.sendWeather(w) }
                 self?.pushTickerConfig()
             }
         }
@@ -246,6 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         bridge?.setDeviceConnected(connected)
         poller.setDeviceConnected(connected)   // #64: back off the usage poll cadence while disconnected.
+        weather.setDeviceConnected(connected)  // no live device => no reason to hold the weather poll.
 
         // Drive the first-run window from the SAME phase stream (no second CBCentralManager): Bluetooth
         // is bad only when powered-off/unauthorized/unavailable; paired tracks live .connected.
@@ -401,8 +407,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // On-change push: a loc-only frame (the device keeps its usage/buddy). The provider only
             // fires on a meaningful change, so this is naturally throttled.
             self.sendFrame(StatusFrame(loc: fix))
+            // Same fix drives the weather poll -- no second permission, and a move refetches for the
+            // new place rather than serving the old one until the cadence expires.
+            self.weather.setCoordinate(lat: fix.lat, lon: fix.lon)
         }
         location.start()
+    }
+
+    // --- weather (hub-sourced, CONTRACT.md §A) ---
+
+    // Standalone frame, like sessions. No fix yet => the poller stays idle and sends nothing, and the
+    // device falls back to fetching Open-Meteo itself.
+    private func startWeather() {
+        weather.onWeather = { [weak self] w in
+            Task { @MainActor in self?.sendWeather(w) }
+        }
+        weather.start()
+    }
+
+    private func sendWeather(_ w: Weather) {
+        guard central.isConnected else { return }
+        do {
+            central.send(try WeatherFrame(w).encoded())
+        } catch {
+            FileHandle.standardError.write(Data("[beacon-hub] weather frame encode failed: \(error.localizedDescription)\n".utf8))
+        }
     }
 
     // --- frame send ---

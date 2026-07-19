@@ -62,6 +62,30 @@ on any session-state change and on (re)connect; parsed by `hub_parse_sessions` i
 - Migration: `buddy.entries` stays emitted/legal for back-compat; new firmware reads `sessions` and
   ignores `entries`, old firmware ignores the unknown `sessions` frame. No version bump.
 
+Optional `weather` block (additive `v:1` extension, design `docs/specs/2026-07-19-hub-weather-and-wifi-off-design.md`).
+A **standalone** frame, for the same budget reason as `sessions`. The hub fetches Open-Meteo over the
+Mac's connection — the same upstream the device calls — using the CoreLocation coordinates it already
+sources for `loc`, and forwards a normalized current-conditions result. This lets the device serve the
+Home screen with its Wi-Fi radio down; parsed by `hub_parse_weather`.
+
+```json
+{"v":1,"weather":{"temp_c":21.4,"rh":58,"wmo":3,"ts":1721390000}}
+```
+- `temp_c` float celsius; `rh` integer 0..100 relative humidity; `wmo` the Open-Meteo
+  `current.weather_code`, consumed by the device's existing `WMO_MAP` (`config/location.h`) — the
+  code->label/icon table is unchanged and stays device-side.
+- `ts` is the epoch second of the **hub's successful upstream fetch**, not of the frame. The device
+  stamps it into `weather_rec_t.hdr.last_updated`, so the existing staleness/ageing logic is untouched.
+- All four fields are required. A partial or malformed block is rejected whole (parser returns false)
+  and the device keeps its last values — same rule as the other blocks.
+- Emitted on (re)connect and on the hub's poll (600 s, matching the device's `WEATHER_CADENCE_S`, so
+  this moves the upstream request rather than adding one). **Never** on the 30 s heartbeat.
+- Device precedence: while the hub link is up and its weather is younger than 1500 s (2.5 cadences),
+  the device skips its own Open-Meteo slot entirely — including when Wi-Fi is on, which is where the
+  power saving comes from. It falls back to its own fetch when the hub weather ages out or the link
+  drops and Wi-Fi is enabled.
+- Old firmware ignores the unknown frame and keeps fetching for itself. No version bump.
+
 ## B. Device -> hub commands + hub acks (FROZEN, `tech.md` §7.1)
 
 ```json

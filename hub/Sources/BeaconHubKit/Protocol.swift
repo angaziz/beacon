@@ -112,6 +112,32 @@ public struct SessionsFrame: Codable {
     }
 }
 
+// Current conditions, normalized from Open-Meteo by the hub (CONTRACT.md §A). Carried so the device
+// can serve the Home screen with its Wi-Fi radio down. `wmo` stays an opaque code here -- the
+// code->label/icon table (WMO_MAP) is device-side and is not duplicated on the hub.
+public struct Weather: Codable, Equatable {
+    public var temp_c: Double
+    public var rh: Int              // relative humidity, 0..100
+    public var wmo: Int             // Open-Meteo current.weather_code
+    public var ts: Int              // epoch seconds of the hub's successful fetch, NOT of the frame
+    public init(temp_c: Double, rh: Int, wmo: Int, ts: Int) {
+        self.temp_c = temp_c; self.rh = rh; self.wmo = wmo; self.ts = ts
+    }
+}
+
+// Standalone hub->device frame, for the same budget reason as SessionsFrame: the combined
+// usage+buddy+loc frame already nears HUB_FRAME_MAX. Old firmware ignores it and keeps fetching
+// Open-Meteo for itself.
+public struct WeatherFrame: Codable {
+    public var weather: Weather
+    public let v: Int
+    public init(_ weather: Weather) { self.weather = weather; self.v = 1 }
+    public func encoded() throws -> Data {
+        let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
+        var d = try enc.encode(self); d.append(0x0A); return d
+    }
+}
+
 // One hub->device status frame. usage/buddy/loc are independently optional (send what changed; the
 // device keeps an absent block's last values). encoded() emits the §7.1 wire form with "v":1 + a \n.
 public struct StatusFrame: Codable {
