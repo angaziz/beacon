@@ -2,6 +2,7 @@
 #include "core/datastore.h"
 #include "core/net.h"
 #include "core/timekeep.h"
+#include "core/hub_task.h"   // hub_weather_is_fresh: hub-sourced weather supersedes our own fetch
 #include "fetch/weather.h"
 #include "fetch/finance.h"
 #include "fetch/geoip.h"
@@ -46,9 +47,19 @@ static data_err_t run_slot(int slot) {
   return (slot == SRC_WEATHER) ? fetch_weather() : fetch_finance((uint8_t)(slot - 1));
 }
 
+// Hub-sourced weather supersedes our own fetch (CONTRACT.md §A). Skipping the slot even while WiFi is
+// UP is the point: gating on WiFi-off alone would leave the radio waking every 10 min in the common
+// case (hub connected AND WiFi on), which is exactly the power the hub path exists to save.
+static bool slot_suppressed(int slot, uint32_t now) {
+  return slot == SRC_WEATHER && hub_weather_is_fresh(now);
+}
+
 // Flip all device-plane records to ST_OFFLINE when the link drops (don't fetch while down).
 static void mark_offline(void) {
-  ds_set_state_weather(ST_OFFLINE, ERR_NO_ROUTE);
+  // ...except weather while the hub is feeding it: that reading is live and arrived over BLE, so
+  // flipping it OFFLINE on a WiFi drop would blank a screen that is in fact still current.
+  if (!hub_weather_is_fresh((uint32_t)timekeep_now()))
+    ds_set_state_weather(ST_OFFLINE, ERR_NO_ROUTE);
   for (uint8_t i = 0; i < ds_get_finance_count(); i++) ds_set_state_finance(i, ST_OFFLINE, ERR_NO_ROUTE);
 }
 
@@ -97,10 +108,12 @@ static void fetch_task(void*) {
           const char* openh = net_open_host();
           if (openh[0])
             for (int i = 0; i < slots; i++)
-              if (s_next_due[i] <= now && strcmp(slot_host(i), openh) == 0) { pick = i; break; }
+              if (s_next_due[i] <= now && !slot_suppressed(i, now)
+                  && strcmp(slot_host(i), openh) == 0) { pick = i; break; }
           if (pick < 0)
             for (int i = 0; i < slots; i++)
-              if (s_next_due[i] <= now && s_next_due[i] < oldest) { oldest = s_next_due[i]; pick = i; }
+              if (s_next_due[i] <= now && !slot_suppressed(i, now)
+                  && s_next_due[i] < oldest) { oldest = s_next_due[i]; pick = i; }
           if (pick >= 0) {
             data_err_t e = run_slot(pick);
             now = (uint32_t)timekeep_now();       // fetch blocks; re-read clock for scheduling

@@ -140,6 +140,28 @@ bool hub_parse_loc(const char* json, size_t len, hub_loc_t* out) {
   return true;
 }
 
+bool hub_parse_weather(const char* json, size_t len, weather_rec_t* out) {
+  if (!out) return false;
+  JsonDocument doc;
+  if (deserializeJson(doc, json, len)) return false;   // not valid JSON
+  if ((doc["v"] | 0) != 1) return false;               // unknown major version => ignore
+  JsonVariantConst w = doc["weather"];
+  if (w.isNull()) return false;                        // no weather block in this frame
+  // Required, all four: a partial block is rejected whole so the caller keeps its last values
+  // (CONTRACT.md §A) rather than showing a reading half-built from defaults.
+  if (w["temp_c"].isNull() || w["rh"].isNull() || w["wmo"].isNull() || w["ts"].isNull()) return false;
+
+  out->temp_c       = w["temp_c"].as<float>();
+  out->humidity_pct = w["rh"].as<float>();
+  out->wmo_code     = w["wmo"].as<uint16_t>();
+  // The hub's fetch time, not the frame's arrival: the record must age against when the reading was
+  // actually taken, exactly as the device's own fetch stamps it.
+  out->hdr.last_updated = w["ts"].as<uint32_t>();
+  out->hdr.state        = ST_LIVE;
+  out->hdr.err          = ERR_NONE;
+  return true;
+}
+
 // Serialize `doc` into buf as a newline-terminated frame. Returns bytes (incl. '\n', excl. NUL) or 0.
 static size_t finish_frame(JsonDocument& doc, char* buf, size_t cap) {
   size_t need = measureJson(doc);

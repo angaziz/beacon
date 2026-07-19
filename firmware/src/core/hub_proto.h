@@ -53,6 +53,21 @@ typedef struct { float lat, lon; char tz[40]; char name[48]; } hub_loc_t;
 // to their capacities. Kept separate from hub_parse_status so existing callers/tests stay unchanged.
 bool hub_parse_loc(const char* json, size_t len, hub_loc_t* out);
 
+// --- Inbound: hub -> device weather frame (CONTRACT.md §A) ---
+// Parse {"v":1,"weather":{"temp_c":21.4,"rh":58,"wmo":3,"ts":...}} into *out. A standalone frame (the
+// combined status frame already nears HUB_FRAME_MAX), so it is parsed on its own like sessions.
+//
+// The hub fetches the SAME Open-Meteo endpoint fetch/weather.cpp calls, letting the device serve Home
+// with its Wi-Fi radio down. `wmo` stays the raw Open-Meteo code -- WMO_MAP (config/location.h) does
+// the code->label/icon mapping device-side, unchanged.
+//
+// All four fields are required: a partial block is rejected whole (returns false, *out untouched) so
+// the caller keeps its last values. Fills hdr.last_updated from `ts` (the hub's fetch time, NOT the
+// frame's arrival) and marks the record ST_LIVE, so the existing ageing/staleness logic applies
+// identically to hub- and device-sourced readings. Returns false on invalid JSON, v != 1, or no
+// "weather" object.
+bool hub_parse_weather(const char* json, size_t len, weather_rec_t* out);
+
 // --- Inbound: hub -> device sessions frame ---
 // Parse {"v":1,"sessions":[...]} into buddy->sessions[] (capped at BUDDY_SESSIONS_MAX, labels
 // truncated, unknown state strings => BST_WORKING). Sets *had_sessions true when a "sessions"

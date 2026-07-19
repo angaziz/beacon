@@ -24,12 +24,33 @@ static bool frame_has(const char* j, size_t n, const char* key) {
 
 static HubLinkBle s_link;
 static HubLink*   g_link = nullptr;   // null until the task starts (BEACON_DEV leaves it null)
-static bool       s_was_connected = false;
+static volatile bool s_was_connected = false;   // also read from Core-1 (hub_is_connected)
 static bool       s_reported = false;   // emitted the once-per-connection ticker report? (issue #105)
 static uint32_t   s_min_int_free  = UINT32_MAX;
 
 // Reassembled-across-parts config snapshot (design §2). Single-threaded: on_frame runs only on Core-0.
 static config_accum_t s_cfg_accum;
+
+// Fetch timestamp of the newest hub-sourced weather reading (CONTRACT.md §A); 0 => none this boot.
+// Written by on_frame and read by fetch_task -- both Core-0, but volatile + a 32-bit aligned word so
+// the read is atomic even if that ever changes.
+static volatile uint32_t s_hub_weather_ts = 0;
+
+// 2.5x the 600 s hub poll cadence: tolerates one missed poll before the device takes the fetch back,
+// so a single transient hub failure doesn't cost a radio wakeup, but a dead hub does age out.
+#define HUB_WEATHER_FRESH_S 1500u
+
+bool     hub_is_connected(void)              { return s_was_connected; }
+
+void     hub_note_weather(uint32_t fetch_ts) { s_hub_weather_ts = fetch_ts; }
+uint32_t hub_weather_ts(void)                { return s_hub_weather_ts; }
+
+bool hub_weather_is_fresh(uint32_t now) {
+  uint32_t ts = s_hub_weather_ts;
+  if (!ts || !now) return false;        // nothing received, or no trustworthy clock yet
+  if (now < ts) return true;            // hub clock slightly ahead of ours: treat as just-fetched
+  return (now - ts) < HUB_WEATHER_FRESH_S;
+}
 
 // Send a config_ack back to the hub over the SAME link permission acks use (g_link->send). On the
 // native host g_link is always null (no BLE), so this no-ops there.
@@ -133,6 +154,16 @@ static void on_frame(const char* json, size_t len) {
     location_set_from_hub(loc.lat, loc.lon, loc.tz, loc.name);
     if (loc.tz[0] && timekeep_tz_supported(loc.tz)) timekeep_set_tz(loc.tz);
   }
+
+  // A weather frame (CONTRACT.md §A) is standalone like sessions. The hub fetched the same Open-Meteo
+  // endpoint on our behalf so the Wi-Fi radio can stay down; ds_set_weather is the same sink the
+  // device's own fetcher writes to, and the parser already stamped the hub's fetch time + ST_LIVE.
+  { weather_rec_t w = ds_get_weather();
+    if (hub_parse_weather(json, len, &w)) {
+      ds_set_weather(&w);
+      hub_note_weather(w.hdr.last_updated);   // fetch_task consults this to skip its own weather slot
+      return;
+    } }
 
   // A sessions frame arrives independently of the buddy frame; merge ONLY sessions into the buddy record.
   { buddy_rec_t tmp; bool had = false;

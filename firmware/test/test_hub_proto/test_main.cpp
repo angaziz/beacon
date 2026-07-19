@@ -246,6 +246,64 @@ static void test_parse_loc_truncates(void) {
   TEST_ASSERT_EQUAL_size_t(sizeof(l.name) - 1, strlen(l.name));
 }
 
+// ===== weather (hub-sourced, CONTRACT.md §A) =====
+
+static void test_parse_weather_present(void) {
+  const char* j = "{\"v\":1,\"weather\":{\"temp_c\":21.4,\"rh\":58,\"wmo\":3,\"ts\":1721390000}}";
+  weather_rec_t w; memset(&w, 0, sizeof(w));
+  TEST_ASSERT_TRUE(hub_parse_weather(j, strlen(j), &w));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 21.4f, w.temp_c);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 58.0f, w.humidity_pct);
+  TEST_ASSERT_EQUAL_UINT16(3, w.wmo_code);
+  // ts is the hub's FETCH time, not the frame's arrival: the record ages against when the reading
+  // was taken, same as the device's own fetch.
+  TEST_ASSERT_EQUAL_UINT32(1721390000u, w.hdr.last_updated);
+  TEST_ASSERT_EQUAL(ST_LIVE, w.hdr.state);
+  TEST_ASSERT_EQUAL(ERR_NONE, w.hdr.err);
+}
+
+static void test_parse_weather_absent_or_bad(void) {
+  weather_rec_t w; memset(&w, 0, sizeof(w));
+  TEST_ASSERT_FALSE(hub_parse_weather(FRAME_FULL, strlen(FRAME_FULL), &w));   // no "weather" block
+  const char* v2 = "{\"v\":2,\"weather\":{\"temp_c\":1,\"rh\":1,\"wmo\":1,\"ts\":1}}";
+  TEST_ASSERT_FALSE(hub_parse_weather(v2, strlen(v2), &w));                   // wrong major version
+  const char* junk = "not json";
+  TEST_ASSERT_FALSE(hub_parse_weather(junk, strlen(junk), &w));
+}
+
+static void test_parse_weather_partial_rejected_whole(void) {
+  // Every field is required: a partial block must leave the caller's record untouched rather than
+  // half-filling it with defaults (CONTRACT.md §A).
+  weather_rec_t w; memset(&w, 0, sizeof(w));
+  w.temp_c = 12.5f; w.wmo_code = 7; w.hdr.last_updated = 999u;
+
+  const char* no_ts  = "{\"v\":1,\"weather\":{\"temp_c\":21.4,\"rh\":58,\"wmo\":3}}";
+  const char* no_rh  = "{\"v\":1,\"weather\":{\"temp_c\":21.4,\"wmo\":3,\"ts\":5}}";
+  const char* no_t   = "{\"v\":1,\"weather\":{\"rh\":58,\"wmo\":3,\"ts\":5}}";
+  const char* no_wmo = "{\"v\":1,\"weather\":{\"temp_c\":21.4,\"rh\":58,\"ts\":5}}";
+  TEST_ASSERT_FALSE(hub_parse_weather(no_ts,  strlen(no_ts),  &w));
+  TEST_ASSERT_FALSE(hub_parse_weather(no_rh,  strlen(no_rh),  &w));
+  TEST_ASSERT_FALSE(hub_parse_weather(no_t,   strlen(no_t),   &w));
+  TEST_ASSERT_FALSE(hub_parse_weather(no_wmo, strlen(no_wmo), &w));
+
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.5f, w.temp_c);          // untouched
+  TEST_ASSERT_EQUAL_UINT16(7, w.wmo_code);
+  TEST_ASSERT_EQUAL_UINT32(999u, w.hdr.last_updated);
+}
+
+static void test_parse_weather_standalone_frame(void) {
+  // Like sessions, weather rides its own frame; hub_parse_status must still accept it as a valid v:1
+  // frame with no blocks so hub_task does not log it as bad.
+  const char* j = "{\"v\":1,\"weather\":{\"temp_c\":-4.5,\"rh\":91,\"wmo\":71,\"ts\":1721390000}}";
+  weather_rec_t w; memset(&w, 0, sizeof(w));
+  TEST_ASSERT_TRUE(hub_parse_weather(j, strlen(j), &w));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, -4.5f, w.temp_c);          // sub-zero must survive the float round-trip
+  usage_rec_t u; buddy_rec_t b; bool hu, hb;
+  memset(&u, 0, sizeof(u)); memset(&b, 0, sizeof(b));
+  TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
+  TEST_ASSERT_FALSE(hu); TEST_ASSERT_FALSE(hb);
+}
+
 // ===== command build =====
 
 static void test_build_permission_roundtrips(void) {
@@ -489,6 +547,10 @@ int main(int, char**) {
   RUN_TEST(test_parse_loc_only_frame);
   RUN_TEST(test_parse_loc_absent);
   RUN_TEST(test_parse_loc_truncates);
+  RUN_TEST(test_parse_weather_present);
+  RUN_TEST(test_parse_weather_absent_or_bad);
+  RUN_TEST(test_parse_weather_partial_rejected_whole);
+  RUN_TEST(test_parse_weather_standalone_frame);
   RUN_TEST(test_build_permission_roundtrips);
   RUN_TEST(test_build_permission_deny);
   RUN_TEST(test_build_overflow_returns_zero);

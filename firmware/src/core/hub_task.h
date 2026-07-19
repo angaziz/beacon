@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stdint.h>
 
 // Hub-plane wiring (P2, Core-0). Owns the Bluedroid HubLink: pumps loop(), routes inbound status
 // frames into ds_set_usage/ds_set_buddy, flips to ST_HUB_OFFLINE on disconnect, and tracks the
@@ -10,6 +11,23 @@ extern "C" {
 #endif
 
 void hub_task_start(void);
+
+// True while a central (the macOS hub) is connected over BLE. Read from Core-1 (the UI) to drop the
+// first-boot "pair with the hub" card once pairing actually succeeds.
+bool hub_is_connected(void);
+
+// --- hub-sourced weather (CONTRACT.md §A) ---
+// The hub polls Open-Meteo on our behalf so the Wi-Fi radio can stay down. hub_task records the
+// arriving reading's fetch timestamp here; fetch_task (also Core-0) reads it to decide whether to skip
+// its own weather slot. Kept as a plain timestamp rather than a bool so the fallback is time-based:
+// a hub that stops sending ages out on its own without needing a disconnect event.
+// 0 => nothing received this boot. Both are cheap enough to call from either task.
+void     hub_note_weather(uint32_t fetch_ts);
+uint32_t hub_weather_ts(void);
+
+// True when hub weather is fresh enough that the device should NOT spend a fetch (and a radio wakeup)
+// on its own. `now` is wall-clock epoch seconds; a zero/unknown clock reports false.
+bool     hub_weather_is_fresh(uint32_t now);
 
 // Device->hub permission decision, safe to call from Core-1 (the buddy decide path). Builds the §7.1
 // command frame and enqueues it via HubLink::send (which copies + is thread-safe). Returns true if
