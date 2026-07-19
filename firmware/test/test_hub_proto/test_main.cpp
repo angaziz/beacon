@@ -18,12 +18,14 @@ static void cap_reset(void) { g_count = 0; }
 
 // Canonical tech.md §7.1 status frame (the device-facing schema is frozen).
 static const char* FRAME_FULL =
-  "{\"v\":1,\"usage\":{\"claude\":{\"h5\":{\"pct\":24,\"reset\":1717600000},"
-  "\"d7\":{\"pct\":24,\"reset\":1717800000}},"
-  "\"codex\":{\"h5\":{\"pct\":1,\"reset\":1717590000},\"d7\":{\"pct\":29,\"reset\":1717800000}}},"
+  "{\"v\":1,\"usage\":{\"providers\":["
+  "{\"id\":\"claude\",\"label\":\"CLAUDE\",\"h5\":{\"pct\":24,\"reset\":1717600000},"
+  "\"d7\":{\"pct\":24,\"reset\":1717800000},\"stale\":true},"
+  "{\"id\":\"codex\",\"label\":\"CODEX\",\"h5\":{\"pct\":1,\"reset\":1717590000},"
+  "\"d7\":{\"pct\":29,\"reset\":1717800000}}]},"
   "\"buddy\":{\"running\":2,\"waiting\":1,\"tokens\":184502,\"context_pct\":42,"
   "\"entries\":[\"10:42 git push\",\"10:41 yarn test\"],"
-  "\"prompt\":{\"id\":\"req_abc\",\"tool\":\"Bash\",\"hint\":\"rm -rf /tmp/build\"}}}";
+  "\"prompt\":{\"id\":\"req_abc\",\"agent\":\"claude\",\"tool\":\"Bash\",\"hint\":\"rm -rf /tmp/build\"}}}";
 
 // ===== reassembly =====
 
@@ -88,9 +90,16 @@ static void test_parse_full_frame(void) {
   memset(&u, 0, sizeof(u)); memset(&b, 0, sizeof(b));
   TEST_ASSERT_TRUE(hub_parse_status(FRAME_FULL, strlen(FRAME_FULL), &u, &hu, &b, &hb));
   TEST_ASSERT_TRUE(hu); TEST_ASSERT_TRUE(hb);
-  TEST_ASSERT_EQUAL_INT16(24, u.claude.h5.pct);
-  TEST_ASSERT_EQUAL_UINT32(1717600000, u.claude.h5.reset);
-  TEST_ASSERT_EQUAL_INT16(29, u.codex.d7.pct);
+  TEST_ASSERT_EQUAL_UINT8(2, u.count);
+  TEST_ASSERT_EQUAL_STRING("claude", u.p[0].id);
+  TEST_ASSERT_EQUAL_STRING("CLAUDE", u.p[0].label);
+  TEST_ASSERT_EQUAL_INT16(24, u.p[0].h5.pct);
+  TEST_ASSERT_EQUAL_UINT32(1717600000, u.p[0].h5.reset);
+  TEST_ASSERT_TRUE(u.p[0].stale);                  // "stale":true
+  TEST_ASSERT_EQUAL_STRING("codex", u.p[1].id);
+  TEST_ASSERT_EQUAL_STRING("CODEX", u.p[1].label);
+  TEST_ASSERT_EQUAL_INT16(29, u.p[1].d7.pct);
+  TEST_ASSERT_FALSE(u.p[1].stale);                 // absent => live
   TEST_ASSERT_EQUAL_UINT8(2, b.running);
   TEST_ASSERT_EQUAL_UINT8(1, b.waiting);
   TEST_ASSERT_EQUAL_UINT32(184502, b.tokens);
@@ -99,36 +108,96 @@ static void test_parse_full_frame(void) {
   TEST_ASSERT_EQUAL_STRING("10:42 git push", b.entries[0]);
   TEST_ASSERT_TRUE(b.prompt.present);
   TEST_ASSERT_EQUAL_STRING("req_abc", b.prompt.id);
+  TEST_ASSERT_EQUAL_STRING("claude", b.prompt.agent);   // additive agent field
   TEST_ASSERT_EQUAL_STRING("Bash", b.prompt.tool);
   TEST_ASSERT_EQUAL_STRING("rm -rf /tmp/build", b.prompt.hint);
 }
 
+// Build a providers array of `n` trivial entries (id "pN"/label "PN"). Used for count cases.
+static void make_providers(char* buf, size_t cap, int n) {
+  size_t o = (size_t)snprintf(buf, cap, "{\"v\":1,\"usage\":{\"providers\":[");
+  for (int i = 0; i < n; i++) {
+    o += (size_t)snprintf(buf + o, cap - o,
+      "%s{\"id\":\"p%d\",\"label\":\"P%d\",\"h5\":{\"pct\":%d,\"reset\":1},\"d7\":{\"pct\":%d,\"reset\":2}}",
+      i ? "," : "", i, i, i, i + 10);
+  }
+  snprintf(buf + o, cap - o, "]}}");
+}
+
+// Table: 0/1/2/4 providers parse to that count; 5+ truncate to USAGE_PROVIDERS_MAX (4).
+static void test_parse_providers_count_table(void) {
+  struct { int sent, expect; } c[] = { {0,0}, {1,1}, {2,2}, {4,4}, {5,4}, {7,4} };
+  for (size_t k = 0; k < sizeof(c)/sizeof(c[0]); k++) {
+    char j[1024]; make_providers(j, sizeof(j), c[k].sent);
+    usage_rec_t u; buddy_rec_t b; bool hu, hb;
+    memset(&u, 0, sizeof(u)); memset(&b, 0, sizeof(b));
+    TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
+    TEST_ASSERT_TRUE(hu);
+    TEST_ASSERT_EQUAL_UINT8(c[k].expect, u.count);
+    if (c[k].expect > 0) {
+      TEST_ASSERT_EQUAL_STRING("p0", u.p[0].id);
+      TEST_ASSERT_EQUAL_INT16(0, u.p[0].h5.pct);
+      TEST_ASSERT_EQUAL_INT16(10, u.p[0].d7.pct);
+    }
+    if (c[k].expect == USAGE_PROVIDERS_MAX)
+      TEST_ASSERT_EQUAL_STRING("p3", u.p[3].id);   // first 4 kept, extras dropped
+  }
+}
+
+static void test_parse_id_label_truncation(void) {
+  // id 20 chars, label 20 chars => truncated to capacity-1 (12 / 10).
+  const char* j = "{\"v\":1,\"usage\":{\"providers\":[{"
+                  "\"id\":\"abcdefghijklmnopqrst\",\"label\":\"ABCDEFGHIJKLMNOPQRST\","
+                  "\"h5\":{\"pct\":5,\"reset\":1},\"d7\":{\"pct\":6,\"reset\":2}}]}}";
+  usage_rec_t u; buddy_rec_t b; bool hu, hb;
+  memset(&u, 0, sizeof(u)); memset(&b, 0, sizeof(b));
+  TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
+  TEST_ASSERT_EQUAL_UINT8(1, u.count);
+  TEST_ASSERT_EQUAL_size_t(USAGE_ID_LEN - 1, strlen(u.p[0].id));
+  TEST_ASSERT_EQUAL_STRING_LEN("abcdefghijkl", u.p[0].id, USAGE_ID_LEN - 1);
+  TEST_ASSERT_EQUAL_size_t(USAGE_LABEL_LEN - 1, strlen(u.p[0].label));
+  TEST_ASSERT_EQUAL_STRING_LEN("ABCDEFGHIJ", u.p[0].label, USAGE_LABEL_LEN - 1);
+}
+
 static void test_parse_null_and_missing_windows(void) {
-  // claude.h5.pct explicitly null; codex provider entirely absent => all unavailable (-1).
-  const char* j = "{\"v\":1,\"usage\":{\"claude\":{\"h5\":{\"pct\":null,\"reset\":0},"
-                  "\"d7\":{\"pct\":50,\"reset\":123}}}}";
+  // h5.pct explicitly null => -1; d7 window entirely absent => -1 (unavailable).
+  const char* j = "{\"v\":1,\"usage\":{\"providers\":[{"
+                  "\"id\":\"claude\",\"label\":\"CLAUDE\",\"h5\":{\"pct\":null,\"reset\":0}}]}}";
   usage_rec_t u; buddy_rec_t b; bool hu, hb;
   memset(&u, 0, sizeof(u)); memset(&b, 0, sizeof(b));
   TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
   TEST_ASSERT_TRUE(hu); TEST_ASSERT_FALSE(hb);
-  TEST_ASSERT_EQUAL_INT16(-1, u.claude.h5.pct);   // explicit JSON null
-  TEST_ASSERT_EQUAL_INT16(50, u.claude.d7.pct);
-  TEST_ASSERT_EQUAL_INT16(-1, u.codex.h5.pct);    // missing provider
-  TEST_ASSERT_EQUAL_INT16(-1, u.codex.d7.pct);
+  TEST_ASSERT_EQUAL_UINT8(1, u.count);
+  TEST_ASSERT_EQUAL_INT16(-1, u.p[0].h5.pct);   // explicit JSON null
+  TEST_ASSERT_EQUAL_INT16(-1, u.p[0].d7.pct);   // absent window
 }
 
 static void test_parse_stale_flag(void) {
-  // #108: per-provider stale. Present+true => stale; absent => live (false). Claude stale, Codex live.
-  const char* j = "{\"v\":1,\"usage\":{"
-                  "\"claude\":{\"stale\":true,\"h5\":{\"pct\":24,\"reset\":1},\"d7\":{\"pct\":32,\"reset\":2}},"
-                  "\"codex\":{\"h5\":{\"pct\":1,\"reset\":3},\"d7\":{\"pct\":0,\"reset\":4}}}}";
+  // #108: per-provider stale. Present+true => stale; absent => live (false).
+  const char* j = "{\"v\":1,\"usage\":{\"providers\":["
+                  "{\"id\":\"claude\",\"label\":\"CLAUDE\",\"stale\":true,\"h5\":{\"pct\":24,\"reset\":1},\"d7\":{\"pct\":32,\"reset\":2}},"
+                  "{\"id\":\"codex\",\"label\":\"CODEX\",\"h5\":{\"pct\":1,\"reset\":3},\"d7\":{\"pct\":0,\"reset\":4}}]}}";
   usage_rec_t u; buddy_rec_t b; bool hu, hb;
   memset(&u, 0, sizeof(u)); memset(&b, 0, sizeof(b));
   TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
   TEST_ASSERT_TRUE(hu);
-  TEST_ASSERT_TRUE(u.claude.stale);    // explicit "stale":true
-  TEST_ASSERT_FALSE(u.codex.stale);    // absent => live
-  TEST_ASSERT_EQUAL_INT16(24, u.claude.h5.pct);   // value still parsed alongside the flag
+  TEST_ASSERT_TRUE(u.p[0].stale);    // explicit "stale":true
+  TEST_ASSERT_FALSE(u.p[1].stale);   // absent => live
+  TEST_ASSERT_EQUAL_INT16(24, u.p[0].h5.pct);
+}
+
+// A usage block missing the providers array is malformed => rejected as a block: *had_usage stays
+// false so the caller keeps the last values (parity with the pre-refactor whole-block reject).
+static void test_parse_malformed_usage_keeps_last(void) {
+  usage_rec_t u; buddy_rec_t b; bool hu, hb;
+  const char* j1 = "{\"v\":1,\"usage\":{}}";                 // no providers key
+  memset(&u, 0, sizeof(u)); memset(&b, 0, sizeof(b));
+  TEST_ASSERT_TRUE(hub_parse_status(j1, strlen(j1), &u, &hu, &b, &hb));
+  TEST_ASSERT_FALSE(hu);                                      // block rejected => keep last
+  const char* j2 = "{\"v\":1,\"usage\":{\"providers\":\"nope\"}}";  // providers not an array
+  memset(&u, 0, sizeof(u));
+  TEST_ASSERT_TRUE(hub_parse_status(j2, strlen(j2), &u, &hu, &b, &hb));
+  TEST_ASSERT_FALSE(hu);
 }
 
 static void test_parse_prompt_absent_is_idle(void) {
@@ -138,6 +207,26 @@ static void test_parse_prompt_absent_is_idle(void) {
   TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
   TEST_ASSERT_TRUE(hb);
   TEST_ASSERT_FALSE(b.prompt.present);            // absence of prompt => idle
+}
+
+// Additive prompt.agent (frozen wire): absent => empty; oversize => truncated to USAGE_ID_LEN-1.
+static void test_parse_prompt_agent_absent(void) {
+  const char* j = "{\"v\":1,\"buddy\":{\"prompt\":{\"id\":\"p1\",\"tool\":\"Bash\",\"hint\":\"ls\"}}}";
+  usage_rec_t u; buddy_rec_t b; bool hu, hb;
+  memset(&u, 0, sizeof(u)); memset(&b, 0, sizeof(b));
+  TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
+  TEST_ASSERT_TRUE(b.prompt.present);
+  TEST_ASSERT_EQUAL_STRING("", b.prompt.agent);   // absent agent => empty string
+}
+
+static void test_parse_prompt_agent_oversize(void) {
+  const char* j = "{\"v\":1,\"buddy\":{\"prompt\":{\"id\":\"p1\",\"agent\":\"abcdefghijklmnop\","
+                  "\"tool\":\"Bash\",\"hint\":\"ls\"}}}";
+  usage_rec_t u; buddy_rec_t b; bool hu, hb;
+  memset(&u, 0, sizeof(u)); memset(&b, 0, sizeof(b));
+  TEST_ASSERT_TRUE(hub_parse_status(j, strlen(j), &u, &hu, &b, &hb));
+  TEST_ASSERT_EQUAL_size_t(USAGE_ID_LEN - 1, strlen(b.prompt.agent));
+  TEST_ASSERT_EQUAL_STRING_LEN("abcdefghijkl", b.prompt.agent, USAGE_ID_LEN - 1);
 }
 
 // A full-frame resend repeating the SAME pending prompt must NOT reset the confirm state (#8),
@@ -469,6 +558,21 @@ void test_parse_sessions_question_state(void) {
   TEST_ASSERT_EQUAL_UINT32(1719401000u, b.sessions[0].ts);
 }
 
+// Additive session.agent (frozen wire): present stored, absent => empty, oversize => truncated.
+void test_parse_sessions_agent(void) {
+  const char* j = "{\"v\":1,\"sessions\":["
+    "{\"id\":\"s1\",\"agent\":\"codex\",\"label\":\"api\",\"state\":\"working\",\"ts\":9},"
+    "{\"id\":\"s2\",\"label\":\"web\",\"state\":\"idle\",\"ts\":8},"
+    "{\"id\":\"s3\",\"agent\":\"abcdefghijklmnop\",\"label\":\"db\",\"state\":\"idle\",\"ts\":7}]}";
+  buddy_rec_t b; memset(&b, 0, sizeof(b));
+  bool had = false;
+  TEST_ASSERT_TRUE(hub_parse_sessions(j, strlen(j), &b, &had));
+  TEST_ASSERT_EQUAL_UINT8(3, b.session_count);
+  TEST_ASSERT_EQUAL_STRING("codex", b.sessions[0].agent);   // present
+  TEST_ASSERT_EQUAL_STRING("", b.sessions[1].agent);        // absent => empty
+  TEST_ASSERT_EQUAL_size_t(USAGE_ID_LEN - 1, strlen(b.sessions[2].agent));   // oversize truncated
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_reassemble_single_frame);
@@ -477,9 +581,14 @@ int main(int, char**) {
   RUN_TEST(test_reassemble_crlf_and_empty);
   RUN_TEST(test_reassemble_overflow_then_recover);
   RUN_TEST(test_parse_full_frame);
+  RUN_TEST(test_parse_providers_count_table);
+  RUN_TEST(test_parse_id_label_truncation);
   RUN_TEST(test_parse_null_and_missing_windows);
   RUN_TEST(test_parse_stale_flag);
+  RUN_TEST(test_parse_malformed_usage_keeps_last);
   RUN_TEST(test_parse_prompt_absent_is_idle);
+  RUN_TEST(test_parse_prompt_agent_absent);
+  RUN_TEST(test_parse_prompt_agent_oversize);
   RUN_TEST(test_parse_same_prompt_preserves_pending);
   RUN_TEST(test_parse_new_prompt_resets_decision);
   RUN_TEST(test_parse_truncates_long_strings);
@@ -510,5 +619,6 @@ int main(int, char**) {
   RUN_TEST(test_parse_sessions_caps_and_truncates);
   RUN_TEST(test_parse_sessions_rejects_bad_version);
   RUN_TEST(test_parse_sessions_question_state);
+  RUN_TEST(test_parse_sessions_agent);
   return UNITY_END();
 }

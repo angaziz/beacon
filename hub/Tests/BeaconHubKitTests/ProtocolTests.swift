@@ -4,11 +4,14 @@ import XCTest
 final class ProtocolTests: XCTestCase {
 
     func testStatusFrameEncodesV1AndNewline() throws {
-        let usage = Usage(
-            claude: ProviderUsage(h5: UsageWindow(pct: 24, reset: 1717600000),
-                                  d7: UsageWindow(pct: 24, reset: 1717800000)),
-            codex: ProviderUsage(h5: UsageWindow(pct: 1, reset: 1717590000),
-                                 d7: UsageWindow(pct: 29, reset: 1717800000)))
+        let usage = Usage(providers: [
+            UsageEntry(id: "claude", label: "CLAUDE",
+                       h5: UsageWindow(pct: 24, reset: 1717600000),
+                       d7: UsageWindow(pct: 24, reset: 1717800000)),
+            UsageEntry(id: "codex", label: "CODEX",
+                       h5: UsageWindow(pct: 1, reset: 1717590000),
+                       d7: UsageWindow(pct: 29, reset: 1717800000)),
+        ])
         let buddy = BuddyState(running: 2, waiting: 1, tokens: 184502, contextPct: 42,
                                entries: ["10:42 git push"],
                                prompt: BuddyPrompt(id: "req_abc", tool: "Bash", hint: "rm -rf /tmp/build"))
@@ -16,20 +19,25 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(data.last, 0x0A)  // newline-terminated
         let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         XCTAssertEqual(obj["v"] as? Int, 1)
-        let claude = ((obj["usage"] as! [String: Any])["claude"] as! [String: Any])
-        XCTAssertEqual((claude["h5"] as! [String: Any])["pct"] as? Int, 24)
+        let providers = ((obj["usage"] as! [String: Any])["providers"] as! [[String: Any]])
+        XCTAssertEqual(providers.count, 2)
+        XCTAssertEqual(providers[0]["id"] as? String, "claude")
+        XCTAssertEqual(providers[0]["label"] as? String, "CLAUDE")
+        XCTAssertEqual((providers[0]["h5"] as! [String: Any])["pct"] as? Int, 24)
         let b = obj["buddy"] as! [String: Any]
         XCTAssertEqual(b["context_pct"] as? Int, 42)
         XCTAssertNotNil(b["prompt"])
     }
 
     func testNilPctOmitted() throws {
-        let usage = Usage(claude: ProviderUsage(h5: UsageWindow(pct: nil, reset: 0),
-                                                d7: UsageWindow(pct: 50, reset: 1)),
-                          codex: .unavailable)
+        let usage = Usage(providers: [
+            UsageEntry(id: "claude", label: "CLAUDE",
+                       h5: UsageWindow(pct: nil, reset: 0), d7: UsageWindow(pct: 50, reset: 1)),
+        ])
         let data = try StatusFrame(usage: usage).encoded()
         let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-        let h5 = (((obj["usage"] as! [String: Any])["claude"] as! [String: Any])["h5"] as! [String: Any])
+        let providers = ((obj["usage"] as! [String: Any])["providers"] as! [[String: Any]])
+        let h5 = (providers[0]["h5"] as! [String: Any])
         XCTAssertNil(h5["pct"])               // nil pct omitted; device reads it as unavailable
         XCTAssertEqual(h5["reset"] as? Int, 0)
     }
@@ -56,9 +64,43 @@ final class ProtocolTests: XCTestCase {
     func testHeartbeatFrameOmitsLoc() throws {
         // The heartbeat full frame must NOT carry loc (issue #54): loc rides connect/on-change only.
         let obj = try JSONSerialization.jsonObject(
-            with: StatusFrame(usage: .init(claude: .unavailable, codex: .unavailable),
-                              buddy: BuddyState()).encoded()) as! [String: Any]
+            with: StatusFrame(usage: Usage(), buddy: BuddyState()).encoded()) as! [String: Any]
         XCTAssertNil(obj["loc"])
+    }
+
+    // §A frozen: `stale` is emitted ONLY when true (nil => omitted, like qlen). Empty providers => [].
+    func testUsageEntryStaleOmissionAndEmptyProviders() throws {
+        let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
+        let live = UsageEntry(id: "claude", label: "CLAUDE",
+                              h5: UsageWindow(pct: 24, reset: 1), d7: UsageWindow(pct: 32, reset: 2))
+        let liveJSON = String(data: try enc.encode(live), encoding: .utf8)!
+        XCTAssertFalse(liveJSON.contains("stale"), "live UsageEntry must not emit stale: \(liveJSON)")
+
+        let stale = UsageEntry(id: "codex", label: "CODEX",
+                               h5: UsageWindow(pct: 1, reset: 1), d7: UsageWindow(pct: 9, reset: 2), stale: true)
+        XCTAssertTrue(String(data: try enc.encode(stale), encoding: .utf8)!.contains("\"stale\":true"))
+
+        let empty = try JSONSerialization.jsonObject(with: StatusFrame(usage: Usage()).encoded()) as! [String: Any]
+        XCTAssertEqual(((empty["usage"] as! [String: Any])["providers"] as! [[String: Any]]).count, 0)
+    }
+
+    // Additive `agent` on session rows + prompt: encoded ONLY when non-nil; SessionsFrame caps it to 12.
+    func testAgentEncodedOnlyWhenPresentAndCapped() throws {
+        let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
+        let noAgent = Session(id: "s1", label: "api", state: .working, ts: 1)
+        XCTAssertFalse(String(data: try enc.encode(noAgent), encoding: .utf8)!.contains("agent"))
+        let withAgent = Session(id: "s1", label: "api", state: .working, ts: 1, agent: "claude")
+        XCTAssertTrue(String(data: try enc.encode(withAgent), encoding: .utf8)!.contains("\"agent\":\"claude\""))
+
+        let prompt = BuddyPrompt(id: "p1", tool: "Bash", hint: "x", agent: "codex")
+        XCTAssertTrue(String(data: try enc.encode(prompt), encoding: .utf8)!.contains("\"agent\":\"codex\""))
+        let lone = BuddyPrompt(id: "p1", tool: "Bash", hint: "x")
+        XCTAssertFalse(String(data: try enc.encode(lone), encoding: .utf8)!.contains("agent"))
+
+        // SessionsFrame truncates a >12-char provider id to 12 (USAGE_ID_LEN-1).
+        let frame = SessionsFrame([Session(id: "s1", label: "api", state: .working, ts: 1,
+                                           agent: "abcdefghijklmnop")])
+        XCTAssertEqual(frame.sessions[0].agent, "abcdefghijkl")
     }
 
     func testLocRoundTrips() throws {

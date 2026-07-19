@@ -30,8 +30,11 @@ static void seed(void) {
     ds_set_finance(i, &f);
   }
   usage_rec_t u; memset(&u, 0, sizeof(u));
-  u.claude.h5 = {24, now + 7680}; u.claude.d7 = {24, now + 400000};
-  u.codex.h5  = {1,  now + 16860}; u.codex.d7 = {29, now + 400000};
+  u.count = 2;
+  strncpy(u.p[0].id, "claude", USAGE_ID_LEN-1); strncpy(u.p[0].label, "CLAUDE", USAGE_LABEL_LEN-1);
+  u.p[0].h5 = {24, now + 7680}; u.p[0].d7 = {24, now + 400000};
+  strncpy(u.p[1].id, "codex", USAGE_ID_LEN-1); strncpy(u.p[1].label, "CODEX", USAGE_LABEL_LEN-1);
+  u.p[1].h5 = {1,  now + 16860}; u.p[1].d7 = {29, now + 400000};
   u.hdr.last_updated = now; ds_set_usage(&u);
   buddy_rec_t b; memset(&b, 0, sizeof(b)); b.running = 2; b.waiting = 1; b.tokens = 184502; b.context_pct = 42;
   // No prompt seeded: capture shows the session list (the new design), not the permission screen.

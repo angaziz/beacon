@@ -2,10 +2,11 @@ import Foundation
 import Security
 import BeaconHubKit
 
-// Polls Claude + Codex usage every 45 s (and once at start), normalizes via UsageNormalizer, and
-// emits the merged Usage plus any human-readable error strings for the menubar. All provider secrets
-// (Keychain / ~/.codex) stay on the Mac; only computed pct/reset cross BLE (tech.md 9). Tokens are
-// never logged. The two unofficial endpoints sit behind UsageProvider so they can be swapped/mocked.
+// Polls every usage-capable, usage-enabled provider from the registry every 45 s (and once at start),
+// normalizes via UsageNormalizer, and emits per-provider results the app reduces (#108). Per-provider
+// gating lives on the provider (Claude skips its oauth call while its statusline shim is fresh; most
+// providers always poll). All provider secrets stay on the Mac; only computed pct/reset cross BLE
+// (tech.md 9). Tokens are never logged. The unofficial endpoints sit behind UsageProvider (mockable).
 
 // Result of one provider poll: the normalized windows (.unavailable on non-live) plus a classified
 // outcome the reducer interprets (#108). .live carries the value; .transient/.terminal carry the
@@ -21,48 +22,30 @@ protocol UsageProvider {
 }
 
 final class UsagePoller {
-    // Per-tick result: Claude is nil when its oauth poll was skipped (statusline fresh OR backed off) --
-    // the reducer (#108) treats nil as "no new observation", distinct from a fresh failure. Codex always
-    // polls.
-    var onUpdate: ((ProviderResult?, ProviderResult) -> Void)?
+    // Per-tick results keyed by provider id. A provider absent from the map was skipped this tick (its
+    // gate said no / it is usage-disabled) -- the app treats absence as "no new observation" (#108).
+    var onUpdate: (([String: ProviderResult]) -> Void)?
 
-    private let claude: UsageProvider
-    private let codex: UsageProvider
+    private let providers: [AgentProvider]
+    private let usageEnabled: (String) -> Bool
     private let interval: TimeInterval = 45
-    // Exposed so the display-side statusline expiry (#93) derives its freshness window from the SAME
+    // Exposed so the app's statusline-source precedence derives its freshness window from the SAME
     // interval as the poll gate -- they must never disagree.
     var pollInterval: TimeInterval { interval }
     private let backoff: TimeInterval = 300   // disconnected cadence (#64): no live device => no sub-min need.
-    // Claude oauth 429 backoff (#108): exponential from the base interval, capped; a server Retry-After
-    // is honored up to the larger sanity cap.
-    private let claudeBackoffCap: TimeInterval = 900
-    private let retryAfterSanityCap: TimeInterval = 3600
-    private let session: URLSession
     private var timer: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "beacon.usage")
 
-    // Gating state, all confined to `queue`. Updated from other threads only via the async setters below.
     private var connected = true
-    private var lastStatuslineAt: Date?
     private var lastPollAt = Date.distantPast
-    private var claudeFails = 0              // consecutive Claude transient failures, for the backoff curve.
-    private var claudeBackoffUntil: Date?    // next time the Claude oauth poll is allowed.
 
-    // Default the providers to the configured 15s-timeout session (#64): previously they fell back to
-    // URLSession.shared (60s), so a stalled network could hang a poll past the 45s tick and stack.
-    init(claude: UsageProvider? = nil, codex: UsageProvider? = nil) {
-        let cfg = URLSessionConfiguration.ephemeral
-        cfg.timeoutIntervalForRequest = 15
-        let session = URLSession(configuration: cfg)
-        self.session = session
-        self.claude = claude ?? ClaudeUsageProvider(session: session)
-        self.codex = codex ?? CodexUsageProvider(session: session)
+    init(providers: [AgentProvider], usageEnabled: @escaping (String) -> Bool) {
+        self.providers = providers
+        self.usageEnabled = usageEnabled
     }
 
-    // AppDelegate -> poller, thread-safe. setDeviceConnected drives the disconnected backoff; noteStatusline
-    // stamps each statusline-Claude arrival so the Claude endpoint is skipped while the shim is fresh.
+    // AppDelegate -> poller, thread-safe. Drives the disconnected backoff cadence.
     func setDeviceConnected(_ b: Bool) { queue.async { [weak self] in self?.connected = b } }
-    func noteStatusline() { queue.async { [weak self] in self?.lastStatuslineAt = Date() } }
 
     func start() {
         let t = DispatchSource.makeTimerSource(queue: queue)
@@ -72,65 +55,34 @@ final class UsagePoller {
         t.resume()
     }
 
-    // Runs every `interval`; decides whether to poll (backoff while disconnected) and whether to include
-    // the Claude endpoint (skipped while the statusline shim is fresh).
     private func tick() {
         let now = Date()
         guard UsagePollDecision.shouldPoll(connected: connected,
                                            secondsSinceLastPoll: now.timeIntervalSince(lastPollAt),
                                            backoff: backoff) else { return }
         lastPollAt = now
-        let age = lastStatuslineAt.map { now.timeIntervalSince($0) }
-        // #93: while the statusline shim is fresh, the Claude endpoint (hence the Keychain read) is
-        // skipped entirely. When the shim is ABSENT or no Claude session is running, this falls through
-        // to the Keychain poll so usage still shows before a session starts -- ACCEPTED tradeoff: one
-        // Keychain prompt can occur in that fallback (bounded by ClaudeUsageProvider's reread cooldown).
-        // This is expected, not a regression -- do not "fix" it by dropping the poller (issue #93 Option B).
-        // #108: AND honor the oauth backoff window so a 429 storm is not re-hit every tick.
-        let backedOff = claudeBackoffUntil.map { now < $0 } ?? false
-        let includeClaude = UsagePollDecision.shouldPollClaude(statuslineAge: age, interval: interval)
-            && !backedOff
-        poll(includeClaude: includeClaude)
+        poll(now: now)
     }
 
-    private func poll(includeClaude: Bool) {
+    // Poll every usage-capable, usage-enabled provider whose gate allows it this tick, in parallel;
+    // collect classified results and hand the map to the app on the main actor.
+    private func poll(now: Date) {
         let group = DispatchGroup()
-        var claudeRes: ProviderResult?
-        var codexRes: ProviderResult?
-
-        if includeClaude {
+        let lock = NSLock()
+        var results: [String: ProviderResult] = [:]
+        for p in providers where p.descriptor.supportsUsage && usageEnabled(p.descriptor.id) {
+            guard let source = p.usageSource, p.shouldPollUsage(now: now, interval: interval) else { continue }
+            let id = p.descriptor.id
             group.enter()
-            claude.fetch { claudeRes = $0; group.leave() }
-        }
-        group.enter()
-        codex.fetch { codexRes = $0; group.leave() }
-
-        group.notify(queue: queue) { [weak self] in
-            guard let self else { return }
-            // Update the Claude oauth backoff from the actual fetch outcome (only when we polled). Live =>
-            // reset; transient => advance the exponential window (jitter applied here so the pure
-            // pollDelay stays deterministic); terminal is not a rate-limit signal, leave the curve alone.
-            if includeClaude, let c = claudeRes {
-                switch c.outcome {
-                case .live:
-                    self.claudeFails = 0; self.claudeBackoffUntil = nil
-                case .transient(let retryAfter, _):
-                    self.claudeFails += 1
-                    let delay = UsagePollDecision.pollDelay(
-                        consecutiveFails: self.claudeFails, retryAfter: retryAfter,
-                        base: self.interval, cap: self.claudeBackoffCap,
-                        retryAfterSanityCap: self.retryAfterSanityCap,
-                        jitterFraction: Double.random(in: -0.2...0.2))
-                    self.claudeBackoffUntil = Date().addingTimeInterval(delay)
-                case .terminal:
-                    break
-                }
+            source.fetch { res in
+                p.noteUsageOutcome(res.outcome)   // per-provider backoff (Claude oauth 429 curve, #108)
+                lock.lock(); results[id] = res; lock.unlock()
+                group.leave()
             }
-            let x = codexRes ?? ProviderResult(usage: .unavailable,
-                                               outcome: .terminal(reason: "Codex unavailable"))
-            let claudeOut = includeClaude ? claudeRes : nil   // nil => skipped, no new observation.
-            let cb = self.onUpdate
-            DispatchQueue.main.async { cb?(claudeOut, x) }
+        }
+        group.notify(queue: queue) { [weak self] in
+            let cb = self?.onUpdate
+            DispatchQueue.main.async { cb?(results) }
         }
     }
 }

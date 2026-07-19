@@ -4,6 +4,7 @@
 #include "ui/theme.h"
 #include "config/layout.h"
 #include "core/datastore.h"
+#include "ui/screens/screen_common.h"
 #include <Arduino.h>
 
 // LED Matrix / LIMITS: cell-meter bars. Each provider window is a row of 10 lit/unlit cells
@@ -13,14 +14,11 @@
 #define CELLS 10
 
 static lv_obj_t *s_status;
+static lv_obj_t *s_name[METER_COUNT];
 static lv_obj_t *s_pct[METER_COUNT];
 static lv_obj_t *s_rst[METER_COUNT];
 static lv_obj_t *s_cell[METER_COUNT][CELLS];
 
-
-static const char* const METER_NAME[METER_COUNT] = {
-  "CLAUDE 5H", "CLAUDE 7D", "CODEX 5H", "CODEX 7D"
-};
 
 static void make_meter(lv_obj_t* parent, const beacon_theme_t* t, int idx) {
   lv_obj_t* meter = lv_obj_create(parent);
@@ -36,7 +34,8 @@ static void make_meter(lv_obj_t* parent, const beacon_theme_t* t, int idx) {
   lv_obj_set_flex_align(head, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
 
   lv_obj_t* nm = lv_label_create(head);
-  lv_label_set_text(nm, METER_NAME[idx]);
+  lv_label_set_text(nm, "");
+  s_name[idx] = nm;
   lv_obj_set_style_text_font(nm, t->f_mono, 0);
   lv_obj_set_style_text_color(nm, t->ink_dim, 0);
 
@@ -128,12 +127,23 @@ static void update(void) {
 
   bool dim = sv_dim(u.hdr.state);
   bool ph = sv_placeholder(u.hdr.state);
-  usage_window_t none = { -1, 0 };
+  const usage_provider_t* p0 = usage_slot(&u, 0);
+  const usage_provider_t* p1 = usage_slot(&u, 1);
+  usage_window_t none = usage_none();
+
+  // idx 0,1 render provider 0; idx 2,3 render provider 1. An absent provider (NULL) or the
+  // placeholder state falls back to `none` so the meter shows "--" with no lit cells.
+  const usage_provider_t* prov[METER_COUNT] = { p0, p0, p1, p1 };
+  const char* wname[METER_COUNT] = { "5H", "7D", "5H", "7D" };
   const usage_window_t* wins[METER_COUNT] = {
-    &u.claude.h5, &u.claude.d7, &u.codex.h5, &u.codex.d7
+    p0 ? &p0->h5 : &none, p0 ? &p0->d7 : &none,
+    p1 ? &p1->h5 : &none, p1 ? &p1->d7 : &none
   };
+  char nb[24];
   for (int i = 0; i < METER_COUNT; i++) {
-    bool wdim = dim || (i < 2 ? u.claude.stale : u.codex.stale);   // #108: idx 0,1 claude; 2,3 codex.
+    usage_tag(nb, sizeof(nb), prov[i], " ", wname[i], false);
+    lv_label_set_text(s_name[i], nb);
+    bool wdim = dim || (prov[i] && prov[i]->stale);
     set_meter(t, i, ph ? &none : wins[i], wdim, now);
   }
 }

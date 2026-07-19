@@ -3,11 +3,12 @@
 #include "ui/state_view.h"
 #include "ui/theme.h"
 #include "config/layout.h"
+#include "ui/screens/screen_common.h"
 #include "core/datastore.h"
 #include <Arduino.h>
 
 // Aerospace HUD / AI Usage. "// AI LIMITS" eyebrow + FOUR concentric full-circle rings in a
-// 2x2 grid (CLAUDE row cyan: 5H | 7D ; CODEX row amber: 5H | 7D). Each ring shows its window
+// 2x2 grid (provider 0 row accent: 5H | 7D ; provider 1 row accent2: 5H | 7D). Each ring shows
 // pct in the center and a "rst <countdown>" line below. pct<0 => "--" and no ring fill.
 // Whole-screen HUB_OFFLINE via u.hdr.
 
@@ -19,6 +20,7 @@ static lv_obj_t *s_status;
 static lv_obj_t *s_arc[N_RINGS];
 static lv_obj_t *s_pct[N_RINGS];
 static lv_obj_t *s_rst[N_RINGS];
+static lv_obj_t *s_name[N_RINGS];
 
 static lv_obj_t* make_ring(lv_obj_t* parent, lv_color_t fill, const beacon_theme_t* t) {
   lv_obj_t* arc = lv_arc_create(parent);
@@ -37,7 +39,7 @@ static lv_obj_t* make_ring(lv_obj_t* parent, lv_color_t fill, const beacon_theme
 }
 
 static void make_cell(lv_obj_t* page, int idx, int dx, int dy, lv_color_t fill,
-                      const char* label, const beacon_theme_t* t) {
+                      const beacon_theme_t* t) {
   s_arc[idx] = make_ring(page, fill, t);
   lv_obj_align(s_arc[idx], LV_ALIGN_CENTER, dx, dy);
 
@@ -49,11 +51,11 @@ static void make_cell(lv_obj_t* page, int idx, int dx, int dy, lv_color_t fill,
   lv_label_set_text(s_pct[idx], "--");
   lv_obj_align_to(s_pct[idx], s_arc[idx], LV_ALIGN_CENTER, 0, -6);
 
-  lv_obj_t* nm = lv_label_create(page);
-  lv_obj_add_style(nm, &S.slot, 0);
-  lv_obj_set_style_text_color(nm, fill, 0);
-  lv_label_set_text(nm, label);
-  lv_obj_align_to(nm, s_arc[idx], LV_ALIGN_CENTER, 0, 12);
+  s_name[idx] = lv_label_create(page);
+  lv_obj_add_style(s_name[idx], &S.slot, 0);
+  lv_obj_set_style_text_color(s_name[idx], fill, 0);
+  lv_label_set_text(s_name[idx], "");   // set in update() from provider data
+  lv_obj_align_to(s_name[idx], s_arc[idx], LV_ALIGN_CENTER, 0, 12);
 
   s_rst[idx] = lv_label_create(page);
   lv_obj_add_style(s_rst[idx], &S.slot, 0);
@@ -78,12 +80,12 @@ static void build(lv_obj_t* page) {
   const int gy = 86;   // half vertical gap between ring rows
   const int oy = 12;   // grid vertical offset below the title
 
-  // CLAUDE row (cyan / accent): 5H | 7D.
-  make_cell(page, 0, -gx, -gy + oy, t->accent, "CL.5H", t);
-  make_cell(page, 1,  gx, -gy + oy, t->accent, "CL.7D", t);
-  // CODEX row (amber / accent2): 5H | 7D.
-  make_cell(page, 2, -gx,  gy + oy, t->accent2, "CX.5H", t);
-  make_cell(page, 3,  gx,  gy + oy, t->accent2, "CX.7D", t);
+  // Row 0 (accent / provider 0): 5H | 7D. Captions set in update() from provider data.
+  make_cell(page, 0, -gx, -gy + oy, t->accent, t);
+  make_cell(page, 1,  gx, -gy + oy, t->accent, t);
+  // Row 1 (accent2 / provider 1): 5H | 7D.
+  make_cell(page, 2, -gx,  gy + oy, t->accent2, t);
+  make_cell(page, 3,  gx,  gy + oy, t->accent2, t);
 }
 
 // Render one window into its ring + center pct + reset line. pct<0 => "--" + no fill.
@@ -121,12 +123,29 @@ static void update(void) {
 
   bool ph = sv_placeholder(u.hdr.state);
   bool dim = sv_dim(u.hdr.state);
-  bool cdim = dim || u.claude.stale, xdim = dim || u.codex.stale;   // #108: dim last-good per provider.
 
-  set_window(0, &u.claude.h5, ph, cdim, t->accent,  t, now);
-  set_window(1, &u.claude.d7, ph, cdim, t->accent,  t, now);
-  set_window(2, &u.codex.h5,  ph, xdim, t->accent2, t, now);
-  set_window(3, &u.codex.d7,  ph, xdim, t->accent2, t, now);
+  const usage_provider_t* p0 = usage_slot(&u, 0);
+  const usage_provider_t* p1 = usage_slot(&u, 1);
+  usage_window_t none = usage_none();
+
+  // Ring captions: 2-letter provider abbrev + window (e.g. "<AB>.5H"); blank when the slot is empty.
+  char ab0[4]; usage_abbr2(ab0, sizeof(ab0), p0);
+  char ab1[4]; usage_abbr2(ab1, sizeof(ab1), p1);
+  char nm[12];
+  snprintf(nm, sizeof(nm), ab0[0] ? "%s.5H" : "", ab0); lv_label_set_text(s_name[0], nm);
+  snprintf(nm, sizeof(nm), ab0[0] ? "%s.7D" : "", ab0); lv_label_set_text(s_name[1], nm);
+  snprintf(nm, sizeof(nm), ab1[0] ? "%s.5H" : "", ab1); lv_label_set_text(s_name[2], nm);
+  snprintf(nm, sizeof(nm), ab1[0] ? "%s.7D" : "", ab1); lv_label_set_text(s_name[3], nm);
+
+  bool cdim = dim || (p0 && p0->stale);   // #108: dim last-good per provider.
+  bool xdim = dim || (p1 && p1->stale);
+  usage_window_t w0h = p0 ? p0->h5 : none, w0d = p0 ? p0->d7 : none;
+  usage_window_t w1h = p1 ? p1->h5 : none, w1d = p1 ? p1->d7 : none;
+
+  set_window(0, &w0h, ph, cdim, t->accent,  t, now);
+  set_window(1, &w0d, ph, cdim, t->accent,  t, now);
+  set_window(2, &w1h, ph, xdim, t->accent2, t, now);
+  set_window(3, &w1d, ph, xdim, t->accent2, t, now);
 }
 
 extern const screen_view_t usage_hud_view = { build, update };

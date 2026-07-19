@@ -4,11 +4,12 @@
 #include "ui/theme.h"
 #include "config/layout.h"
 #include "core/datastore.h"
+#include "ui/screens/screen_common.h"
 #include <Arduino.h>
 
-// Analog Neo usage: FOUR conic SUB-DIALS in a 2x2 grid (claude 5H | 7D ; codex 5H | 7D). Each is
-// a full-circle arc filled to pct in accent over a faint track, with the percent CENTERED inside
-// the dial and a "rst <countdown>" line below. pct<0 => "--" and no fill (never feed <0 to the arc).
+// Analog Neo usage: FOUR conic SUB-DIALS in a 2x2 grid (provider 0: 5H | 7D ; provider 1: 5H | 7D).
+// Each is a full-circle arc filled to pct in accent over a faint track, with the percent CENTERED
+// inside the dial and a "rst <countdown>" line below. pct<0 => "--" and no fill (never feed <0).
 
 
 #define SUB_SIZE 116
@@ -18,9 +19,9 @@ static lv_obj_t *s_status;
 static lv_obj_t *s_arc[N_DIAL];
 static lv_obj_t *s_pct[N_DIAL];
 static lv_obj_t *s_rst[N_DIAL];
+static lv_obj_t *s_tag[N_DIAL];
 
-static void make_subdial(lv_obj_t* page, const beacon_theme_t* t, int idx, int dx, int dy,
-                         const char* name) {
+static void make_subdial(lv_obj_t* page, const beacon_theme_t* t, int idx, int dx, int dy) {
   lv_obj_t* arc = lv_arc_create(page);
   lv_obj_set_size(arc, SUB_SIZE, SUB_SIZE);
   lv_obj_align(arc, LV_ALIGN_CENTER, dx, dy);
@@ -45,11 +46,11 @@ static void make_subdial(lv_obj_t* page, const beacon_theme_t* t, int idx, int d
   lv_obj_center(pct);
   s_pct[idx] = pct;
 
-  lv_obj_t* nm = lv_label_create(page);
-  lv_label_set_text(nm, name);
-  lv_obj_set_style_text_font(nm, t->f_mono, 0);
-  lv_obj_set_style_text_color(nm, t->ink_dim, 0);
-  lv_obj_align_to(nm, arc, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
+  s_tag[idx] = lv_label_create(page);
+  lv_label_set_text(s_tag[idx], "");
+  lv_obj_set_style_text_font(s_tag[idx], t->f_mono, 0);
+  lv_obj_set_style_text_color(s_tag[idx], t->ink_dim, 0);
+  lv_obj_align_to(s_tag[idx], arc, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
 
   s_rst[idx] = lv_label_create(page);
   lv_label_set_text(s_rst[idx], "rst --");
@@ -77,10 +78,10 @@ static void build(lv_obj_t* page) {
   const int gy = 78;   // half vertical gap between dial rows
   const int oy = 18;   // grid vertical offset
 
-  make_subdial(page, t, 0, -gx, -gy + oy, "claude 5h");
-  make_subdial(page, t, 1,  gx, -gy + oy, "claude 7d");
-  make_subdial(page, t, 2, -gx,  gy + oy, "codex 5h");
-  make_subdial(page, t, 3,  gx,  gy + oy, "codex 7d");
+  make_subdial(page, t, 0, -gx, -gy + oy);
+  make_subdial(page, t, 1,  gx, -gy + oy);
+  make_subdial(page, t, 2, -gx,  gy + oy);
+  make_subdial(page, t, 3,  gx,  gy + oy);
 }
 
 static void apply(const beacon_theme_t* t, int idx, const usage_window_t* w,
@@ -121,12 +122,23 @@ static void update(void) {
 
   bool dim = sv_dim(u.hdr.state);
   bool ph  = sv_placeholder(u.hdr.state);
-  bool cdim = dim || u.claude.stale, xdim = dim || u.codex.stale;   // #108: dim last-good per provider.
+  const usage_provider_t* p0 = usage_slot(&u, 0);
+  const usage_provider_t* p1 = usage_slot(&u, 1);
+  usage_window_t none = usage_none();
+  bool cdim = dim || (p0 && p0->stale);   // #108: dim last-good per provider.
+  bool xdim = dim || (p1 && p1->stale);
 
-  apply(t, 0, &u.claude.h5, ph, cdim, now);
-  apply(t, 1, &u.claude.d7, ph, cdim, now);
-  apply(t, 2, &u.codex.h5,  ph, xdim, now);
-  apply(t, 3, &u.codex.d7,  ph, xdim, now);
+  // Data-driven tags: "<label> 5h" (lowercase). Blank when the slot is absent.
+  char tb[24];
+  usage_tag(tb, sizeof(tb), p0, " ", "5h", true); lv_label_set_text(s_tag[0], tb);
+  usage_tag(tb, sizeof(tb), p0, " ", "7d", true); lv_label_set_text(s_tag[1], tb);
+  usage_tag(tb, sizeof(tb), p1, " ", "5h", true); lv_label_set_text(s_tag[2], tb);
+  usage_tag(tb, sizeof(tb), p1, " ", "7d", true); lv_label_set_text(s_tag[3], tb);
+
+  apply(t, 0, p0 ? &p0->h5 : &none, ph, cdim, now);
+  apply(t, 1, p0 ? &p0->d7 : &none, ph, cdim, now);
+  apply(t, 2, p1 ? &p1->h5 : &none, ph, xdim, now);
+  apply(t, 3, p1 ? &p1->d7 : &none, ph, xdim, now);
 }
 
 extern const screen_view_t usage_analog_view = { build, update };

@@ -15,18 +15,27 @@ Newline-delimited JSON, `"v":1`. `usage` and `buddy` are independently optional 
 the device keeps an absent block's last values). A null/omitted window `pct` => unavailable ("--").
 
 ```json
-{"v":1,"usage":{"claude":{"h5":{"pct":24,"reset":1717600000},"d7":{"pct":24,"reset":1717800000}},
-                "codex":{"h5":{"pct":1,"reset":1717590000},"d7":{"pct":29,"reset":1717800000}}},
+{"v":1,"usage":{"providers":[
+  {"id":"claude","label":"CLAUDE","h5":{"pct":24,"reset":1717600000},"d7":{"pct":24,"reset":1717800000},"stale":true},
+  {"id":"codex","label":"CODEX","h5":{"pct":1,"reset":1717590000},"d7":{"pct":29,"reset":1717800000}}]},
  "buddy":{"running":2,"waiting":1,"tokens":184502,"context_pct":42,
           "entries":["10:42 git push","10:41 yarn test"],
-          "prompt":{"id":"p07","tool":"Bash","hint":"rm -rf /tmp/build","qlen":2}}}
+          "prompt":{"id":"p07","agent":"claude","tool":"Bash","hint":"rm -rf /tmp/build","qlen":2}}}
 ```
 - Absent `buddy.prompt` => idle. `pct` is an integer 0..100 or JSON null (device reads null/absent as -1).
 - The device codec (`hub_parse_status`) + `test_hub_proto` assert exactly this shape.
-- `usage.<provider>.stale` (additive `v:1` ext, issue #108) -- `true` => the windows carry
+- `usage.providers` (**BREAKING**, design 2026-07-19, clean cutover from the old fixed
+  `usage.{claude,codex}` slots) -- 0..4 entries, one per usage-toggle-ON provider, in hub display
+  order. Each entry: `id` (stable lowercase ascii, <=12 chars), `label` (display string, <=10 chars,
+  uppercase preferred), `h5`/`d7` windows, and optional `stale`. The device renders provider labels
+  from the record instead of hardcoding "claude"/"codex"; usage themes show the first 2.
+- `usage.providers[].stale` (additive `v:1` ext, issue #108) -- `true` => the windows carry
   last-known-good the hub held through a transient failure (e.g. Claude oauth 429); the device dims that
-  provider's windows. Emitted ONLY when `true` (absent/`false` => live), like `qlen`. Per-provider:
-  `claude` and `codex` carry it independently.
+  provider's windows. Emitted ONLY when `true` (absent/`false` => live), like `qlen`. Per-provider,
+  independent.
+- **Migration:** this is a breaking change to the `usage` block only. Old firmware fails to parse the
+  new `providers` array and shows usage unavailable ("--"); flash matching firmware (the web flasher
+  makes this trivial). `buddy`/`loc`/`sessions` are unaffected.
 - `buddy.prompt.qlen` (additive `v:1` ext, issue #98) -- total pending prompts incl. the shown front.
   Omitted or `<=1` => a single prompt (no `(1 of N)` badge). The device always shows the front;
   position is implicitly 1, so there is no `qpos`.
@@ -49,8 +58,8 @@ lets old firmware ignore it while still reading the unchanged `buddy`/`entries` 
 on any session-state change and on (re)connect; parsed by `hub_parse_sessions` into `buddy_rec_t.sessions[]`.
 
 ```json
-{"v":1,"sessions":[{"id":"s3","label":"beacon · fix/109","state":"attention","ts":1719400000},
-                   {"id":"s1","label":"api · main","state":"working","ts":1719399860}]}
+{"v":1,"sessions":[{"id":"s3","agent":"claude","label":"beacon · fix/109","state":"attention","ts":1719400000},
+                   {"id":"s1","agent":"codex","label":"api · main","state":"working","ts":1719399860}]}
 ```
 - Newest-first (hub-sorted by last update). **Frozen caps** (worst case asserted < 1024 B): `sessions`
   length ≤ **5**; `id` ≤ **6** chars (`s` + monotonic counter, wraps mod 100000); `label` ≤ **28** chars
@@ -59,6 +68,12 @@ on any session-state change and on (re)connect; parsed by `hub_parse_sessions` i
   (device). `question` = the session is waiting on the user's input (from the CC `Notification` hook);
   the device surfaces it as a "tap to answer on Mac" takeover (priority: permission prompt > question >
   list). The device renders up to 4 rows on the `claude` screen.
+- `agent` (additive `v:1` ext, design 2026-07-19) = the owning provider id. Optional on the wire
+  (omitted when nil), always emitted by the new hub; the device stores it (cap **12** chars) and may
+  ignore it for now. Also carried on `buddy.prompt.agent` (same semantics). `buddy.running`/`waiting`
+  count across all buddy-enabled providers; `tokens`/`context_pct` come from whichever provider reports
+  metrics (0 otherwise). Session `sN` + prompt `pN` ids stay hub-minted, globally unique across
+  providers; device `permission`/`open` commands are unchanged and the hub routes them to the owner.
 - Migration: `buddy.entries` stays emitted/legal for back-compat; new firmware reads `sessions` and
   ignores `entries`, old firmware ignores the unknown `sessions` frame. No version bump.
 

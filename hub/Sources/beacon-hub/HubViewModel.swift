@@ -10,11 +10,21 @@ import BeaconHubKit
 // the device's config_ack; synced(count) = device applied N rows; error(reason) = device rejected.
 enum TickerSyncStatus: Equatable { case idle, pending, synced(Int), error(String) }
 
+// One provider's menubar card state (design 2026-07-19). Capabilities gate which toggles render.
+struct ProviderToggle: Identifiable, Equatable {
+    let id: String
+    let label: String
+    let supportsUsage: Bool
+    let supportsBuddy: Bool
+    var usageOn: Bool
+    var buddyOn: Bool
+}
+
 @MainActor
 final class HubViewModel: ObservableObject {
     @Published var link: MenubarController.Link = .searching
     @Published var lastSync: Date?
-    @Published var usage = Usage(claude: .unavailable, codex: .unavailable)
+    @Published var usage = Usage()   // provider array (design 2026-07-19); rendered as one card per entry
     @Published var notes: [UsageNote] = []   // #108: typed usage notes (info = rate-limited; error = banner)
     @Published var alert: String?          // undeliverable-prompt surface
     @Published var bridgeAlert: String?    // bridge bind failure; priority over alert
@@ -23,6 +33,9 @@ final class HubViewModel: ObservableObject {
     @Published var now: Date
     @Published var tickerSync: TickerSyncStatus = .idle
     @Published var tickerRows: [TickerRow] = []   // issue #92: current desired list, seeds the B4 editor
+    // One dynamic card per registered provider (design 2026-07-19): the Usage / Coding Buddy toggles the
+    // menubar shows, each gated by the provider's declared capabilities. Backed by ProviderSettings.
+    @Published var providers: [ProviderToggle] = []
 
     // Intent closures, populated by MenubarController (weakly, so VM<->controller is not a retain cycle).
     var onToggleMute: () -> Void = {}
@@ -40,6 +53,8 @@ final class HubViewModel: ObservableObject {
     var onValidateTicker: ((TickerRow, @escaping (Bool, String?) -> Void) -> Void)?
     var onOpenFixURL: () -> Void = {}
     var onQuit: () -> Void = {}
+    var onSetProviderUsage: (String, Bool) -> Void = { _, _ in }   // provider id, desired on/off (live)
+    var onSetProviderBuddy: (String, Bool) -> Void = { _, _ in }
 
     // `now` seeded once; refreshed on poll + popover open so reset hints stay fresh. `muted` seeded from
     // the same UserDefaults key the controller persists, so the first render matches the real state.

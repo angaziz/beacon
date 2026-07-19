@@ -29,9 +29,15 @@ struct HubPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            HStack(spacing: 10) {
-                ProviderCard(name: "Claude", usage: model.usage.claude, now: model.now)
-                ProviderCard(name: "Codex", usage: model.usage.codex, now: model.now)
+            if !model.usage.providers.isEmpty {
+                HStack(spacing: 10) {
+                    ForEach(model.usage.providers, id: \.id) { entry in
+                        ProviderCard(entry: entry, now: model.now)
+                    }
+                }
+            }
+            if !model.providers.isEmpty {
+                ProviderTogglesModule(model: model)
             }
             TogglesModule(model: model)
             ActionBar(model: model, closeAndRun: closeAndRun)
@@ -123,21 +129,26 @@ private struct HeaderModule: View {
 // MARK: - Usage
 
 private struct ProviderCard: View {
-    let name: String
-    let usage: ProviderUsage
+    let entry: UsageEntry
     let now: Date
 
     var body: some View {
         Module {
             VStack(alignment: .leading, spacing: 9) {
-                Text(name).font(.system(size: 12, weight: .semibold))
-                WindowRow(label: "5h", window: usage.h5, now: now)
-                WindowRow(label: "7d", window: usage.d7, now: now)
+                HStack(spacing: 4) {
+                    Text(entry.label).font(.system(size: 12, weight: .semibold))
+                    if entry.stale == true {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 9)).foregroundStyle(.secondary)
+                    }
+                }
+                WindowRow(label: "5h", window: entry.h5, now: now)
+                WindowRow(label: "7d", window: entry.d7, now: now)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(name)
+        .accessibilityLabel(entry.label)
         .accessibilityValue(summary)
     }
 
@@ -147,7 +158,7 @@ private struct ProviderCard: View {
             let reset = WindowRow.resetText(w.reset, now: now)
             return reset.isEmpty ? "\(unit) \(pct)" : "\(unit) \(pct), \(reset)"
         }
-        return "\(part("5 hour", usage.h5)); \(part("7 day", usage.d7))."
+        return "\(part("5 hour", entry.h5)); \(part("7 day", entry.d7))."
     }
 }
 
@@ -208,6 +219,50 @@ private struct LevelBar: View {
             }
         }
         .frame(height: 4)
+    }
+}
+
+// MARK: - Provider toggles
+
+// One card per registered provider (design 2026-07-19): Usage / Coding Buddy switches shown only for
+// the capabilities that provider supports. Flipping a switch calls the live setEnabled path.
+private struct ProviderTogglesModule: View {
+    @ObservedObject var model: HubViewModel
+
+    var body: some View {
+        Module(padding: 0) {
+            VStack(spacing: 0) {
+                ForEach(Array(model.providers.enumerated()), id: \.element.id) { idx, p in
+                    if idx > 0 { Divider().padding(.leading, 12) }
+                    VStack(spacing: 0) {
+                        if p.supportsUsage {
+                            ToggleRow(icon: "gauge.with.dots.needle.67percent",
+                                      title: "\(p.label) usage", isOn: usageBinding(p.id))
+                        }
+                        if p.supportsUsage && p.supportsBuddy { Divider().padding(.leading, 12) }
+                        if p.supportsBuddy {
+                            ToggleRow(icon: "person.2.fill",
+                                      title: "\(p.label) coding buddy", isOn: buddyBinding(p.id))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func usageBinding(_ id: String) -> Binding<Bool> {
+        Binding(get: { model.providers.first { $0.id == id }?.usageOn ?? true },
+                set: { on in
+                    if let i = model.providers.firstIndex(where: { $0.id == id }) { model.providers[i].usageOn = on }
+                    model.onSetProviderUsage(id, on)
+                })
+    }
+    private func buddyBinding(_ id: String) -> Binding<Bool> {
+        Binding(get: { model.providers.first { $0.id == id }?.buddyOn ?? true },
+                set: { on in
+                    if let i = model.providers.firstIndex(where: { $0.id == id }) { model.providers[i].buddyOn = on }
+                    model.onSetProviderBuddy(id, on)
+                })
     }
 }
 
@@ -335,11 +390,18 @@ private struct ActionButton: View {
     let m = HubViewModel(now: Date(timeIntervalSince1970: 1_733_800_000))
     m.link = .connected("Beacon-8428")
     m.lastSync = Date(timeIntervalSince1970: 1_733_800_000)
-    m.usage = Usage(
-        claude: ProviderUsage(h5: UsageWindow(pct: 2, reset: 1_733_820_000),
-                              d7: UsageWindow(pct: 0, reset: 1_734_200_000)),
-        codex: ProviderUsage(h5: UsageWindow(pct: 1, reset: 1_733_821_000),
-                             d7: UsageWindow(pct: 93, reset: 1_734_300_000)))
+    m.usage = Usage(providers: [
+        UsageEntry(id: "claude", label: "CLAUDE",
+                   h5: UsageWindow(pct: 2, reset: 1_733_820_000),
+                   d7: UsageWindow(pct: 0, reset: 1_734_200_000)),
+        UsageEntry(id: "codex", label: "CODEX",
+                   h5: UsageWindow(pct: 1, reset: 1_733_821_000),
+                   d7: UsageWindow(pct: 93, reset: 1_734_300_000), stale: true),
+    ])
+    m.providers = [
+        ProviderToggle(id: "claude", label: "Claude", supportsUsage: true, supportsBuddy: true, usageOn: true, buddyOn: true),
+        ProviderToggle(id: "codex", label: "Codex", supportsUsage: true, supportsBuddy: false, usageOn: true, buddyOn: true),
+    ]
     return HubPanel(model: m, closeAndRun: { $0() })
 }
 #endif

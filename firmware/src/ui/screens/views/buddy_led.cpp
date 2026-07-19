@@ -59,7 +59,7 @@ static void build(lv_obj_t* page) {
   if (!t) return;
 
   lv_obj_t* eb = lv_label_create(page);
-  lv_label_set_text(eb, "BEACON / CLAUDE");
+  lv_label_set_text(eb, "BEACON / AGENTS");
   lv_obj_set_style_text_font(eb, t->f_mono, 0);
   lv_obj_set_style_text_color(eb, t->accent, 0);
   lv_obj_align(eb, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET);

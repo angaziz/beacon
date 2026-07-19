@@ -65,7 +65,7 @@ static void build(lv_obj_t* page) {
   const beacon_theme_t* t = theme_active();
 
   lv_obj_t* dwg = lv_label_create(page);
-  lv_label_set_text(dwg, "DWG. BEACON-004 / CLAUDE");
+  lv_label_set_text(dwg, "DWG. BEACON-004 / AGENTS");
   lv_obj_set_style_text_color(dwg, t->ink_dim, 0);
   lv_obj_set_style_text_font(dwg, t->f_mono, 0);
   lv_obj_align(dwg, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET);

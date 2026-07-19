@@ -86,12 +86,16 @@ lv_obj_get_coords. For gauges you may instead reuse `gauge_render(parent, t, pct
 - finance (MARKETS): rows over ds_get_finance(0..count-1): id (char[]), value (double -> ui/fmt.h
   fmt_value), change_pct (double -> fmt_change returns +1/-1/0 -> up/down color + ^/v glyph). Per-row hdr
   state. >6 rows: vertical-scroll list inside the page (lv_obj_set_scroll_dir(list, LV_DIR_VER)).
-- usage (LIMITS): CLAUDE + CODEX, each 5H + 7D. usage_rec_t: u.claude.h5/.d7, u.codex.h5/.d7, each
-  usage_window_t{int16_t pct; uint32_t reset}. pct<0 == unavailable => show "--" and NO bar/ring fill
-  (never feed -1 to a 0..100 widget). resets => placeholder. Whole-screen HUB_OFFLINE via u.hdr.
+- usage (LIMITS): data-driven providers, up to 4 on the wire, first 2 rendered (2x2 grid). usage_rec_t:
+  u.count + u.p[i]{ char id[13]; char label[11]; usage_window_t h5,d7; bool stale } . usage_window_t
+  {int16_t pct; uint32_t reset}. Render from u.count + u.p[i].label (NOT hardcoded provider names);
+  helpers usage_slot/usage_tag/usage_abbr2/usage_none in screen_common.h. count 0 => all placeholders;
+  count 1 => provider 0 in the top row; >2 => first 2. pct<0 == unavailable => show "--" and NO bar/ring
+  fill (never feed -1 to a 0..100 widget). resets => placeholder. Whole-screen HUB_OFFLINE via u.hdr.
+  Casing per theme: lowercase tags (calm/analog), uppercase (editorial/blueprint/led/oscilloscope/hud).
   Per directions.html: HUD=concentric rings, Calm=big-fig + dots, Blueprint=measure axis+marker,
   LED=cell meter, Oscilloscope=scope level fill, Analog=conic sub-dials, Editorial=track bars.
-- buddy (CLAUDE): status line (running, waiting, tokens/1000 +"K", context_pct). Discriminate
+- buddy (screen id "CLAUDE", branded "AGENTS"): status line (running, waiting, tokens/1000 +"K", context_pct). Discriminate
   buddy.prompt.present: true => prompt layout (prompt.tool, prompt.hint in a box, DENY|APPROVE);
   false => idle (entries[0..entry_count-1], or "idle"). Approve/Deny tap is a LOCAL STUB: read rec,
   set prompt.present=false, ds_set_buddy(&rec), LOGI. Disable actions when hdr.state is HUB_OFFLINE.

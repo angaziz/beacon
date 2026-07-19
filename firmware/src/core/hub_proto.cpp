@@ -49,13 +49,23 @@ bool hub_parse_status(const char* json, size_t len,
 
   JsonVariantConst u = doc["usage"];
   if (!u.isNull()) {
-    *had_usage = true;
-    fill_window(&usage->claude.h5, u["claude"]["h5"]);  // missing provider => its windows go null
-    fill_window(&usage->claude.d7, u["claude"]["d7"]);
-    fill_window(&usage->codex.h5,  u["codex"]["h5"]);
-    fill_window(&usage->codex.d7,  u["codex"]["d7"]);
-    usage->claude.stale = u["claude"]["stale"] | false;  // #108: absent => live; only "stale":true dims.
-    usage->codex.stale  = u["codex"]["stale"]  | false;
+    // Frozen wire: usage.providers is an array of {id,label,h5,d7,stale?}. A usage block WITHOUT a
+    // providers array is malformed => reject the block (leave *had_usage false => caller keeps last).
+    JsonVariantConst provs = u["providers"];
+    if (provs.is<JsonArrayConst>()) {
+      *had_usage = true;
+      usage->count = 0;
+      for (JsonVariantConst pv : provs.as<JsonArrayConst>()) {
+        if (usage->count >= USAGE_PROVIDERS_MAX) break;   // cap at 4; extras dropped
+        usage_provider_t* d = &usage->p[usage->count];
+        copy_trunc(d->id,    USAGE_ID_LEN,    pv["id"].as<const char*>());
+        copy_trunc(d->label, USAGE_LABEL_LEN, pv["label"].as<const char*>());
+        fill_window(&d->h5, pv["h5"]);          // absent/null pct => -1 (unavailable)
+        fill_window(&d->d7, pv["d7"]);
+        d->stale = pv["stale"] | false;          // #108: absent => live; only "stale":true dims
+        usage->count++;
+      }
+    }
   }
 
   JsonVariantConst b = doc["buddy"];
@@ -76,7 +86,7 @@ bool hub_parse_status(const char* json, size_t len,
     JsonVariantConst p = b["prompt"];
     if (p.isNull()) {                                   // absent prompt => idle
       buddy->prompt.present = false;
-      buddy->prompt.id[0] = buddy->prompt.tool[0] = buddy->prompt.hint[0] = '\0';
+      buddy->prompt.id[0] = buddy->prompt.tool[0] = buddy->prompt.hint[0] = buddy->prompt.agent[0] = '\0';
       buddy->prompt.queue_len = 1;
     } else {
       const char* pid = p["id"].as<const char*>();
@@ -89,6 +99,7 @@ bool hub_parse_status(const char* json, size_t len,
       copy_trunc(buddy->prompt.id,   BUDDY_ID_LEN,   pid);
       copy_trunc(buddy->prompt.tool, BUDDY_TOOL_LEN, p["tool"].as<const char*>());
       copy_trunc(buddy->prompt.hint, BUDDY_HINT_LEN, p["hint"].as<const char*>());
+      copy_trunc(buddy->prompt.agent, USAGE_ID_LEN, p["agent"].as<const char*>());  // optional; absent => empty
       int q = p["qlen"] | 1;                                 // absent/non-numeric => 1
       buddy->prompt.queue_len = (uint8_t)(q < 1 ? 1 : (q > 255 ? 255 : q));  // clamp: 0/neg => 1, cap at 255
     }
@@ -120,6 +131,7 @@ bool hub_parse_sessions(const char* json, size_t len, buddy_rec_t* buddy, bool* 
     buddy_session_t* d = &buddy->sessions[buddy->session_count];
     copy_trunc(d->id,    BUDDY_SID_LEN,   s["id"].as<const char*>());
     copy_trunc(d->label, BUDDY_LABEL_LEN, s["label"].as<const char*>());
+    copy_trunc(d->agent, USAGE_ID_LEN,    s["agent"].as<const char*>());  // optional; absent => empty
     d->state = map_session_state(s["state"].as<const char*>());
     d->ts    = s["ts"] | (uint32_t)0;
     buddy->session_count++;

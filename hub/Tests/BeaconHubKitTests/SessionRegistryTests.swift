@@ -64,53 +64,6 @@ final class SessionRegistryTests: XCTestCase {
         XCTAssertLessThanOrEqual(snap.first!.label.count, SessionLimits.labelMaxChars)
     }
 
-    func testSetHostAndHostByShortId() {
-        let r = SessionRegistry()
-        r.touchActivity(sessionId: "CC-abc", cwd: "/home/user/beacon", now: t0)
-        r.setHost(sessionId: "CC-abc", hostApp: "WarpTerminal", focusURL: "warp://focus/123", bundleId: "dev.warp.Warp-Stable")
-
-        // host(for:) returns populated fields for the full CC session_id.
-        let byFull = r.host(for: "CC-abc")
-        XCTAssertNotNil(byFull)
-        XCTAssertEqual(byFull?.app, "WarpTerminal")
-        XCTAssertEqual(byFull?.focusURL, "warp://focus/123")
-        XCTAssertEqual(byFull?.bundleId, "dev.warp.Warp-Stable")
-        XCTAssertEqual(byFull?.cwd, "/home/user/beacon")
-
-        // hostByShortId finds the same entry via the minted s<n> id.
-        let snap = r.snapshot(now: t0.addingTimeInterval(1), waitingFront: nil, waitingQueued: [])
-        let shortId = snap.first!.id   // e.g. "s1"
-        let byShort = r.hostByShortId(shortId)
-        XCTAssertNotNil(byShort)
-        XCTAssertEqual(byShort?.app, "WarpTerminal")
-        XCTAssertEqual(byShort?.focusURL, "warp://focus/123")
-        XCTAssertEqual(byShort?.cwd, "/home/user/beacon")
-    }
-
-    func testHostUnknownReturnsNil() {
-        let r = SessionRegistry()
-        XCTAssertNil(r.host(for: "no-such-session"))
-        XCTAssertNil(r.hostByShortId("s99"))
-    }
-
-    func testSetHostNoOpForUnknownSession() {
-        let r = SessionRegistry()
-        // Should not crash; there is simply no entry to update.
-        r.setHost(sessionId: "ghost", hostApp: "Terminal", focusURL: nil, bundleId: nil)
-        XCTAssertNil(r.host(for: "ghost"))
-    }
-
-    func testHostEmptyStringsLeaveFieldsNil() {
-        let r = SessionRegistry()
-        r.touchActivity(sessionId: "B", cwd: "/tmp/x", now: t0)
-        r.setHost(sessionId: "B", hostApp: "", focusURL: "", bundleId: "")
-        let h = r.host(for: "B")
-        XCTAssertNil(h?.app)
-        XCTAssertNil(h?.focusURL)
-        XCTAssertNil(h?.bundleId)
-        XCTAssertEqual(h?.cwd, "/tmp/x")   // cwd from touchActivity is kept
-    }
-
     func testMarkNeedsInputProducesQuestion() {
         let r = SessionRegistry(idleTTL: 300)
         r.touchActivity(sessionId: "A", cwd: "/x/api", now: t0)
@@ -159,23 +112,19 @@ final class SessionRegistryTests: XCTestCase {
         XCTAssertEqual(snap.first?.state, .waiting)
     }
 
-    // I2: a later setHost with empty/nil fields (e.g. a `compact` event that didn't re-export
-    // WARP_FOCUS_URL) must MERGE, not wipe a previously-captured precise handle.
-    func testSetHostMergesAndPreservesPriorValues() {
+    func testProviderIdAgentRouteAndTrackedCount() {
         let r = SessionRegistry()
-        r.touchActivity(sessionId: "M", cwd: "/x/api", now: t0)
-        r.setHost(sessionId: "M", hostApp: "WarpTerminal", focusURL: "warp://focus/abc", bundleId: "dev.warp.Warp-Stable")
-
-        // Second call: empty focus_url + nil bundle, only host_app re-sent -> prior values survive.
-        r.setHost(sessionId: "M", hostApp: "WarpTerminal", focusURL: "", bundleId: nil)
-        let h = r.host(for: "M")
-        XCTAssertEqual(h?.app, "WarpTerminal")
-        XCTAssertEqual(h?.focusURL, "warp://focus/abc")        // NOT wiped by empty string
-        XCTAssertEqual(h?.bundleId, "dev.warp.Warp-Stable")     // NOT wiped by nil
-
-        // A non-empty incoming value still overwrites.
-        r.setHost(sessionId: "M", hostApp: nil, focusURL: "warp://focus/xyz", bundleId: nil)
-        XCTAssertEqual(r.host(for: "M")?.focusURL, "warp://focus/xyz")
-        XCTAssertEqual(r.host(for: "M")?.app, "WarpTerminal")   // untouched by nil
+        r.touchActivity(providerID: "claude", sessionId: "cc-1", cwd: "/x/api", now: t0)
+        r.touchActivity(providerID: "codex", sessionId: "cx-1", cwd: "/x/srv", now: t0.addingTimeInterval(1))
+        let snap = r.snapshot(now: t0.addingTimeInterval(2), waitingFront: nil, waitingQueued: [])
+        XCTAssertEqual(Set(snap.compactMap { $0.agent }), ["claude", "codex"])   // agent = providerID
+        // route: the codex row's short id resolves back to (codex, cx-1).
+        let codexRow = snap.first { $0.agent == "codex" }!
+        let route = r.route(shortId: codexRow.id)
+        XCTAssertEqual(route?.providerID, "codex")
+        XCTAssertEqual(route?.nativeKey, "cx-1")
+        // trackedCount scoped to enabled providers.
+        XCTAssertEqual(r.trackedCount(), 2)
+        XCTAssertEqual(r.trackedCount(includeProvider: { $0 == "claude" }), 1)
     }
 }
