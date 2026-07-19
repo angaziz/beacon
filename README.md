@@ -22,7 +22,7 @@ Five screens, navigated by swipe + motion gestures:
 | Home | clock, date, weather, humidity | WiFi (direct) |
 | Finance | FX, crypto, indices, ETFs — curated from the Mac hub | WiFi (direct) |
 | AI Usage | Claude + Codex, **both** 5h and 7-day windows + reset | Mac hub (BLE) |
-| Coding Buddy | live per-session list (state + folder·branch + age), approve/deny tool-permission prompts, tap a session to focus its terminal | Mac hub (BLE) |
+| Coding Buddy | live per-session list (state + folder·branch + age), approve/deny tool-permission prompts, tap a session to focus its terminal | pluggable agent providers (Claude Code today, Codex CLI landing) via the Mac hub (BLE) |
 | Settings | WiFi, brightness, theme picker, sleep, etc. | local (NVS) |
 
 ## What works today
@@ -31,8 +31,8 @@ Five screens, navigated by swipe + motion gestures:
 - **Home + Finance run on live data** over WiFi: NTP/RTC time, Open-Meteo weather (auto-located by IP), FX / BTC / indices.
 - **Markets are curated from the hub, no re-flashing** — search Binance + Yahoo in the macOS menubar app, pick your tickers, and they push to the device over BLE and apply instantly (persisted on-device, no reboot, no code change). The device keeps fetching prices itself over WiFi.
 - **WiFi setup happens on-device** — the device opens a hotspot with a captive portal; no credentials are ever compiled into the firmware. Multiple networks are remembered.
-- **AI Usage is live over Bluetooth**: the macOS hub reads Claude Code + Codex usage and streams it to the device over a bonded BLE link, alongside the device's own WiFi plane.
-- **Coding Buddy is session-aware, validated on hardware**: the `claude` screen lists your live Claude Code sessions (state + folder·branch + age, newest first); approve/deny a tool-permission prompt from the device and the Mac honors it; a session waiting on your input shows a **"tap to answer on Mac"** card; **tap any session to focus its terminal** (precise for Warp; repo-window for VS Code/Cursor; app-level otherwise); a distinct chime fires when a session needs you, and the device wakes itself for it.
+- **AI Usage is live over Bluetooth**: the macOS hub streams usage from any enabled provider (Claude and Codex built in) to the device over a bonded BLE link, alongside the device's own WiFi plane.
+- **Coding Buddy is session-aware, validated on hardware**: the `claude` screen lists live sessions from buddy-enabled providers (state + folder·branch + age, newest first); approve/deny a tool-permission prompt from the device and the Mac honors it; a session waiting on your input shows a **"tap to answer on Mac"** card; **tap any session to focus its terminal** (precise for Warp; repo-window for VS Code/Cursor; app-level otherwise); a distinct chime fires when a session needs you, and the device wakes itself for it. Per-provider **Usage** and **Coding Buddy** toggles live in the hub menubar.
 - Settings, theme picker, brightness, and preferences persist across reboots.
 
 ## Two-plane architecture
@@ -88,6 +88,8 @@ Just validating a fresh board? Flash the bring-up spike first — [`docs/spikes/
 Beacon Hub is a small macOS menubar app — the device's private-data plane. It reads your Claude Code + Codex usage and bridges Claude Code's tool-permission prompts to the device over a bonded Bluetooth link. Your Claude/Codex credentials stay on the Mac; only normalized percentages, reset times, and prompt text ever cross BLE.
 
 It's also where you **curate the Finance screen**: search Binance + Yahoo from the menubar, pick the tickers you care about, and they sync to the device over BLE and apply on the spot — no firmware edit, no re-flash, no reboot.
+
+Providers are modular: each has independent **Usage** and **Coding Buddy** toggles in the menubar. Disabling Coding Buddy for a provider passes its permission prompts through to the terminal.
 
 ![Beacon Hub menubar app](docs/assets/hub.png)
 

@@ -147,6 +147,39 @@ final class ProviderMuxTests: XCTestCase {
         XCTAssertEqual(box.buddy.running, 0)
     }
 
+    // --- buddy entries toggle filtering ---
+
+    // Entries are gated by the per-provider buddy toggle: buffered while enabled (newest-first), dropped
+    // on toggle-off (excluded from frames, future lines ignored), and re-enable shows FRESH lines only --
+    // pre-disable entries are not resurrected.
+    func testBuddyEntriesFilteredByToggle() {
+        let (mux, box) = makeMux(now: { self.t0 })
+        mux.provider("claude", didAppendEntry: "10:41 yarn test")
+        mux.provider("claude", didAppendEntry: "10:42 git push")
+        XCTAssertEqual(box.buddy.entries, ["10:42 git push", "10:41 yarn test"])
+
+        mux.setEnabled("claude", EnabledCapabilities(usage: true, buddy: false))
+        XCTAssertEqual(box.buddy.entries, [], "buddy-off drops buffered entries")
+        mux.provider("claude", didAppendEntry: "10:43 ignored while off")
+        XCTAssertEqual(box.buddy.entries, [], "buddy-off provider's new entries never reach the device")
+
+        mux.setEnabled("claude", EnabledCapabilities(usage: true, buddy: true))
+        mux.provider("claude", didAppendEntry: "10:44 fresh")
+        XCTAssertEqual(box.buddy.entries, ["10:44 fresh"], "re-enable restores fresh entries only")
+    }
+
+    // Toggling one provider off leaves another buddy-enabled provider's entries intact.
+    func testBuddyEntriesToggleIsPerProvider() {
+        let (mux, box) = makeMux(now: { self.t0 })
+        mux.register(ProviderDescriptor(id: "b", label: "B", capabilities: [.sessions, .prompts]))
+        mux.provider("claude", didAppendEntry: "c1")
+        mux.provider("b", didAppendEntry: "b1")
+        XCTAssertEqual(box.buddy.entries, ["b1", "c1"])
+
+        mux.setEnabled("claude", EnabledCapabilities(usage: true, buddy: false))
+        XCTAssertEqual(box.buddy.entries, ["b1"], "only the disabled provider's entries drop")
+    }
+
     // --- open routing ---
 
     func testSessionRouteResolvesShortId() {

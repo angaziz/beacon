@@ -257,6 +257,75 @@ receives JSON with `session_id` (per-session TOK/CTX aggregation key), `cwd` (at
 statusline renderer** (forwards the JSON to `127.0.0.1:8765/statusline`, then delegates to the real
 command passed as args), so the user's status bar is unchanged. Bind port is the fixed **8765**.
 
+### C.5 Codex hooks (buddy) — VERIFIED (openai/codex codex-rs/hooks @ 0fb559f0; codex-cli 0.140.0)
+Codex ships a Claude-compatible command-hook system (feature `hooks`, stable + default-on). The Codex
+buddy adapter bridges it with a shim, `~/.beacon/beacon-codex-hook` (installed alongside the Claude
+statusline shim). Codex spawns the shim per event with the event JSON on stdin and reads the decision
+from stdout.
+
+**Install (managed block in `~/.codex/config.toml`, honors `CODEX_HOME`).** Idempotent, marker-delimited
+(`# >>> beacon-codex-hooks (managed by Beacon Hub; do not edit) >>>` ... `<<<`); everything outside the
+markers is preserved and a timestamped `.bak.<ts>` is written before any change. The block wires five
+events, one matcher group + one command each:
+
+```toml
+[[hooks.SessionStart]]
+hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook" }]
+[[hooks.UserPromptSubmit]]
+hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook" }]
+[[hooks.Stop]]
+hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook" }]
+[[hooks.SessionEnd]]
+hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook" }]
+[[hooks.PermissionRequest]]
+hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook", timeout = 590 }]
+
+[hooks.state]
+"<canonical config.toml path>:permission_request:0:0" = { enabled = true, trusted_hash = "sha256:..." }
+# ... one trusted_hash entry per event ...
+```
+
+**stdin (Codex -> shim, snake_case).** `{session_id, turn_id, cwd, hook_event_name, model,
+permission_mode, tool_name, tool_input, ...}`. `SessionStart` adds `source` (startup|resume|clear|
+compact); `SessionEnd` adds `reason`.
+
+**stdout (shim -> Codex).** Byte-identical to the Claude `PermissionRequest` shape (§C.3):
+`{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"|"deny",
+"message":"..."}}}`. Empty stdout or `{}` = **no verdict** (Codex falls through to its own interactive
+TUI prompt). Any deny wins the fold; exit 2 + stderr also denies.
+
+**Lifecycle -> session state.** `SessionStart` => register (label = cwd basename + git branch),
+`UserPromptSubmit` => working, `Stop` => attention, `SessionEnd` => remove. These POST fire-and-forget
+(shim `curl -m 1`); the hub replies `{"ok":true}`.
+
+**PermissionRequest hold / timeout.** The shim POSTs synchronously (`curl --max-time 585`) and the hub
+HOLDS the connection until the device decides, then returns the allow/deny decision. The hub arms a
+fail-closed 575 s cap; the timers are strictly ordered `hub 575 < curl 585 < Codex hook 590` so the hub
+always fires first while the socket is still open (its deny reaches Codex). A cap equal to the curl
+budget would fire only after curl had already closed the socket, degrading to fail-OPEN passthrough --
+curl's clock starts before the hub even receives the request. If the held connection drops first, the
+user answered in the Codex TUI => the hub withdraws that prompt silently.
+
+**Pass-through (never auto-deny on a toggle).** Coding-Buddy OFF, or a still-held prompt at toggle-off,
+returns `{}` (no verdict) so Codex prompts locally. Device offline denies immediately (named). Hub
+unreachable is handled in the shim: connection refused / timeout => print nothing, exit 0 (fail-open to
+the Codex TUI).
+
+**Trust (CRITICAL, source-verified + reproduced against codex-cli 0.140.0).** A user-config command hook
+only RUNS when Codex marks it `Trusted`, i.e. its `[hooks.state]` `trusted_hash` equals the hash Codex
+derives (`codex-rs/hooks/src/engine/discovery.rs`: `enabled && (bypass || Managed | Trusted)`; else the
+hook is discovered but never dispatched). Codex derives the hash (`config/src/fingerprint.rs
+version_for_toml`) as `sha256:` + hex(sha256(canonical compact JSON of the normalized identity
+`{"event_name":"<label>","hooks":[{"async":false,"command":"<cmd>","timeout":<normalized>,"type":"command"}]}`,
+object keys sorted). Normalized timeouts: 600 for SessionStart/UserPromptSubmit/Stop, 1 for SessionEnd,
+590 for PermissionRequest. The state key is `<fs::canonicalize(config.toml)>:<event label>:<group>:<handler>`
+(group/handler are 0 for our single-group-per-event block). The installer computes and writes these
+hashes, so a fresh install is immediately trusted with **no interactive trust step** (verified end to end:
+`hooks/list` reports every Beacon hook `trusted`). One-time recovery, only if Codex ever reports the
+hooks as untrusted (e.g. a Codex build whose hashing changed, or a pre-existing `[[hooks.<Event>]]`
+group shifting our group index): re-run install, or trust the Beacon hooks once from the Codex TUI
+`/hooks` menu.
+
 ## D. Hub-side policies
 
 - **Short id mapping (`records.h` `BUDDY_ID_LEN`=24 => <=23 chars):** the hub mints a short id per

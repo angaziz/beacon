@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Beacon Codex hook shim (design 2026-07-19). Codex hooks are command-type: Codex spawns this with the
+# event JSON on stdin and reads the decision from stdout. We bridge that to the hub over localhost:
+# forward the payload to POST /codex/hook and print the hub's response body back to Codex.
+#
+# Wired into ~/.codex/config.toml by the installer (five [[hooks.<Event>]] groups). PermissionRequest is
+# synchronous -- the hub HOLDS the connection until the device decides -- so it gets a long curl budget
+# (just under Codex's 590s hook timeout). Lifecycle events (SessionStart/UserPromptSubmit/Stop/
+# SessionEnd) are fire-and-forget with a 1s cap so a stopped hub never stalls Codex.
+#
+# FAIL-OPEN: if the hub is unreachable (not running / connection refused / timeout), print NOTHING and
+# exit 0. Empty stdout is "no verdict" to Codex, so it falls through to its own interactive TUI prompt.
+
+input="$(</dev/stdin)"   # builtin slurp; no `cat` fork on the hot path
+
+# Fixed port 8765 (LocalIngestServer), with the port file as a fallback (same pattern as beacon-statusline).
+port=8765
+[ -r "$HOME/.beacon-hub/port" ] && read -r port < "$HOME/.beacon-hub/port"
+url="http://127.0.0.1:${port}/codex/hook"
+
+# PermissionRequest is the only event that needs the hub's decision on stdout. Detect it from the
+# snake_case hook_event_name (Codex stdin schema) without a JSON parser. Any deny/allow decision or an
+# empty body flows straight back to Codex.
+case "$input" in
+  *'"hook_event_name":"PermissionRequest"'* | *'"hook_event_name": "PermissionRequest"'*)
+    # Block until the hub resolves (device decision) or the connection dies. --connect-timeout keeps a
+    # dead hub from stalling; --max-time is just under Codex's 590s hook timeout. On any curl failure the
+    # command substitution yields empty output -> we print nothing -> Codex prompts locally (fail-open).
+    # Payload is piped (--data-binary @-), never argv: a large tool_input would blow past ARG_MAX and
+    # silently fail-open an otherwise real PermissionRequest.
+    resp="$(printf '%s' "$input" | curl -s --connect-timeout 2 --max-time 585 -X POST "$url" \
+      -H 'Content-Type: application/json' --data-binary @- 2>/dev/null)" || resp=""
+    [ -n "$resp" ] && printf '%s' "$resp"
+    exit 0
+    ;;
+  *)
+    # Lifecycle event: forward for session tracking, fire-and-forget with a 1s cap. Never blocks Codex.
+    printf '%s' "$input" | curl -s -m 1 -X POST "$url" \
+      -H 'Content-Type: application/json' --data-binary @- >/dev/null 2>&1 &
+    exit 0
+    ;;
+esac

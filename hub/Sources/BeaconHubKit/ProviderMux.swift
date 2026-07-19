@@ -48,7 +48,7 @@ public final class ProviderMux: ProviderSink {
     private var enabled: [String: EnabledCapabilities] = [:]
     private var usageByID: [String: ProviderUsage] = [:]
     private var metricsByID: [String: (tokens: Int, contextPct: Int)] = [:]
-    private var entries: [String] = []
+    private var entries: [(providerID: String, line: String)] = []
 
     private var lastUsage: Usage?
     private var lastBuddy: BuddyState?
@@ -73,6 +73,10 @@ public final class ProviderMux: ProviderSink {
 
     public func setEnabled(_ id: String, _ caps: EnabledCapabilities) {
         enabled[id] = caps
+        // Toggle-off excludes a provider's data from frames, so drop any buffered entries from a
+        // now-buddy-disabled provider. Re-enable then shows fresh entries only -- pre-disable lines are
+        // not resurrected (consistent with sessions/prompts, which the toggle also excludes wholesale).
+        entries.removeAll { !buddyEnabled($0.providerID) }
         publishUsage(); publishBuddy(); publishSessions()
     }
 
@@ -157,7 +161,10 @@ public final class ProviderMux: ProviderSink {
     }
 
     public func provider(_ id: String, didAppendEntry line: String) {
-        entries = Array(([line] + entries).prefix(3))   // newest-first, cap 3 (device BUDDY_ENTRIES)
+        // Gate on the per-provider buddy toggle like sessions/prompts: a buddy-disabled provider's
+        // activity is excluded from frames, so drop the line rather than buffer it (no future leak).
+        guard buddyEnabled(id) else { return }
+        entries = Array(([(providerID: id, line: line)] + entries).prefix(3))   // newest-first, cap 3 (device BUDDY_ENTRIES)
         publishBuddy()
     }
 
@@ -180,7 +187,7 @@ public final class ProviderMux: ProviderSink {
         buddy.waiting = broker.heldSessionKeys(where: { [weak self] in self?.buddyEnabled($0) ?? false }).count
         buddy.tokens = order.reduce(0) { $0 + (buddyEnabled($1) ? (metricsByID[$1]?.tokens ?? 0) : 0) }
         buddy.contextPct = order.compactMap { buddyEnabled($0) ? metricsByID[$0]?.contextPct : nil }.max() ?? 0
-        buddy.entries = entries
+        buddy.entries = entries.map(\.line)
         if let (fid, h) = broker.front(), buddyEnabled(h.providerID) {
             let n = broker.qlen
             buddy.prompt = BuddyPrompt(id: fid, tool: h.tool, hint: h.hint,

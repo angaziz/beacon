@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let ingest = LocalIngestServer()
     private var providers: [AgentProvider] = []
     private var claude: ClaudeCodeProvider?            // typed ref for drain + device-connected + statusline
+    private var codex: CodexProvider?                  // typed ref for drain + device-connected
     private var poller: UsagePoller!                   // built once providers exist
     private let firstRun = FirstRunWindowController()
     private let forgetWindow = ForgetWindowController()
@@ -82,10 +83,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let claude else { return .terminateNow }
+        let drainers = [claude?.drainHeldPrompts, codex?.drainHeldPrompts].compactMap { $0 }
+        guard !drainers.isEmpty else { return .terminateNow }
         var replied = false
         let reply = { if !replied { replied = true; NSApp.reply(toApplicationShouldTerminate: true) } }
-        claude.drainHeldPrompts(reason: "Beacon hub is quitting", completion: reply)
+        let group = DispatchGroup()
+        for drain in drainers {
+            group.enter()
+            drain("Beacon hub is quitting", { group.leave() })
+        }
+        group.notify(queue: .main, execute: reply)
         // Safety cap so Quit never hangs if a socket write stalls; the drain replies earlier on real flush,
         // and immediately when nothing was held. A dropped conn would fail-OPEN per CONTRACT.md C.3.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { reply() }
@@ -203,7 +210,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         claude.onPromptArrived = { [weak self] in Task { @MainActor in self?.menubar.playPromptSoundIfEnabled() } }
         self.claude = claude
 
-        let codex = CodexProvider(usageSession: usageSession)
+        let codex = CodexProvider(server: ingest, usageSession: usageSession)
+        self.codex = codex
         providers = [claude, codex]
 
         for p in providers {
@@ -290,6 +298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menubar.setAlert(nil)   // device reachable again => clear any undeliverable-prompt alert.
         }
         claude?.setDeviceConnected(connected)
+        codex?.setDeviceConnected(connected)
         poller.setDeviceConnected(connected)   // #64: back off the usage poll cadence while disconnected.
 
         // Drive the first-run window from the SAME phase stream (no second CBCentralManager): Bluetooth

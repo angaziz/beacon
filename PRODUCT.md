@@ -11,7 +11,7 @@ A single owner-user: a developer at their desk. Context is *peripheral* — they
 ## Product Purpose
 
 Beacon is a personal desk command-center on an ESP32-S3 AMOLED device. It is:
-- A **companion to the Mac** for AI-coding: shows Claude Code / Codex usage and session state over BLE, and lets the user approve/deny tool-permission prompts and launch tasks from the device. Secret tokens stay on the Mac hub; the device never holds Claude/Codex credentials.
+- A **companion to the Mac** for AI-coding: shows usage and session state from pluggable agent providers (Claude Code / Codex today) over BLE, and lets the user approve/deny tool-permission prompts and launch tasks from the device. Secret tokens stay on the Mac hub; the device never holds Claude/Codex credentials.
 - **Independent over WiFi** for public, always-useful data: live FX/crypto/indices, weather, time, and Spotify control (commands an active Spotify Connect device — the device is a remote, not a player). These keep working when the Mac is asleep, though Spotify still needs some active player to target.
 
 Success = the user trusts a glance at Beacon instead of checking menubars/phone, and acts on it (approve, skip, check a rate) without context-switching away from their work.
