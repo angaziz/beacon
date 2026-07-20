@@ -6,11 +6,20 @@ import Foundation
 // quota window resets. This is pure so the whole (priorState, outcome, now) -> (display, nextState)
 // path is host-tested without URLSession/timers.
 
+// Why a terminal fetch failed, for the abandonment demotion (#126). Only Claude's credential paths
+// carry meaningful kinds; every other terminal is .other and never demotes.
+public enum TerminalKind: Equatable {
+    case missingCredential
+    case staleToken(expiredFor: TimeInterval)
+    case other
+}
+
 // How a fetch resolved. Providers classify the transport facts only they can observe.
 public enum ProviderOutcome: Equatable {
     case live                                                 // HTTP 200 + normalized OK
     case transient(retryAfter: TimeInterval?, reason: String) // 429 / 5xx / network -- retain last-good
-    case terminal(reason: String)                             // token missing/expired, shape drift
+    case terminal(reason: String, kind: TerminalKind) // token missing/expired, shape drift
+    case inactive(reason: String)                     // abandoned provider (#126): quiet .info, no red banner
 }
 
 // A menubar note. `.info` is muted (rate-limited, showing last value); `.error` is the red banner.
@@ -45,6 +54,7 @@ public enum UsageReducer {
     //                there was never a last-good) => "--" + the error reason.
     //  - .terminal : clear last-good (credential-identity safety: a re-login must not show the old
     //                account) => "--" + the actionable reason.
+    //  - .inactive : like .terminal but a muted .info note (abandoned provider, #126).
     public static func reduceProvider(prior: ProviderRetention, outcome: ProviderOutcome,
                                       usage: ProviderUsage, now: Date, maxStale: TimeInterval,
                                       label: String) -> (next: ProviderRetention, display: ProviderDisplay) {
@@ -54,10 +64,15 @@ public enum UsageReducer {
             return (ProviderRetention(lastGood: live, lastGoodAt: now),
                     ProviderDisplay(usage: live, note: nil))
 
-        case .terminal(let reason):
+        case .terminal(let reason, _):
             return (ProviderRetention(lastGood: nil, lastGoodAt: nil),
                     ProviderDisplay(usage: .unavailable,
                                     note: UsageNote(severity: .error, text: reason)))
+
+        case .inactive(let reason):
+            return (ProviderRetention(lastGood: nil, lastGoodAt: nil),
+                    ProviderDisplay(usage: .unavailable,
+                                    note: UsageNote(severity: .info, text: reason)))
 
         case .transient(_, let reason):
             guard let good = prior.lastGood else {
@@ -77,6 +92,13 @@ public enum UsageReducer {
                 : UsageNote(severity: .error, text: reason)
             return (prior, ProviderDisplay(usage: shown, note: note))
         }
+    }
+
+    // A usage-disabled provider must not surface its (possibly frozen) note (#126): filter by the live
+    // usage-enabled predicate before assembling the menubar note list, in registration order.
+    public static func visibleNotes(order: [String], notes: [String: UsageNote],
+                                    enabled: (String) -> Bool) -> [UsageNote] {
+        order.compactMap { enabled($0) ? notes[$0] : nil }
     }
 
     // Fixed at lastGoodAt (not wall-clock) so the note text does not churn every minute (#108 two-channel

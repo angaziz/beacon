@@ -144,7 +144,7 @@ final class ClaudeCodeProvider: AgentProvider {
                 base: 45, cap: claudeBackoffCap, retryAfterSanityCap: retryAfterSanityCap,
                 jitterFraction: Double.random(in: -0.2...0.2))
             claudeBackoffUntil = Date().addingTimeInterval(delay)
-        case .terminal:
+        case .terminal, .inactive:
             break
         }
     }

@@ -81,7 +81,8 @@ Three concerns, three homes (matches the existing transport/policy split):
 enum ProviderOutcome: Equatable {
     case live                                                // HTTP 200 + normalized OK
     case transient(retryAfter: TimeInterval?, reason: String)// 429 / 5xx / network — last-good + backoff
-    case terminal(reason: String)                            // token missing/expired, shape drift
+    case terminal(reason: String, kind: TerminalKind)        // token missing/expired, shape drift
+    case inactive(reason: String)                            // #126: abandoned provider -- muted .info, no red banner
 }
 struct ProviderResult { let usage: ProviderUsage; let outcome: ProviderOutcome }
 ```
@@ -92,6 +93,7 @@ struct ProviderResult { let usage: ProviderUsage; let outcome: ProviderOutcome }
   refresh")`. Reasons are preserved distinctly, not collapsed.
 - Response-shape drift (HTTP 200, normalizer returns nil) => `.terminal("Claude usage: unexpected
   response shape")` so a schema change stays visible.
+- **Abandonment demotion (#126).** A `.terminal` carrying `kind: .staleToken(expiredFor:)` past 48 h with no statusline POST inside that window is remapped by AppDelegate to `.inactive("Claude inactive")` (a muted `.info` note, not the red banner) -- an abandoned Claude Code stops nagging while a same-day expiry or a recently-active statusline keeps the actionable `.error`. A `kind: .missingCredential` is never demoted (no durable first-seen timestamp; indistinguishable from a never-logged-in user), so "run claude login" stays actionable. `TerminalKind` is `.missingCredential | .staleToken(expiredFor:) | .other`.
 - 429 / 5xx / network error => `.transient(retryAfter:, reason:)`. The `reason` carries the localized
   failure text (e.g. "Claude usage unavailable (HTTP 429)") so the menubar still has an actionable
   string when last-good is *expired* and we fall back to an error.
@@ -154,6 +156,7 @@ Behavior table:
 | `.transient`, last-good `staleness == .fresh` | keep | `lastGood` with `stale=true` | `.info("Claude rate-limited - last value HH:MM")` |
 | `.transient`, last-good `.expired` or none | keep | `.unavailable` | `.error(reason or generic)` |
 | `.terminal` | **cleared** (credential-identity safety) | `.unavailable` | `.error(reason)` |
+| `.inactive` | **cleared** (identity safety) | `.unavailable` | `.info(reason)` -- muted, #126 |
 
 **Staleness is per-window, not per-provider.** `h5` and `d7` reset independently, so expiring the
 whole provider on `h5.reset` would blank a still-valid 7-day value when only the 5-hour window rolled
