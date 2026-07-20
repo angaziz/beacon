@@ -91,6 +91,23 @@ It's also where you **curate the Finance screen**: search Binance + Yahoo from t
 
 Providers are modular: each has independent **Usage** and **Coding Buddy** toggles in the menubar. Disabling Coding Buddy for a provider passes its permission prompts through to the terminal.
 
+### Provider feature parity
+
+Both providers stream AI usage and bridge tool-permission prompts to the device. Claude Code has the richer coding buddy today: its statusline and session host-context feed the hub data that Codex's command hooks don't carry yet.
+
+| Capability | Claude Code | Codex CLI |
+|---|---|---|
+| AI usage (5h + 7-day windows) | ✅ | ✅ |
+| Live session list (state · folder·branch · age) | ✅ | ✅ |
+| Approve / deny tool-permission prompts from the device | ✅ | ✅ |
+| Auto-deny on device-offline / hub-quit | ✅ | ✅ |
+| "Tap to answer on Mac" question card | ✅ | ❌ |
+| Tap a session to focus its terminal | ✅ | ❌ |
+| Token + context-window readout | ✅ | ❌ |
+| Recent-activity feed | ✅ | ❌ |
+
+The Codex gaps are hook-surface limits, not menubar toggles: Codex's command hooks expose no statusline (tokens/context), no host context (terminal focus), and no question event.
+
 ![Beacon Hub menubar app](docs/assets/hub.png)
 
 **Requirements.** macOS 13 (Ventura) or later. The prebuilt release is **Apple Silicon only** (arm64); Intel Macs build from source ([`hub/README.md`](hub/README.md)) — SwiftPM compiles for the host architecture.
