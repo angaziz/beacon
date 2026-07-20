@@ -34,6 +34,7 @@ public final class ProviderMux: ProviderSink {
     public var onBuddy: ((BuddyState) -> Void)?
     public var onSessions: (([Session]) -> Void)?
     public var onAttention: (() -> Void)?   // aggregate 0 -> >0 attention-bucket transition
+    public var onPromptArrived: (() -> Void)?   // a buddy-enabled provider raised a deliverable prompt (cue the user)
 
     // Device permission decisions dispatch into the concrete provider (app wires this; kit stays
     // networking-free). `open` uses sessionRoute below -- focus itself runs async in the app.
@@ -153,6 +154,7 @@ public final class ProviderMux: ProviderSink {
         let sessionKey = sessionNativeKey.map { SessionRegistry.key(providerID: id, nativeKey: $0) }
         broker.raise(providerID: id, nativeID: nativeID, tool: tool, hint: hint, sessionKey: sessionKey)
         publishBuddy(); publishSessions()
+        if buddyEnabled(id) { onPromptArrived?() }
     }
 
     public func provider(_ id: String, didEndPrompt nativeID: String) {

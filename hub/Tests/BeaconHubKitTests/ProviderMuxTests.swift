@@ -13,12 +13,14 @@ final class ProviderMuxTests: XCTestCase {
         mux.onBuddy = { box.buddy = $0 }
         mux.onSessions = { box.sessions = $0 }
         mux.onAttention = { box.attentions += 1 }
+        mux.onPromptArrived = { box.prompts += 1 }
         mux.register(ProviderDescriptor(id: "claude", label: "CLAUDE", capabilities: [.usage, .sessions, .prompts]))
         mux.register(ProviderDescriptor(id: "codex", label: "CODEX", capabilities: [.usage]))
         return (mux, box)
     }
     private final class Box {
-        var usage = Usage(); var buddy = BuddyState(); var sessions: [Session] = []; var attentions = 0
+        var usage = Usage(); var buddy = BuddyState(); var sessions: [Session] = []
+        var attentions = 0; var prompts = 0
     }
     private func pu(_ pct: Int) -> ProviderUsage {
         ProviderUsage(h5: UsageWindow(pct: pct, reset: 1), d7: UsageWindow(pct: pct, reset: 2))
@@ -79,6 +81,18 @@ final class ProviderMuxTests: XCTestCase {
         mux.provider("claude", didUpdateSession: .stop(nativeKey: "a", cwd: "/x/api"))   // 0 -> >0: fire
         mux.provider("claude", didUpdateSession: .stop(nativeKey: "b", cwd: "/x/api"))   // already >0: no fire
         XCTAssertEqual(box.attentions, 1)
+    }
+
+    func testPromptArrivedCuesForEveryBuddyEnabledRaise() {
+        let (mux, box) = makeMux(now: { self.t0 })
+        mux.register(ProviderDescriptor(id: "b", label: "B", capabilities: [.sessions, .prompts]))
+        mux.provider("claude", didRaisePrompt: "c1", tool: "Bash", hint: "x", sessionNativeKey: "s")
+        mux.provider("b", didRaisePrompt: "b1", tool: "Write", hint: "y", sessionNativeKey: "t")
+        XCTAssertEqual(box.prompts, 2, "each buddy-enabled provider's raise cues the user (Codex parity, #121)")
+
+        mux.setEnabled("claude", EnabledCapabilities(usage: true, buddy: false))
+        mux.provider("claude", didRaisePrompt: "c2", tool: "Bash", hint: "z", sessionNativeKey: "s")
+        XCTAssertEqual(box.prompts, 2, "a buddy-disabled provider's raise stays silent")
     }
 
     // --- prompt FIFO + qlen (cross-provider) + short-id routing ---

@@ -226,6 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let data = try? SessionsFrame(sessions).encoded() { self.central.send(data) }
         }
         mux.onAttention = { [weak self] in self?.menubar.playAttentionSoundIfEnabled() }
+        mux.onPromptArrived = { [weak self] in self?.menubar.playPromptSoundIfEnabled() }
         mux.resolvePromptHandler = { [weak self] pid, nid, approve in
             guard let self, let p = self.providers.first(where: { $0.descriptor.id == pid })
             else { return .unknown }
@@ -240,7 +241,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         claude.onPromptUndeliverable = { [weak self] reason in
             Task { @MainActor in self?.menubar.setAlert("Auto-denied: \(reason)") }
         }
-        claude.onPromptArrived = { [weak self] in Task { @MainActor in self?.menubar.playPromptSoundIfEnabled() } }
         self.claude = claude
 
         let codex = CodexProvider(server: ingest, usageSession: usageSession)

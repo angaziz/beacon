@@ -17,7 +17,6 @@ final class ClaudeCodeProvider: AgentProvider {
     var onClaudeUsage: ((ProviderUsage) -> Void)?      // 5h/7d from statusline rate_limits (deduped, #59)
     var onStatuslineActivity: (() -> Void)?            // liveness: fires on EVERY rate_limits POST (#93)
     var onPromptUndeliverable: ((String) -> Void)?     // a prompt couldn't be shown (device offline)
-    var onPromptArrived: (() -> Void)?                 // a deliverable prompt was shown (cue the user)
 
     private let server: LocalIngestServer
     private weak var sink: ProviderSink?
@@ -283,8 +282,6 @@ final class ClaudeCodeProvider: AgentProvider {
                   sessionNativeKey: sessionKey.isEmpty ? nil : sessionKey)
         // Peer closes the held connection => the user answered on the Mac; withdraw exactly THIS prompt.
         registerClose { [weak self] in self?.withdraw(id: nativeID) }
-        let cb = onPromptArrived
-        DispatchQueue.main.async { cb?() }
     }
 
     // Answer Claude Code (allow/deny/timeout) and free the slot; the broker drops it via didEndPrompt.
