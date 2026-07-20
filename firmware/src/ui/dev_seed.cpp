@@ -5,6 +5,7 @@
 #include <esp_heap_caps.h>
 #include <lvgl.h>
 #include "core/datastore.h"
+#include "core/location.h"
 #include "core/stale.h"
 #include "config/tickers.h"
 #include "ui/carousel.h"
@@ -19,6 +20,9 @@
 
 static void seed(void) {
   uint32_t now = now_s();
+#if BEACON_CAPTURE
+  location_set_place_capture("San Francisco, CA");   // mask the device's real cached place in screenshots (RAM only)
+#endif
   weather_rec_t w; memset(&w, 0, sizeof(w)); w.temp_c = 31.8f; w.humidity_pct = 57; w.wmo_code = 2; w.hdr.last_updated = now;
   ds_set_weather(&w);
   const double vals[] = {18026, 62392, 6012, 19540, 52.18, 5594, 16800, 2400, 145, 7600};
@@ -32,9 +36,9 @@ static void seed(void) {
   usage_rec_t u; memset(&u, 0, sizeof(u));
   u.count = 2;
   strncpy(u.p[0].id, "claude", USAGE_ID_LEN-1); strncpy(u.p[0].label, "CLAUDE", USAGE_LABEL_LEN-1);
-  u.p[0].h5 = {24, now + 7680}; u.p[0].d7 = {24, now + 400000};
+  u.p[0].h5 = {72, now + 7680}; u.p[0].d7 = {45, now + 400000};
   strncpy(u.p[1].id, "codex", USAGE_ID_LEN-1); strncpy(u.p[1].label, "CODEX", USAGE_LABEL_LEN-1);
-  u.p[1].h5 = {1,  now + 16860}; u.p[1].d7 = {29, now + 400000};
+  u.p[1].h5 = {58, now + 16860}; u.p[1].d7 = {33, now + 400000};
   u.hdr.last_updated = now; ds_set_usage(&u);
   buddy_rec_t b; memset(&b, 0, sizeof(b)); b.running = 2; b.waiting = 1; b.tokens = 184502; b.context_pct = 42;
   // No prompt seeded: capture shows the session list (the new design), not the permission screen.
@@ -49,7 +53,7 @@ static void seed(void) {
   // Seed 4 representative sessions (newest-first) so the session list renders across all themes.
   buddy_session_t sess[4];
   memset(sess, 0, sizeof(sess));
-  strncpy(sess[0].id, "s3", BUDDY_SID_LEN-1); strncpy(sess[0].label, "beacon \xc2\xb7 fix/109", BUDDY_LABEL_LEN-1);
+  strncpy(sess[0].id, "s3", BUDDY_SID_LEN-1); strncpy(sess[0].label, "beacon \xc2\xb7 feat/usage", BUDDY_LABEL_LEN-1);
 #if BEACON_CAP_BUDDY == 2
   // Question state: first session shows the "tap to answer on Mac" takeover card.
   sess[0].state = BST_QUESTION;
@@ -57,9 +61,9 @@ static void seed(void) {
   sess[0].state = BST_ATTENTION;
 #endif
   sess[0].ts = now - 30;
-  strncpy(sess[1].id, "s1", BUDDY_SID_LEN-1); strncpy(sess[1].label, "api \xc2\xb7 main",       BUDDY_LABEL_LEN-1); sess[1].state = BST_WORKING;         sess[1].ts = now - 120;
-  strncpy(sess[2].id, "s7", BUDDY_SID_LEN-1); strncpy(sess[2].label, "hub-tools",                BUDDY_LABEL_LEN-1); sess[2].state = BST_WAITING_QUEUED;  sess[2].ts = now - 300;
-  strncpy(sess[3].id, "s2", BUDDY_SID_LEN-1); strncpy(sess[3].label, "notes",                    BUDDY_LABEL_LEN-1); sess[3].state = BST_IDLE;            sess[3].ts = now - 900;
+  strncpy(sess[1].id, "s1", BUDDY_SID_LEN-1); strncpy(sess[1].label, "hub \xc2\xb7 main",      BUDDY_LABEL_LEN-1); sess[1].state = BST_WORKING;         sess[1].ts = now - 120;
+  strncpy(sess[2].id, "s7", BUDDY_SID_LEN-1); strncpy(sess[2].label, "dotfiles \xc2\xb7 sync", BUDDY_LABEL_LEN-1); sess[2].state = BST_WAITING_QUEUED;  sess[2].ts = now - 300;
+  strncpy(sess[3].id, "s2", BUDDY_SID_LEN-1); strncpy(sess[3].label, "notes \xc2\xb7 main",    BUDDY_LABEL_LEN-1); sess[3].state = BST_IDLE;            sess[3].ts = now - 900;
   ds_apply_sessions(sess, 4, now);
 }
 
