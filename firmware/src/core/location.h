@@ -28,6 +28,13 @@ loc_source_t location_source(void);                 // current best source (lock
 void location_set_from_hub(float lat, float lon, const char* tz, const char* place);
 void location_set_from_ip (float lat, float lon, const char* tz, const char* place);
 
+#if BEACON_CAPTURE
+// Capture-only: override the displayed place name in the RAM cache with no NVS write, so screenshot
+// builds show a demo location instead of the device's real cached place. Never persisted; the owner's
+// stored location survives a re-flash to env:beacon.
+void location_set_place_capture(const char* place);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

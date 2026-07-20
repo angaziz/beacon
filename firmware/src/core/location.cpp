@@ -69,3 +69,13 @@ void location_set_from_hub(float lat, float lon, const char* tz, const char* pla
 void location_set_from_ip(float lat, float lon, const char* tz, const char* place) {
   location_set(lat, lon, tz, place, LOC_SRC_IP);   // location_set drops this if a hub fix already won
 }
+
+#if BEACON_CAPTURE
+void location_set_place_capture(const char* place) {
+  if (!place) return;
+  ds_lock_take(s_lock);
+  strncpy(s_place, place, sizeof(s_place) - 1); s_place[sizeof(s_place) - 1] = 0;
+  s_source = LOC_SRC_HUB;   // mark resolved so the UI treats it as a known place (no NVS write)
+  ds_lock_give(s_lock);
+}
+#endif
