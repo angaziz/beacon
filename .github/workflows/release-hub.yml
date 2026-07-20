@@ -18,7 +18,7 @@ jobs:
     name: Build hub app
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Stamp version from tag
         run: /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${GITHUB_REF_NAME#hub-v}" hub/Info.plist
       - name: Import signing certificate
