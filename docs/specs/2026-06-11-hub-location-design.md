@@ -18,7 +18,7 @@ never overwritten by the IP path and never auto-reverts (stationary-device assum
 ## Wire format (additive `v:1` extension, NOT a version bump)
 
 ```json
-{"v":1,"loc":{"lat":-6.91,"lon":107.61,"tz":"Asia/Jakarta","name":"Sukajadi, Bandung"}}
+{"v":1,"loc":{"lat":37.76,"lon":-122.42,"tz":"America/Los_Angeles","name":"Mission, San Francisco"}}
 ```
 
 `loc` is an independently-optional block (like `usage`/`buddy`). Sent ONLY in the full frame on

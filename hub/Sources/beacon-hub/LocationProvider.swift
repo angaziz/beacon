@@ -95,7 +95,7 @@ final class LocationProvider: NSObject, CLLocationManagerDelegate {
                    tz: TimeZone.current.identifier, name: name))
     }
 
-    // "<subLocality>, <locality>" when both are present (e.g. "Sukajadi, Bandung"); reduced accuracy
+    // "<subLocality>, <locality>" when both are present (e.g. "Mission, San Francisco"); reduced accuracy
     // (~5 km) drops the sub-locality and reports the city only.
     private static func placeName(_ p: CLPlacemark?, reduced: Bool) -> String? {
         guard let p else { return nil }
