@@ -53,7 +53,7 @@ Private data (your Claude/Codex tokens) lives only on a small macOS hub app and 
 
 The UI is fully themeable — **7 themes**, each a bespoke per-screen experience (its own layout in a distinct visual language) composed from shared design tokens (color / type / gauge-style): Editorial Index, Aerospace HUD, **Dot-Matrix** (default), Blueprint, LED Matrix, Oscilloscope, and Analog Neo.
 
-Every theme across all five screens, captured straight from the device framebuffer:
+Every theme, across all five screens plus the two extra Coding Buddy states, captured straight from the device framebuffer:
 
 | Theme | Home | Markets | AI Usage | Coding Buddy | Approval | Question | Settings |
 |---|---|---|---|---|---|---|---|
@@ -65,13 +65,9 @@ Every theme across all five screens, captured straight from the device framebuff
 | **Oscilloscope** | <img src="docs/assets/screens/oscilloscope_HOME.png" width="150"> | <img src="docs/assets/screens/oscilloscope_MARKETS.png" width="150"> | <img src="docs/assets/screens/oscilloscope_LIMITS.png" width="150"> | <img src="docs/assets/screens/oscilloscope_CLAUDE.png" width="150"> | <img src="docs/assets/screens/oscilloscope_CLAUDE_prompt.png" width="150"> | <img src="docs/assets/screens/oscilloscope_CLAUDE_question.png" width="150"> | <img src="docs/assets/screens/oscilloscope_SETTINGS.png" width="150"> |
 | **Analog Neo** | <img src="docs/assets/screens/analog_HOME.png" width="150"> | <img src="docs/assets/screens/analog_MARKETS.png" width="150"> | <img src="docs/assets/screens/analog_LIMITS.png" width="150"> | <img src="docs/assets/screens/analog_CLAUDE.png" width="150"> | <img src="docs/assets/screens/analog_CLAUDE_prompt.png" width="150"> | <img src="docs/assets/screens/analog_CLAUDE_question.png" width="150"> | <img src="docs/assets/screens/analog_SETTINGS.png" width="150"> |
 
-**Coding Buddy — three states** (shown in Editorial; every theme renders all three in its own style): the live **session list**, a **permission prompt** (Approve/Deny on the device), and a **question** ("tap to answer on Mac" → focuses that terminal). Each `*_CLAUDE_prompt.png` / `*_CLAUDE_question.png` exists for every theme.
+**Coding Buddy — three states:** the **Coding Buddy** column is the live session list; **Approval** is an on-device permission prompt (Approve/Deny); **Question** is a passive "tap to answer on Mac" takeover that focuses the terminal (the device can't answer multiple-choice prompts itself). Every theme renders all three in its own style.
 
-| Session list | Permission prompt | Question (tap to answer) |
-|---|---|---|
-| <img src="docs/assets/screens/editorial_CLAUDE.png" width="160"> | <img src="docs/assets/screens/editorial_CLAUDE_prompt.png" width="160"> | <img src="docs/assets/screens/editorial_CLAUDE_question.png" width="160"> |
-
-[**View the full montage**](docs/assets/screens/montage.png) — all 35 in a single image.
+[**View the full montage**](docs/assets/screens/montage.png) — all 49 in a single image.
 
 ## Get one running
 

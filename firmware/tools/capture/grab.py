@@ -16,6 +16,7 @@ Usage:
     python3 grab.py --port /dev/cu.usbmodemXXXX --out shots/ --montage
 """
 import argparse
+import glob
 import os
 import re
 import sys
@@ -146,6 +147,32 @@ def parse_frames(buf: bytes):
         pos = start + clen
 
 
+# Published contact-sheet column order: the five carousel screens plus the two extra Coding Buddy
+# states (permission prompt, question) captured from separate BEACON_CAP_BUDDY builds. A live sweep
+# only yields the five screens, so the full montage is composed from the assembled asset dir.
+COMPOSE_COLS = ["HOME", "MARKETS", "LIMITS", "CLAUDE", "CLAUDE_prompt", "CLAUDE_question", "SETTINGS"]
+
+
+def compose_montage(dirpath, cols=COMPOSE_COLS):
+    """Build montage.png from an existing dir of {theme}_{col}.png cells (themes = rows, cols = columns)."""
+    themes = sorted(os.path.basename(p)[:-len("_HOME.png")]
+                    for p in glob.glob(os.path.join(dirpath, "*_HOME.png")))
+    if not themes:
+        print(f"no *_HOME.png in {dirpath}", file=sys.stderr)
+        return 1
+    w, h = Image.open(os.path.join(dirpath, f"{themes[0]}_HOME.png")).size
+    pad = 8
+    sheet = Image.new("RGB", (len(cols) * (w + pad) + pad, len(themes) * (h + pad) + pad), "black")
+    for ti, t in enumerate(themes):
+        for ci, c in enumerate(cols):
+            p = os.path.join(dirpath, f"{t}_{c}.png")
+            if os.path.exists(p):
+                sheet.paste(Image.open(p), (pad + ci * (w + pad), pad + ti * (h + pad)))
+    out = os.path.join(dirpath, "montage.png")
+    sheet.save(out)
+    print(f"saved {out} ({len(themes)} themes x {len(cols)} cols)")
+    return 0
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", help="serial port, e.g. /dev/cu.usbmodem1101")
@@ -153,7 +180,11 @@ def main() -> int:
     ap.add_argument("--out", default="shots", help="output directory for PNGs")
     ap.add_argument("--montage", action="store_true", help="also write a theme x screen contact sheet")
     ap.add_argument("--from-file", help="decode a previously recorded raw sweep instead of reading serial")
+    ap.add_argument("--compose", help="build montage.png from an existing dir of {theme}_{screen}.png and exit")
     args = ap.parse_args()
+
+    if args.compose:
+        return compose_montage(args.compose)
 
     os.makedirs(args.out, exist_ok=True)
     frames = {}  # (theme, screen) -> Image
