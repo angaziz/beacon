@@ -46,7 +46,7 @@ macOS CoreLocation/CLGeocoder and `tz` from `TimeZone.current`. Independently op
 loc-only frame on meaningful (> ~0.01 deg) change — **never** on the 30s heartbeat.
 
 ```json
-{"v":1,"loc":{"lat":-6.91,"lon":107.61,"tz":"Asia/Jakarta","name":"Sukajadi, Bandung"}}
+{"v":1,"loc":{"lat":37.76,"lon":-122.42,"tz":"America/Los_Angeles","name":"Mission, San Francisco"}}
 ```
 - Device precedence: hub `loc` > cached NVS > IP geolocation; a hub fix is never overwritten by IP.
 - Permission denied / no fix => the hub omits `loc` and the device keeps its IP-based place name.

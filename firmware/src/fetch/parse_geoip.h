@@ -14,7 +14,7 @@ data_err_t parse_geoip(const char* json, size_t len, float* lat, float* lon,
                        char* region, size_t region_cap);
 
 // BigDataCloud reverse-geocode: pick the city/kota level (admin entry whose description begins
-// "city ...") from localityInfo.administrative => a recognizable name (e.g. "Bandung") vs ipwho.is's
+// "city ...") from localityInfo.administrative => a recognizable name (e.g. "San Francisco") vs ipwho.is's
 // over-granular locality. ERR_PARSE if no city-level entry is present.
 data_err_t parse_bdc_city(const char* json, size_t len, char* city, size_t city_cap);
 #ifdef __cplusplus

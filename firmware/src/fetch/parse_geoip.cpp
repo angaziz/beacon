@@ -3,7 +3,7 @@
 #include <string.h>
 #include <strings.h>   // strncasecmp
 
-// ipwho.is: {"success":true,"latitude":-6.93,"longitude":107.59,...,"timezone":{"id":"Asia/Jakarta",...}}
+// ipwho.is: {"success":true,"latitude":37.77,"longitude":-122.42,...,"timezone":{"id":"America/Los_Angeles",...}}
 static void copy_field(JsonVariantConst v, char* out, size_t cap) {
   if (!out || !cap) return;
   const char* s = v | "";

@@ -1253,7 +1253,7 @@ NOTE: zsh does not word-split an unquoted `$VAR`, so the per-family loop wraps t
 
 ```bash
 cd /tmp/beaconfonts
-OUT=/Users/angaziz/work/personal/beacon/firmware/beacon/src/ui/fonts
+OUT="$(git rev-parse --show-toplevel)/firmware/beacon/src/ui/fonts"
 HERO_SYMS="0123456789:%.,+-/° "
 
 gen() {  # gen <ttf> <size> <key> <role> [hero]

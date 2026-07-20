@@ -292,14 +292,14 @@ static void test_parse_rejects_bad_version_and_garbage(void) {
 // ===== loc parse (issue #54) =====
 
 static void test_parse_loc_present(void) {
-  const char* j = "{\"v\":1,\"usage\":{},\"loc\":{\"lat\":-6.91,\"lon\":107.61,"
-                  "\"tz\":\"Asia/Jakarta\",\"name\":\"Sukajadi, Bandung\"}}";
+  const char* j = "{\"v\":1,\"usage\":{},\"loc\":{\"lat\":37.76,\"lon\":-122.42,"
+                  "\"tz\":\"America/Los_Angeles\",\"name\":\"Mission, San Francisco\"}}";
   hub_loc_t l; memset(&l, 0, sizeof(l));
   TEST_ASSERT_TRUE(hub_parse_loc(j, strlen(j), &l));
-  TEST_ASSERT_FLOAT_WITHIN(0.001f, -6.91f, l.lat);
-  TEST_ASSERT_FLOAT_WITHIN(0.001f, 107.61f, l.lon);
-  TEST_ASSERT_EQUAL_STRING("Asia/Jakarta", l.tz);
-  TEST_ASSERT_EQUAL_STRING("Sukajadi, Bandung", l.name);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 37.76f, l.lat);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, -122.42f, l.lon);
+  TEST_ASSERT_EQUAL_STRING("America/Los_Angeles", l.tz);
+  TEST_ASSERT_EQUAL_STRING("Mission, San Francisco", l.name);
 }
 
 static void test_parse_loc_only_frame(void) {

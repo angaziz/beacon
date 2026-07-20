@@ -50,15 +50,15 @@ final class ProtocolTests: XCTestCase {
 
     func testLocFrameEncodesAndOmitsOtherBlocks() throws {
         // A loc-only on-change frame: loc present, usage/buddy absent (the device keeps their values).
-        let fix = Loc(lat: -6.91, lon: 107.61, tz: "Asia/Jakarta", name: "Sukajadi, Bandung")
+        let fix = Loc(lat: 37.76, lon: -122.42, tz: "America/Los_Angeles", name: "Mission, San Francisco")
         let obj = try JSONSerialization.jsonObject(with: StatusFrame(loc: fix).encoded()) as! [String: Any]
         XCTAssertEqual(obj["v"] as? Int, 1)
         XCTAssertNil(obj["usage"]); XCTAssertNil(obj["buddy"])
         let loc = obj["loc"] as! [String: Any]
-        XCTAssertEqual(loc["lat"] as? Double, -6.91)
-        XCTAssertEqual(loc["lon"] as? Double, 107.61)
-        XCTAssertEqual(loc["tz"] as? String, "Asia/Jakarta")
-        XCTAssertEqual(loc["name"] as? String, "Sukajadi, Bandung")
+        XCTAssertEqual(loc["lat"] as? Double, 37.76)
+        XCTAssertEqual(loc["lon"] as? Double, -122.42)
+        XCTAssertEqual(loc["tz"] as? String, "America/Los_Angeles")
+        XCTAssertEqual(loc["name"] as? String, "Mission, San Francisco")
     }
 
     func testHeartbeatFrameOmitsLoc() throws {

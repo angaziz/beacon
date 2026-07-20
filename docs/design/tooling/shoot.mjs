@@ -1,8 +1,11 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const file = process.argv[2] || '/Users/angaziz/work/personal/beacon/docs/design/mockups/directions.html';
-const out = process.argv[3] || '/Users/angaziz/work/personal/beacon/docs/design/mockups/shots';
+const here = path.dirname(fileURLToPath(import.meta.url));
+const file = process.argv[2] || path.join(here, '../mockups/directions.html');
+const out = process.argv[3] || path.join(here, '../mockups/shots');
 fs.mkdirSync(out, { recursive: true });
 
 const browser = await chromium.launch();
