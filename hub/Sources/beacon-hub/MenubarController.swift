@@ -34,8 +34,11 @@ final class MenubarController: NSObject {
     // URL the fix link opens; set per-state in setLink, read by openLink.
     private var fixURL: URL?
 
-    // Re-opens the first-run status window; AppDelegate wires it to FirstRunWindowController.show().
-    var onOpenSetup: (() -> Void)?
+    // Opens the dedicated Settings window; AppDelegate wires it to SettingsWindowController.show().
+    var onOpenSettings: (() -> Void)?
+    // Install one provider's hooks + jump to Bluetooth settings (setup lives in the Settings window now).
+    var onInstallProviderHooks: ((String) -> Void)?
+    var onOpenBluetooth: (() -> Void)?
 
     // Login-item + forget-device callbacks (issue #16); AppDelegate owns the side effects.
     var onToggleLoginItem: ((Bool) -> Void)?   // desired on/off; AppDelegate re-reads truth + calls setLoginItemState.
@@ -44,6 +47,9 @@ final class MenubarController: NSObject {
     var onMenuWillOpen: (() -> Void)?          // accessory app: popoverWillShow is the reliable login-item refresh hook.
     var onApplyTickerEdit: (([TickerRow]) -> Void)?   // issue #92: editor commits the desired list; AppDelegate persists + pushes.
     var onOpenTickerEditor: (() -> Void)?             // issue #92: opens the dedicated ticker editor window.
+    // Per-provider live toggles (design 2026-07-19); AppDelegate persists via ProviderSettings + calls setEnabled.
+    var onSetProviderUsage: ((String, Bool) -> Void)?
+    var onSetProviderBuddy: ((String, Bool) -> Void)?
 
     // Bundled custom chime; falls back to a system sound when run without the .app bundle (bare dev build).
     private let promptSound: NSSound? = {
@@ -77,13 +83,17 @@ final class MenubarController: NSObject {
     private func wireModel() {
         model.onToggleMute = { [weak self] in self?.promptSoundMuted = self?.model.muted ?? false }
         model.onRequestLoginItem = { [weak self] on in self?.onToggleLoginItem?(on) }
-        model.onSetup = { [weak self] in self?.onOpenSetup?() }
+        model.onInstallProviderHooks = { [weak self] id in self?.onInstallProviderHooks?(id) }
+        model.onOpenBluetooth = { [weak self] in self?.onOpenBluetooth?() }
+        model.onOpenSettings = { [weak self] in self?.onOpenSettings?() }
         model.onForget = { [weak self] in self?.onForgetDevice?() }
         model.onRetryPairing = { [weak self] in self?.onRetryPairing?() }
         model.onApplyTickerEdit = { [weak self] rows in self?.onApplyTickerEdit?(rows) }
         model.onOpenTickerEditor = { [weak self] in self?.onOpenTickerEditor?() }
         model.onOpenFixURL = { [weak self] in self?.openLink() }
         model.onQuit = { NSApp.terminate(nil) }
+        model.onSetProviderUsage = { [weak self] id, on in self?.onSetProviderUsage?(id, on) }
+        model.onSetProviderBuddy = { [weak self] id, on in self?.onSetProviderBuddy?(id, on) }
     }
 
     private func buildPopover() {
@@ -154,6 +164,14 @@ final class MenubarController: NSObject {
         model.lastSync = Date()
         model.now = Date()   // restamp so reset hints stay fresh even while the popover is open
     }
+
+    // Rebuild the per-provider toggle cards (design 2026-07-19). Called on registration and on every live
+    // toggle so the switches reflect the persisted ProviderSettings truth.
+    func setProviderToggles(_ toggles: [ProviderToggle]) { model.providers = toggles }
+
+    // Global (non-provider) setup checks shown in the Settings window.
+    func setBluetoothCheck(_ s: CheckState) { model.setupBluetooth = s }
+    func setPairedCheck(_ s: CheckState) { model.setupPaired = s }
 
     func setTickerSync(_ status: TickerSyncStatus) { model.tickerSync = status }
     func setTickerRows(_ rows: [TickerRow]) { model.tickerRows = rows }   // issue #92: seed the editor with the persisted list

@@ -87,7 +87,7 @@ static void build(lv_obj_t* page) {
   lv_obj_align(dot, LV_ALIGN_TOP_LEFT, SAFE_INSET + 4, SAFE_INSET + 12);
 
   lv_obj_t* brand = lv_label_create(page);
-  lv_label_set_text(brand, "claude");
+  lv_label_set_text(brand, "agents");
   lv_obj_set_style_text_font(brand, t->f_body, 0);
   lv_obj_set_style_text_color(brand, t->ink_dim, 0);
   lv_obj_set_style_text_letter_space(brand, 3, 0);

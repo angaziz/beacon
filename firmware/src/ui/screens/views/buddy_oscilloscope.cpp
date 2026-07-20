@@ -70,7 +70,7 @@ static void build(lv_obj_t* page) {
   const beacon_theme_t* t = theme_active();
 
   lv_obj_t* hdr = lv_label_create(page);
-  lv_label_set_text(hdr, "CLAUDE . CH MON");
+  lv_label_set_text(hdr, "AGENTS . CH MON");
   lv_obj_set_style_text_color(hdr, t->ink_dim, 0);
   lv_obj_set_style_text_font(hdr, t->f_mono, 0);
   lv_obj_align(hdr, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET);

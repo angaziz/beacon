@@ -3,54 +3,69 @@ import Foundation
 import ServiceManagement
 import BeaconHubKit
 
-// Wires the four subsystems together: the local hook bridge, the BLE central, and the usage poller all
-// feed a single current Usage + BuddyState, which we serialize to a StatusFrame and push to the device.
-// We resend the full frame on (re)connect and on a 30 s heartbeat so a freshly-bonded device catches up.
+// Wires the subsystems together (design 2026-07-19): a shared LocalIngestServer + registered
+// AgentProviders (Claude, Codex) feed a ProviderMux, which merges per-provider usage/sessions/prompts
+// into a single Usage + BuddyState + [Session]. We serialize those to StatusFrame/SessionsFrame and push
+// to the device over BLE, resending the full frame on (re)connect and on a 30 s heartbeat. The usage
+// poller iterates usage-enabled providers; per-provider toggles (ProviderSettings) drive live setEnabled.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let menubar = MenubarController()
     private let central = BeaconCentral()
-    private var bridge: ClaudeCodeBridge?
-    private let poller = UsagePoller()
-    private let firstRun = FirstRunWindowController()
-    private let forgetWindow = ForgetWindowController()
+    private let mux = ProviderMux()
+    private let settings = ProviderSettings(store: UserDefaults.standard)
+    private let ingest = LocalIngestServer()
+    private var providers: [AgentProvider] = []
+    private var claude: ClaudeCodeProvider?            // typed ref for drain + device-connected + statusline
+    private var codex: CodexProvider?                  // typed ref for drain + device-connected
+    private var poller: UsagePoller!                   // built once providers exist
     private let location = LocationProvider()
     private let tickerStore = TickerConfigStore()   // desired ticker list + monotonic rev (issue #92)
     private var reportAssembler = ReportAssembler()   // reassembles device->hub ticker report chunks (#105)
     private let tickerSearch = TickerSearch()        // Binance(cached) + Yahoo(live) discovery (issue #92 B4)
     private lazy var tickerEditor = TickerEditorWindowController(model: menubar.viewModel)
+    private lazy var settingsWindow = SettingsWindowController(model: menubar.viewModel)
     private var binanceCandidates: [TickerCandidate] = []   // warmed-once cache for local Binance filtering
 
+    // A single ephemeral session (15s timeout) shared by every provider's usage source (#64).
+    private let usageSession: URLSession = {
+        let cfg = URLSessionConfiguration.ephemeral; cfg.timeoutIntervalForRequest = 15
+        return URLSession(configuration: cfg)
+    }()
+
     // Latest known state -- the source of truth we (re)send on heartbeat/reconnect.
-    private var usage = Usage(claude: .unavailable, codex: .unavailable)   // merged; resent on heartbeat
+    private var usage = Usage()          // merged provider array (from the mux); resent on heartbeat
     private var buddy = BuddyState()
     private var sessions: [Session] = []
     private var lastFix: Loc?   // most recent CoreLocation fix (issue #54); rides the (re)connect full frame
     private var heartbeat: Timer?
 
-    // Claude usage has two sources: the oauth poller (works without a CC session, but the endpoint can
-    // 429) and Claude Code's statusline rate_limits (authoritative, no token, only while a session runs
-    // with the shim). Both feed the SAME per-provider reliability reducer (#108): any LIVE value (from
-    // either source) becomes last-known-good; a transient failure serves last-good as STALE rather than
-    // blanking to "--". Retention lives here (the only place that sees both sources); backoff lives in
-    // the poller. maxStale = 30 min.
+    // Per-provider usage reliability (#108). Any LIVE value (oauth poll or, for Claude, statusline
+    // rate_limits) becomes last-known-good; a transient failure serves last-good as STALE. Keyed by id
+    // so the reducer generalizes across providers. maxStale = 30 min.
     private let maxStale: TimeInterval = 1800
-    private var claudeRetention = ProviderRetention()
-    private var codexRetention = ProviderRetention()
-    private var claudeDisplay: ProviderUsage = .unavailable
-    private var codexDisplay: ProviderUsage = .unavailable
-    private var claudeNote: UsageNote?
-    private var codexNote: UsageNote?
-    private var statuslineClaude: ProviderUsage?   // #59 dedup: statusline re-fires ~3x/s, usually unchanged.
-    private var statuslineClaudeAt: Date?          // #93: last live statusline POST, for the source-precedence gate.
-    private var claudeTransientReason: String?     // #108: last oauth transient reason, for the backoff-window recheck.
-    private var lastNotes: [UsageNote] = []        // #108: last notes handed to the menubar (note channel gate).
+    private var descriptors: [String: ProviderDescriptor] = [:]
+    private var registrationOrder: [String] = []
+    private var retentions: [String: ProviderRetention] = [:]
+    private var displays: [String: ProviderUsage] = [:]
+    private var notes: [String: UsageNote] = [:]
+    // Claude-only: its authoritative statusline source takes precedence over a late oauth poll (#93).
+    private var statuslineClaude: ProviderUsage?   // #59 dedup
+    private var statuslineClaudeAt: Date?          // #93 source-precedence gate
+    private var claudeTransientReason: String?     // #108 backoff-window recheck reason
+    // Per-provider hooks/setup state surfaced in the Settings window; AppDelegate owns the truth so a
+    // toggle-driven refreshProviderToggles never clobbers a transient install spinner/note.
+    private var providerHooks: [String: CheckState] = [:]
+    private var providerInstalling: Set<String> = []
+    private var providerNote: [String: String] = [:]
+    private var checkBluetooth: CheckState = .checking
+    private var checkPaired: CheckState = .checking
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        startBridge()
+        startProviders()
         startCentral()
         startPoller()
-        startFirstRun()
+        startSettings()
         startLoginItem()
         startLocation()
         startTickerEditor()
@@ -58,54 +73,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Heartbeat resends the full frame WITHOUT loc (issue #54): location rides the (re)connect frame
         // and on-change frames only, never the 30s heartbeat.
         heartbeat = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.sendFullFrame(includeLocation: false) }
+            Task { @MainActor in self?.mux.reap(); self?.sendFullFrame(includeLocation: false) }
         }
         heartbeat?.tolerance = 3   // #66 L6: let the OS coalesce the 30s heartbeat wakeup.
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        // Hooks can change out-of-band (manual edit) between launches; re-check on re-focus. The check
-        // does sync file IO + JSON parse of ~/.claude/settings.json, so run it off the main thread (#66 L8).
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let ok = HooksInstaller.isInstalled()
-            Task { @MainActor in self?.firstRun.setHooks(ok ? .ok : .bad) }
-        }
+        // Hooks can change out-of-band (manual edit) between launches; re-check on re-focus (off-main).
+        refreshProviderHooks()
         refreshLoginItem()   // cheap re-sync; the menu-open refresh is the reliable path for this accessory app.
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let bridge else { return .terminateNow }
+        let drainers = [claude?.drainHeldPrompts, codex?.drainHeldPrompts].compactMap { $0 }
+        guard !drainers.isEmpty else { return .terminateNow }
         var replied = false
         let reply = { if !replied { replied = true; NSApp.reply(toApplicationShouldTerminate: true) } }
-        bridge.drainHeldPrompts(reason: "Beacon hub is quitting", completion: reply)
+        let group = DispatchGroup()
+        for drain in drainers {
+            group.enter()
+            drain("Beacon hub is quitting", { group.leave() })
+        }
+        group.notify(queue: .main, execute: reply)
         // Safety cap so Quit never hangs if a socket write stalls; the drain replies earlier on real flush,
         // and immediately when nothing was held. A dropped conn would fail-OPEN per CONTRACT.md C.3.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { reply() }
         return .terminateLater
     }
 
-    // --- first-run window ---
+    // --- settings window + per-provider setup ---
 
-    private func startFirstRun() {
-        firstRun.onInstallHooks = { [weak self] in self?.installHooksAndRefresh() }
-        menubar.onOpenSetup = { [weak self] in self?.firstRun.show() }
-        firstRun.setHooks(HooksInstaller.isInstalled() ? .ok : .bad)
-        firstRun.showIfNeeded()
+    private func startSettings() {
+        menubar.onOpenSettings = { [weak self] in self?.settingsWindow.show() }
+        menubar.onInstallProviderHooks = { [weak self] id in self?.installHooks(for: id) }
+        menubar.onOpenBluetooth = { SettingsLinks.open(SettingsLinks.bluetooth) }
+        refreshProviderHooks()
+        settingsWindow.showIfNeeded()
     }
 
-    // Run the (Process-backed) install off the main thread so the window stays responsive, then hop
-    // back to update the row + surface any stderr-derived error.
-    private func installHooksAndRefresh() {
-        Task.detached { [weak self] in
-            let errorMessage: String?
-            do { try HooksInstaller.install(); errorMessage = nil }
-            catch { errorMessage = error.localizedDescription }
-            let installed = HooksInstaller.isInstalled()
-            guard let self else { return }
-            await MainActor.run {
-                self.firstRun.finishInstall(installed: installed ? .ok : .bad, error: errorMessage)
+    // Re-read every provider's hooks state off the main thread (sync file IO + parse), then apply on main
+    // without stomping a provider mid-install.
+    private func refreshProviderHooks() {
+        let ids = providers.map { $0.descriptor.id }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let states = ids.map { ($0, HooksInstaller.isInstalled(providerID: $0)) }
+            Task { @MainActor in
+                guard let self else { return }
+                for (id, ok) in states where !self.providerInstalling.contains(id) {
+                    self.providerHooks[id] = ok ? .ok : .bad
+                }
+                self.refreshProviderToggles()
+                self.maybeMarkComplete()
             }
         }
+    }
+
+    // Install one provider's hooks (Process-backed, off the main thread), then re-check + surface a note.
+    private func installHooks(for id: String) {
+        guard !providerInstalling.contains(id) else { return }
+        providerInstalling.insert(id)
+        providerNote[id] = nil
+        refreshProviderToggles()
+        let label = descriptors[id]?.label.capitalized ?? id
+        Task.detached { [weak self] in
+            let errorMessage: String?
+            do { try HooksInstaller.install(providerID: id); errorMessage = nil }
+            catch { errorMessage = error.localizedDescription }
+            let ok = HooksInstaller.isInstalled(providerID: id)
+            guard let self else { return }
+            await MainActor.run {
+                self.providerInstalling.remove(id)
+                self.providerHooks[id] = ok ? .ok : .bad
+                self.providerNote[id] = ok ? "Installed. Restart \(label) for hooks to take effect." : errorMessage
+                self.refreshProviderToggles()
+                self.maybeMarkComplete()
+            }
+        }
+    }
+
+    // First-run auto-open stops once Bluetooth + pairing + every provider's hooks are satisfied.
+    private func maybeMarkComplete() {
+        let hooksOk = providers.allSatisfy { (providerHooks[$0.descriptor.id] ?? .checking) == .ok }
+        if checkBluetooth == .ok, checkPaired == .ok, hooksOk { settingsWindow.markComplete() }
     }
 
     // --- login item (issue #16) ---
@@ -155,46 +204,90 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func forgetDevice() {
         central.forgetAndRescan()
-        // CoreBluetooth cannot clear the OS bond (no API). The app-side reset above just drops the link and
-        // rescans, so a healthy bond reconnects on its own. The only real "forget" is the user doing it in
-        // Bluetooth settings -- so the window spells out the steps and offers a one-click jump there.
-        forgetWindow.onOpenBluetooth = { SettingsLinks.open(SettingsLinks.bluetooth) }
-        forgetWindow.show()
+        // CoreBluetooth cannot clear the OS bond (no API); the app-side reset drops the link + rescans, so
+        // a healthy bond reconnects on its own. The real "forget" is the user removing Beacon in Bluetooth
+        // settings, so we jump straight there (the Settings window spells out the two clicks).
+        SettingsLinks.open(SettingsLinks.bluetooth)
     }
 
-    // --- bridge ---
+    // --- providers + mux ---
 
-    private func startBridge() {
-        let b = ClaudeCodeBridge()
-        b.onBuddyUpdate = { [weak self] state in
-            Task { @MainActor in self?.onBuddy(state) }
+    private func startProviders() {
+        // Wire mux outputs FIRST so the initial register() emit (seeded usage / empty buddy) is captured.
+        mux.onUsage = { [weak self] merged in
+            guard let self else { return }
+            self.usage = merged
+            self.sendFrame(StatusFrame(usage: merged))
         }
-        b.onClaudeUsage = { [weak self] c in
-            Task { @MainActor in self?.onStatuslineClaude(c) }
+        mux.onBuddy = { [weak self] state in self?.onBuddy(state) }
+        mux.onSessions = { [weak self] sessions in
+            guard let self else { return }
+            self.sessions = sessions
+            if let data = try? SessionsFrame(sessions).encoded() { self.central.send(data) }
         }
-        b.onStatuslineActivity = { [weak self] in
-            Task { @MainActor in self?.onStatuslineActivity() }
+        mux.onAttention = { [weak self] in self?.menubar.playAttentionSoundIfEnabled() }
+        mux.onPromptArrived = { [weak self] in self?.menubar.playPromptSoundIfEnabled() }
+        mux.resolvePromptHandler = { [weak self] pid, nid, approve in
+            guard let self, let p = self.providers.first(where: { $0.descriptor.id == pid })
+            else { return .unknown }
+            return p.resolvePrompt(nativeID: nid, approve: approve)
         }
-        b.onPromptUndeliverable = { [weak self] reason in
+
+        ingest.onStatus = { [weak self] msg in Task { @MainActor in self?.menubar.setBridgeAlert(msg) } }
+
+        let claude = ClaudeCodeProvider(server: ingest, usageSession: usageSession)
+        claude.onClaudeUsage = { [weak self] c in Task { @MainActor in self?.onStatuslineClaude(c) } }
+        claude.onStatuslineActivity = { [weak self] in Task { @MainActor in self?.onStatuslineActivity() } }
+        claude.onPromptUndeliverable = { [weak self] reason in
             Task { @MainActor in self?.menubar.setAlert("Auto-denied: \(reason)") }
         }
-        b.onPromptArrived = { [weak self] in
-            Task { @MainActor in self?.menubar.playPromptSoundIfEnabled() }
+        self.claude = claude
+
+        let codex = CodexProvider(server: ingest, usageSession: usageSession)
+        self.codex = codex
+        providers = [claude, codex]
+
+        for p in providers {
+            descriptors[p.descriptor.id] = p.descriptor
+            registrationOrder.append(p.descriptor.id)
+            let caps = settings.enabled(for: p.descriptor.id)
+            mux.register(p.descriptor, enabled: caps)
+            p.start(sink: mux)          // registers ingest routes before ingest.start()
+            p.setEnabled(caps)          // apply a persisted-off buddy state on launch
         }
-        b.onAttention = { [weak self] in
-            Task { @MainActor in self?.menubar.playAttentionSoundIfEnabled() }
+        ingest.start()
+
+        // Provider toggle cards: seed + wire live setEnabled.
+        menubar.onSetProviderUsage = { [weak self] id, on in self?.setProviderUsage(id, on) }
+        menubar.onSetProviderBuddy = { [weak self] id, on in self?.setProviderBuddy(id, on) }
+        refreshProviderToggles()
+        pushMenubarUsage()
+    }
+
+    private func refreshProviderToggles() {
+        let toggles = providers.map { p -> ProviderToggle in
+            let id = p.descriptor.id
+            let e = settings.enabled(for: id)
+            return ProviderToggle(id: id, label: p.descriptor.label.capitalized,
+                                  supportsUsage: p.descriptor.supportsUsage,
+                                  supportsBuddy: p.descriptor.supportsBuddy,
+                                  usageOn: e.usage, buddyOn: e.buddy,
+                                  hooks: providerHooks[id] ?? .checking,
+                                  installing: providerInstalling.contains(id),
+                                  note: providerNote[id])
         }
-        b.onBridgeStatus = { [weak self] msg in
-            Task { @MainActor in self?.menubar.setBridgeAlert(msg) }
-        }
-        b.onSessionsUpdate = { [weak self] sessions in
-            Task { @MainActor in
-                self?.sessions = sessions
-                if let data = try? SessionsFrame(sessions).encoded() { self?.central.send(data) }
-            }
-        }
-        b.start()
-        bridge = b
+        menubar.setProviderToggles(toggles)
+    }
+
+    private func setProviderUsage(_ id: String, _ on: Bool) { settings.setUsage(on, for: id); applyEnabled(id) }
+    private func setProviderBuddy(_ id: String, _ on: Bool) { settings.setBuddy(on, for: id); applyEnabled(id) }
+
+    private func applyEnabled(_ id: String) {
+        let caps = settings.enabled(for: id)
+        mux.setEnabled(id, caps)
+        providers.first { $0.descriptor.id == id }?.setEnabled(caps)
+        refreshProviderToggles()
+        pushMenubarUsage()   // a usage toggle re-includes/excludes the provider's card immediately
     }
 
     // --- central ---
@@ -241,30 +334,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if connected {
             menubar.setAlert(nil)   // device reachable again => clear any undeliverable-prompt alert.
         }
-        bridge?.setDeviceConnected(connected)
+        claude?.setDeviceConnected(connected)
+        codex?.setDeviceConnected(connected)
         poller.setDeviceConnected(connected)   // #64: back off the usage poll cadence while disconnected.
 
-        // Drive the first-run window from the SAME phase stream (no second CBCentralManager): Bluetooth
-        // is bad only when powered-off/unauthorized/unavailable; paired tracks live .connected.
+        // Drive the Settings connection checks from the SAME phase stream (no second CBCentralManager):
+        // Bluetooth is bad only when powered-off/unauthorized/unavailable; paired tracks live .connected.
         switch phase {
-        case .bluetoothOff, .unauthorized, .unavailable: firstRun.setBluetooth(.bad)
-        default:                                          firstRun.setBluetooth(.ok)
+        case .bluetoothOff, .unauthorized, .unavailable: checkBluetooth = .bad
+        default:                                          checkBluetooth = .ok
         }
-        firstRun.setPaired(connected ? .ok : .bad)
+        checkPaired = connected ? .ok : .bad
+        menubar.setBluetoothCheck(checkBluetooth)
+        menubar.setPairedCheck(checkPaired)
+        maybeMarkComplete()
     }
 
     private func handle(_ cmd: DeviceCommand) {
         switch cmd {
         case .permission(let id, let approve):
             // Ack the truth (issue #8): only ok:true when the decision actually applied. A late/
-            // superseded decision => ok:false; an id we never minted (or no bridge) => err.
-            switch bridge?.resolve(id: id, approve: approve) {
-            case .applied:
-                central.send(HubAck.ack(id: id, ok: true))
-            case .late:
-                central.send(HubAck.ack(id: id, ok: false))
-            case .unknown, nil:
-                central.send(HubAck.err(id: id, reason: "unknown_prompt_id"))
+            // superseded decision => ok:false; an id we never minted => err.
+            switch mux.resolve(shortId: id, approve: approve) {
+            case .applied: central.send(HubAck.ack(id: id, ok: true))
+            case .late:    central.send(HubAck.ack(id: id, ok: false))
+            case .unknown: central.send(HubAck.err(id: id, reason: "unknown_prompt_id"))
             }
         case .configAck(let rev, let ok, let count, let err):
             // Ignore stale acks: a later edit already bumped our rev, so an ack for an older push no
@@ -273,19 +367,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menubar.setTickerSync(ok ? .synced(count ?? tickerStore.current.rows.count)
                                      : .error(err ?? "rejected"))
         case .open(let id):
-            guard let h = bridge?.hostForShortId(id) else {
+            // Route to the owning provider by short id; the provider focuses its own native session.
+            guard let (pid, nativeKey) = mux.sessionRoute(shortId: id),
+                  let p = providers.first(where: { $0.descriptor.id == pid }) else {
                 FileHandle.standardError.write(Data("[beacon-hub] open id=\(id) -> unknown_session\n".utf8))
                 central.send(HubAck.err(id: id, reason: "unknown_session"))
                 return
             }
-            let target = FocusTarget(hostApp: h.app, focusURL: h.focusURL, bundleId: h.bundleId, cwd: h.cwd)
-            Task.detached {
-                let ok = SessionFocus.focus(target)
-                // Logs only app + result, never focus_url (may embed a token, tech.md 9).
-                FileHandle.standardError.write(Data("[beacon-hub] open id=\(id) app=\(h.app ?? "?") ok=\(ok)\n".utf8))
-                await MainActor.run { [weak self] in
-                    self?.central.send(HubAck.ack(id: id, ok: ok))
-                }
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let ok = p.focusSession(nativeKey: nativeKey)
+                FileHandle.standardError.write(Data("[beacon-hub] open id=\(id) provider=\(pid) ok=\(ok)\n".utf8))
+                DispatchQueue.main.async { self?.central.send(HubAck.ack(id: id, ok: ok)) }
             }
         case .report(_, _, _, _, _):
             switch reportAssembler.feed(cmd) {
@@ -298,89 +390,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // --- poller ---
 
     private func startPoller() {
-        poller.onUpdate = { [weak self] claude, codex in
-            Task { @MainActor in self?.onUsage(claude, codex) }
-        }
+        poller = UsagePoller(providers: providers,
+                             usageEnabled: { [weak self] id in self?.settings.enabled(for: id).usage ?? true })
+        poller.onUpdate = { [weak self] results in Task { @MainActor in self?.onUsage(results) } }
+        poller.setDeviceConnected(central.isConnected)
         poller.start()
     }
 
-    // Poll results (#108). Codex always observed. Claude is nil when its oauth poll was skipped; even
-    // when present, the statusline is the authoritative source, so a late-completing oauth result is
-    // dropped while the statusline is fresh (source precedence) -- it must not downgrade a live value
-    // the statusline just established.
-    private func onUsage(_ claude: ProviderResult?, _ codex: ProviderResult) {
-        reduceCodex(codex.outcome, codex.usage)
-        let age = statuslineClaudeAt.map { Date().timeIntervalSince($0) }
-        let fresh = UsagePollDecision.statuslineFresh(age: age, interval: poller.pollInterval)
-        if let c = claude {
-            if !fresh {
-                if case .transient(_, let reason) = c.outcome { claudeTransientReason = reason }
-                reduceClaude(c.outcome, c.usage)
+    // Per-provider poll results (#108). A provider absent from `results` was skipped this tick (gate /
+    // disabled). Claude's authoritative statusline takes precedence over a late oauth poll, and when its
+    // oauth poll is suppressed the retained value is still aged out so it can't pin stale past maxStale.
+    private func onUsage(_ results: [String: ProviderResult]) {
+        for id in registrationOrder where usageEnabled(id) {
+            if id == "claude" {
+                let age = statuslineClaudeAt.map { Date().timeIntervalSince($0) }
+                let fresh = UsagePollDecision.statuslineFresh(age: age, interval: poller.pollInterval)
+                if let r = results[id] {
+                    if !fresh {
+                        if case .transient(_, let reason) = r.outcome { claudeTransientReason = reason }
+                        reduce(id, r.outcome, r.usage)
+                    }
+                } else if !fresh, retentions[id]?.lastGood != nil {
+                    reduce(id, .transient(retryAfter: nil,
+                                          reason: claudeTransientReason ?? "Claude usage unavailable"), .unavailable)
+                }
+            } else if let r = results[id] {
+                reduce(id, r.outcome, r.usage)
             }
-        } else if !fresh, claudeRetention.lastGood != nil {
-            // OAuth poll suppressed (backoff / long Retry-After) with no live statusline: re-run the
-            // transient branch so the retained value still ages out on time (#108). Without this the
-            // reducer -- the only place applying windowExpired -- never re-checks during a long backoff,
-            // pinning a stale value past maxStale/reset. Idempotent re-evaluation on the same lastGood;
-            // codex always polls so this fires every ~45s tick.
-            reduceClaude(.transient(retryAfter: nil, reason: claudeTransientReason ?? "Claude usage unavailable"),
-                         .unavailable)
         }
-        rebuildUsage()
+        pushMenubarUsage()
     }
 
-    // Liveness from Claude Code's statusline: fires on EVERY rate_limits POST (#93), even when the value
-    // is unchanged. A fresh POST means the statusline is the live source, so re-affirm the cached value
-    // as LIVE -- this clears any stale flag/note a prior oauth transient left even when the value callback
-    // was deduped (#59/#108). On a flat session (display already live) just keep last-good fresh so it
-    // does not age out mid-session.
+    private func usageEnabled(_ id: String) -> Bool {
+        (descriptors[id]?.supportsUsage ?? false) && settings.enabled(for: id).usage
+    }
+
+    // Liveness from Claude Code's statusline: fires on EVERY rate_limits POST (#93). A fresh POST means
+    // the statusline is the live source, so re-affirm the cached value as LIVE -- clearing a stale
+    // flag/note a prior oauth transient left even when the value callback was deduped (#59/#108).
     private func onStatuslineActivity() {
-        poller.noteStatusline()    // #64: a live statusline => skip the (often-429) Claude oauth poll.
         statuslineClaudeAt = Date()
         guard let v = statuslineClaude else { return }
         var live = v; live.stale = nil
-        if claudeDisplay != live {
-            reduceClaude(.live, v)
-            rebuildUsage()
+        if displays["claude"] != live {
+            reduce("claude", .live, v); pushMenubarUsage()
         } else {
-            claudeRetention.lastGoodAt = Date()
+            retentions["claude"]?.lastGoodAt = Date()
         }
     }
 
-    // Claude usage VALUE from Claude Code's statusline rate_limits. Fed to the reducer as a LIVE
-    // observation (so it becomes last-known-good and survives a later 429). Deduped (#59).
+    // Claude usage VALUE from the statusline rate_limits. Fed as a LIVE observation (becomes last-known-
+    // good, survives a later 429). Deduped (#59).
     private func onStatuslineClaude(_ c: ProviderUsage) {
-        guard c != statuslineClaude else { return }   // #59: statusline re-fires ~3x/s, usually unchanged.
+        guard c != statuslineClaude else { return }
         statuslineClaude = c
-        reduceClaude(.live, c)
-        rebuildUsage()
+        reduce("claude", .live, c); pushMenubarUsage()
     }
 
-    private func reduceClaude(_ outcome: ProviderOutcome, _ usage: ProviderUsage) {
-        let r = UsageReducer.reduceProvider(prior: claudeRetention, outcome: outcome, usage: usage,
-                                            now: Date(), maxStale: maxStale, label: "Claude")
-        claudeRetention = r.next; claudeDisplay = r.display.usage; claudeNote = r.display.note
+    // Reduce one provider's observation into its retention/display/note, then feed the mux the display
+    // value (the mux merges + dedups + emits the wire Usage; the BLE send rides mux.onUsage).
+    private func reduce(_ id: String, _ outcome: ProviderOutcome, _ usage: ProviderUsage) {
+        let prior = retentions[id] ?? ProviderRetention()
+        let label = descriptors[id]?.label.capitalized ?? id
+        let r = UsageReducer.reduceProvider(prior: prior, outcome: outcome, usage: usage,
+                                            now: Date(), maxStale: maxStale, label: label)
+        retentions[id] = r.next; displays[id] = r.display.usage
+        if let note = r.display.note { notes[id] = note } else { notes.removeValue(forKey: id) }
+        mux.provider(id, didUpdateUsage: r.display.usage)
     }
 
-    private func reduceCodex(_ outcome: ProviderOutcome, _ usage: ProviderUsage) {
-        let r = UsageReducer.reduceProvider(prior: codexRetention, outcome: outcome, usage: usage,
-                                            now: Date(), maxStale: maxStale, label: "Codex")
-        codexRetention = r.next; codexDisplay = r.display.usage; codexNote = r.display.note
-    }
-
-    private func rebuildUsage() {
-        let merged = Usage(claude: claudeDisplay, codex: codexDisplay)
-        let notes = [claudeNote, codexNote].compactMap { $0 }
-        // Two channels (#108): the BLE frame is sent only on a Usage change (incl. the per-provider
-        // stale bool); a note-only change updates the menubar but sends no frame -- a per-minute info
-        // note must not generate BLE traffic, and the 30s heartbeat covers any genuinely missed frame.
-        let usageChanged = merged != usage
-        let notesChanged = notes != lastNotes
-        guard usageChanged || notesChanged else { return }
-        usage = merged
-        lastNotes = notes
-        menubar.setUsage(usage, notes: notes)
-        if usageChanged { sendFrame(StatusFrame(usage: usage)) }
+    // Push the merged usage + ordered notes to the menubar. The mux gates BLE frames on usage change;
+    // menubar refresh is unconditional so a note-only change updates the UI without BLE traffic (#108).
+    private func pushMenubarUsage() {
+        let ordered = registrationOrder.compactMap { notes[$0] }
+        menubar.setUsage(usage, notes: ordered)
     }
 
     private func onBuddy(_ state: BuddyState) {

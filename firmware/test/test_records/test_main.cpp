@@ -1,5 +1,6 @@
 #include <unity.h>
 #include <stdint.h>
+#include <string.h>
 #include "core/records.h"
 
 void setUp(void) {}
@@ -26,9 +27,21 @@ static void test_records_contract(void) {
 
   TEST_ASSERT_EQUAL_INT(16,  FIN_ID_LEN);
   TEST_ASSERT_EQUAL_INT(80,  BUDDY_HINT_LEN);
+  TEST_ASSERT_EQUAL_INT(4,   USAGE_PROVIDERS_MAX);
+  TEST_ASSERT_EQUAL_INT(13,  USAGE_ID_LEN);
+  TEST_ASSERT_EQUAL_INT(11,  USAGE_LABEL_LEN);
 
   usage_window_t win = { -1, 0 };          // -1 = unavailable
   TEST_ASSERT_EQUAL_INT16(-1, win.pct);
+
+  u.count = 2;                             // provider array + per-provider id/label reachable
+  strcpy(u.p[0].id, "claude"); strcpy(u.p[0].label, "CLAUDE");
+  TEST_ASSERT_EQUAL_UINT8(2, u.count);
+  TEST_ASSERT_EQUAL_STRING("claude", u.p[0].id);
+  strcpy(b.prompt.agent, "codex");         // additive agent fields reachable
+  strcpy(b.sessions[0].agent, "claude");
+  TEST_ASSERT_EQUAL_STRING("codex", b.prompt.agent);
+  TEST_ASSERT_EQUAL_STRING("claude", b.sessions[0].agent);
 
   f.hdr.state = ST_STALE;                  // header reachable on every record
   TEST_ASSERT_EQUAL_INT(ST_STALE, f.hdr.state);

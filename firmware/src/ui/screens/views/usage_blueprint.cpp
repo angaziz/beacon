@@ -1,5 +1,5 @@
 // Blueprint / Schematic - LIMITS (AI usage). Horizontal MEASURE axes: each window is an
-// axis line with end ticks + a base line + a diamond marker at pct. CLAUDE and CODEX, each
+// axis line with end ticks + a base line + a diamond marker at pct. Two providers, each
 // 5H + 7D. pct<0 => "--" and NO marker/fill. Grid/reticle drawn by chrome; do NOT redraw.
 #include "ui/screen.h"
 #include "ui/styles.h"
@@ -7,6 +7,7 @@
 #include "ui/theme.h"
 #include "config/layout.h"
 #include "core/datastore.h"
+#include "ui/screens/screen_common.h"
 #include <Arduino.h>
 
 #define AXIS_W   386   // 466 - 2*SAFE_INSET
@@ -14,14 +15,10 @@
 
 static lv_obj_t *s_status;
 static lv_obj_t *s_axis[N_AXES];   // custom-draw objects, one per window
-static lv_obj_t *s_lab[N_AXES];    // "CLAUDE . 5H"
+static lv_obj_t *s_lab[N_AXES];    // "<LABEL> . 5H"
 static lv_obj_t *s_pct[N_AXES];    // "24%" / "--"
 static lv_obj_t *s_rst[N_AXES];    // "rst 2h08" reset countdown
 static int16_t   s_val[N_AXES];    // -1 => unavailable (no marker/fill)
-
-static const char* AXIS_NAME[N_AXES] = {
-  "CLAUDE . 5H", "CLAUDE . 7D", "CODEX . 5H", "CODEX . 7D"
-};
 
 static void axis_draw_cb(lv_event_t* e) {
   lv_obj_t* o = lv_event_get_target(e);
@@ -98,7 +95,7 @@ static void build(lv_obj_t* page) {
     int by = top + i * block;
 
     s_lab[i] = lv_label_create(page);
-    lv_label_set_text(s_lab[i], AXIS_NAME[i]);
+    lv_label_set_text(s_lab[i], "");
     lv_obj_set_style_text_color(s_lab[i], t->ink_dim, 0);
     lv_obj_set_style_text_font(s_lab[i], t->f_mono, 0);
     lv_obj_set_pos(s_lab[i], SAFE_INSET, by);
@@ -159,12 +156,23 @@ static void update(void) {
 
   bool dim = sv_dim(u.hdr.state);
   bool ph  = sv_placeholder(u.hdr.state) || u.hdr.state == ST_HUB_OFFLINE;
-  bool cdim = dim || u.claude.stale, xdim = dim || u.codex.stale;   // #108: dim last-good per provider.
 
-  apply_window(0, &u.claude.h5, cdim, ph, t, now);
-  apply_window(1, &u.claude.d7, cdim, ph, t, now);
-  apply_window(2, &u.codex.h5,  xdim, ph, t, now);
-  apply_window(3, &u.codex.d7,  xdim, ph, t, now);
+  const usage_provider_t* p0 = usage_slot(&u, 0);
+  const usage_provider_t* p1 = usage_slot(&u, 1);
+  usage_window_t none = usage_none();
+  bool cdim = dim || (p0 && p0->stale);   // #108: dim last-good per provider.
+  bool xdim = dim || (p1 && p1->stale);
+
+  // Axis labels: "<LABEL> . 5H" / "<LABEL> . 7D"; blank when the slot is empty.
+  usage_tag(buf, sizeof(buf), p0, " . ", "5H", false); lv_label_set_text(s_lab[0], buf);
+  usage_tag(buf, sizeof(buf), p0, " . ", "7D", false); lv_label_set_text(s_lab[1], buf);
+  usage_tag(buf, sizeof(buf), p1, " . ", "5H", false); lv_label_set_text(s_lab[2], buf);
+  usage_tag(buf, sizeof(buf), p1, " . ", "7D", false); lv_label_set_text(s_lab[3], buf);
+
+  apply_window(0, p0 ? &p0->h5 : &none, cdim, ph, t, now);
+  apply_window(1, p0 ? &p0->d7 : &none, cdim, ph, t, now);
+  apply_window(2, p1 ? &p1->h5 : &none, xdim, ph, t, now);
+  apply_window(3, p1 ? &p1->d7 : &none, xdim, ph, t, now);
 }
 
 extern const screen_view_t usage_blueprint_view = { build, update };

@@ -1,22 +1,23 @@
-// Dot-Matrix LIMITS view. A clean 2x2 grid of self-labeled cells (claude 5h | claude 7d /
-// codex 5h | codex 7d); each cell = tiny tag + big Doto figure (the figure IS the gauge) + faint
-// "rst <countdown>". pct<0 => "--". Whole-screen HUB_OFFLINE via u.hdr. Chrome drawn by carousel.
+// Dot-Matrix LIMITS view. A clean 2x2 grid of self-labeled cells (row0 = provider 0's 5h|7d,
+// row1 = provider 1's 5h|7d); each cell = tiny tag + big Doto figure (the figure IS the gauge) +
+// faint "rst <countdown>". pct<0 => "--". Whole-screen HUB_OFFLINE via u.hdr. Chrome drawn by carousel.
 #include "ui/screen.h"
 #include "ui/styles.h"
 #include "ui/state_view.h"
 #include "ui/theme.h"
 #include "config/layout.h"
+#include "ui/screens/screen_common.h"
 #include "core/datastore.h"
 #include <Arduino.h>
 static void update(void);
 
 
-#define N_WIN 4   // claude.h5, claude.d7, codex.h5, codex.d7
+#define N_WIN 4   // p0.h5, p0.d7, p1.h5, p1.d7
 
 static lv_obj_t *s_status;
-static lv_obj_t *s_big[N_WIN], *s_sub[N_WIN];
+static lv_obj_t *s_big[N_WIN], *s_sub[N_WIN], *s_tag[N_WIN];
 
-static void mk_cell(lv_obj_t* page, const beacon_theme_t* t, int idx, const char* tag, int dx, int dy) {
+static void mk_cell(lv_obj_t* page, const beacon_theme_t* t, int idx, int dx, int dy) {
   lv_obj_t* cell = lv_obj_create(page);
   lv_obj_remove_style_all(cell);
   lv_obj_set_size(cell, 150, LV_SIZE_CONTENT);
@@ -26,10 +27,11 @@ static void mk_cell(lv_obj_t* page, const beacon_theme_t* t, int idx, const char
   lv_obj_align(cell, LV_ALIGN_CENTER, dx, dy);
 
   lv_obj_t* tg = lv_label_create(cell);
-  lv_label_set_text(tg, tag);
+  lv_label_set_text(tg, "");   // real text set in update() from provider label
   lv_obj_set_style_text_font(tg, t->f_body, 0);
   lv_obj_set_style_text_color(tg, t->ink_dim, 0);
   lv_obj_set_style_text_letter_space(tg, 3, 0);
+  s_tag[idx] = tg;
 
   s_big[idx] = lv_label_create(cell);
   lv_obj_set_style_text_font(s_big[idx], t->f_display, 0);
@@ -67,10 +69,10 @@ static void build(lv_obj_t* page) {
   lv_obj_align(s_status, LV_ALIGN_TOP_RIGHT, -(SAFE_INSET + 2), SAFE_INSET);
 
   // 2x2 grid centered (slightly below header).
-  mk_cell(page, t, 0, "claude 5h", -82, -52);
-  mk_cell(page, t, 1, "claude 7d",  82, -52);
-  mk_cell(page, t, 2, "codex 5h",  -82,  66);
-  mk_cell(page, t, 3, "codex 7d",   82,  66);
+  mk_cell(page, t, 0, -82, -52);
+  mk_cell(page, t, 1,  82, -52);
+  mk_cell(page, t, 2, -82,  66);
+  mk_cell(page, t, 3,  82,  66);
   update();
 }
 
@@ -93,11 +95,19 @@ static void update(void) {
   usage_rec_t u = ds_get_usage();
   uint32_t now = now_s();
   bool ph = sv_placeholder(u.hdr.state), dim = sv_dim(u.hdr.state);
-  bool cdim = dim || u.claude.stale, xdim = dim || u.codex.stale;   // #108: dim last-good per provider.
-  set_window(0, &u.claude.h5, ph, cdim, t, now);
-  set_window(1, &u.claude.d7, ph, cdim, t, now);
-  set_window(2, &u.codex.h5,  ph, xdim, t, now);
-  set_window(3, &u.codex.d7,  ph, xdim, t, now);
+  usage_window_t none = usage_none();
+  const usage_provider_t* p0 = usage_slot(&u, 0);
+  const usage_provider_t* p1 = usage_slot(&u, 1);
+  bool cdim = dim || (p0 && p0->stale), xdim = dim || (p1 && p1->stale);   // #108: dim last-good per provider.
+  char tb[USAGE_LABEL_LEN + 8];
+  usage_tag(tb, sizeof(tb), p0, " ", "5h", true); lv_label_set_text(s_tag[0], tb);
+  usage_tag(tb, sizeof(tb), p0, " ", "7d", true); lv_label_set_text(s_tag[1], tb);
+  usage_tag(tb, sizeof(tb), p1, " ", "5h", true); lv_label_set_text(s_tag[2], tb);
+  usage_tag(tb, sizeof(tb), p1, " ", "7d", true); lv_label_set_text(s_tag[3], tb);
+  set_window(0, p0 ? &p0->h5 : &none, ph, cdim, t, now);
+  set_window(1, p0 ? &p0->d7 : &none, ph, cdim, t, now);
+  set_window(2, p1 ? &p1->h5 : &none, ph, xdim, t, now);
+  set_window(3, p1 ? &p1->d7 : &none, ph, xdim, t, now);
   char sbuf[24];
   if (sv_status(sbuf, sizeof(sbuf), &u.hdr, now)) {
     lv_label_set_text(s_status, sbuf);

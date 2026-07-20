@@ -1,8 +1,8 @@
 import AppKit
 import Foundation
 
-// Single source for the System Settings deep links so MenubarController and FirstRunWindowController
-// can't drift. macOS 13+ pane ids; the pre-Ventura "com.apple.Bluetooth" no longer resolves.
+// Single source for the System Settings deep links so MenubarController and the Settings window can't
+// drift. macOS 13+ pane ids; the pre-Ventura "com.apple.Bluetooth" no longer resolves.
 enum SettingsLinks {
     static let bluetooth = URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings")!
     static let privacyBluetooth = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth")!

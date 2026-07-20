@@ -67,7 +67,7 @@ static void build(lv_obj_t* page) {
 
   lv_obj_t* title = lv_label_create(page);
   lv_obj_add_style(title, &S.slot, 0);
-  lv_label_set_text(title, "// CLAUDE");
+  lv_label_set_text(title, "// AGENTS");
   lv_obj_align(title, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET);
 
   s_status = lv_label_create(page);

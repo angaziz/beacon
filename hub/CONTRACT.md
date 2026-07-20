@@ -15,18 +15,27 @@ Newline-delimited JSON, `"v":1`. `usage` and `buddy` are independently optional 
 the device keeps an absent block's last values). A null/omitted window `pct` => unavailable ("--").
 
 ```json
-{"v":1,"usage":{"claude":{"h5":{"pct":24,"reset":1717600000},"d7":{"pct":24,"reset":1717800000}},
-                "codex":{"h5":{"pct":1,"reset":1717590000},"d7":{"pct":29,"reset":1717800000}}},
+{"v":1,"usage":{"providers":[
+  {"id":"claude","label":"CLAUDE","h5":{"pct":24,"reset":1717600000},"d7":{"pct":24,"reset":1717800000},"stale":true},
+  {"id":"codex","label":"CODEX","h5":{"pct":1,"reset":1717590000},"d7":{"pct":29,"reset":1717800000}}]},
  "buddy":{"running":2,"waiting":1,"tokens":184502,"context_pct":42,
           "entries":["10:42 git push","10:41 yarn test"],
-          "prompt":{"id":"p07","tool":"Bash","hint":"rm -rf /tmp/build","qlen":2}}}
+          "prompt":{"id":"p07","agent":"claude","tool":"Bash","hint":"rm -rf /tmp/build","qlen":2}}}
 ```
 - Absent `buddy.prompt` => idle. `pct` is an integer 0..100 or JSON null (device reads null/absent as -1).
 - The device codec (`hub_parse_status`) + `test_hub_proto` assert exactly this shape.
-- `usage.<provider>.stale` (additive `v:1` ext, issue #108) -- `true` => the windows carry
+- `usage.providers` (**BREAKING**, design 2026-07-19, clean cutover from the old fixed
+  `usage.{claude,codex}` slots) -- 0..4 entries, one per usage-toggle-ON provider, in hub display
+  order. Each entry: `id` (stable lowercase ascii, <=12 chars), `label` (display string, <=10 chars,
+  uppercase preferred), `h5`/`d7` windows, and optional `stale`. The device renders provider labels
+  from the record instead of hardcoding "claude"/"codex"; usage themes show the first 2.
+- `usage.providers[].stale` (additive `v:1` ext, issue #108) -- `true` => the windows carry
   last-known-good the hub held through a transient failure (e.g. Claude oauth 429); the device dims that
-  provider's windows. Emitted ONLY when `true` (absent/`false` => live), like `qlen`. Per-provider:
-  `claude` and `codex` carry it independently.
+  provider's windows. Emitted ONLY when `true` (absent/`false` => live), like `qlen`. Per-provider,
+  independent.
+- **Migration:** this is a breaking change to the `usage` block only. Old firmware fails to parse the
+  new `providers` array and shows usage unavailable ("--"); flash matching firmware (the web flasher
+  makes this trivial). `buddy`/`loc`/`sessions` are unaffected.
 - `buddy.prompt.qlen` (additive `v:1` ext, issue #98) -- total pending prompts incl. the shown front.
   Omitted or `<=1` => a single prompt (no `(1 of N)` badge). The device always shows the front;
   position is implicitly 1, so there is no `qpos`.
@@ -49,8 +58,8 @@ lets old firmware ignore it while still reading the unchanged `buddy`/`entries` 
 on any session-state change and on (re)connect; parsed by `hub_parse_sessions` into `buddy_rec_t.sessions[]`.
 
 ```json
-{"v":1,"sessions":[{"id":"s3","label":"beacon · fix/109","state":"attention","ts":1719400000},
-                   {"id":"s1","label":"api · main","state":"working","ts":1719399860}]}
+{"v":1,"sessions":[{"id":"s3","agent":"claude","label":"beacon · fix/109","state":"attention","ts":1719400000},
+                   {"id":"s1","agent":"codex","label":"api · main","state":"working","ts":1719399860}]}
 ```
 - Newest-first (hub-sorted by last update). **Frozen caps** (worst case asserted < 1024 B): `sessions`
   length ≤ **5**; `id` ≤ **6** chars (`s` + monotonic counter, wraps mod 100000); `label` ≤ **28** chars
@@ -59,6 +68,12 @@ on any session-state change and on (re)connect; parsed by `hub_parse_sessions` i
   (device). `question` = the session is waiting on the user's input (from the CC `Notification` hook);
   the device surfaces it as a "tap to answer on Mac" takeover (priority: permission prompt > question >
   list). The device renders up to 4 rows on the `claude` screen.
+- `agent` (additive `v:1` ext, design 2026-07-19) = the owning provider id. Optional on the wire
+  (omitted when nil), always emitted by the new hub; the device stores it (cap **12** chars) and may
+  ignore it for now. Also carried on `buddy.prompt.agent` (same semantics). `buddy.running`/`waiting`
+  count across all buddy-enabled providers; `tokens`/`context_pct` come from whichever provider reports
+  metrics (0 otherwise). Session `sN` + prompt `pN` ids stay hub-minted, globally unique across
+  providers; device `permission`/`open` commands are unchanged and the hub routes them to the owner.
 - Migration: `buddy.entries` stays emitted/legal for back-compat; new firmware reads `sessions` and
   ignores `entries`, old firmware ignores the unknown `sessions` frame. No version bump.
 
@@ -242,6 +257,75 @@ receives JSON with `session_id` (per-session TOK/CTX aggregation key), `cwd` (at
 statusline renderer** (forwards the JSON to `127.0.0.1:8765/statusline`, then delegates to the real
 command passed as args), so the user's status bar is unchanged. Bind port is the fixed **8765**.
 
+### C.5 Codex hooks (buddy) — VERIFIED (openai/codex codex-rs/hooks @ 0fb559f0; codex-cli 0.140.0)
+Codex ships a Claude-compatible command-hook system (feature `hooks`, stable + default-on). The Codex
+buddy adapter bridges it with a shim, `~/.beacon/beacon-codex-hook` (installed alongside the Claude
+statusline shim). Codex spawns the shim per event with the event JSON on stdin and reads the decision
+from stdout.
+
+**Install (managed block in `~/.codex/config.toml`, honors `CODEX_HOME`).** Idempotent, marker-delimited
+(`# >>> beacon-codex-hooks (managed by Beacon Hub; do not edit) >>>` ... `<<<`); everything outside the
+markers is preserved and a timestamped `.bak.<ts>` is written before any change. The block wires five
+events, one matcher group + one command each:
+
+```toml
+[[hooks.SessionStart]]
+hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook" }]
+[[hooks.UserPromptSubmit]]
+hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook" }]
+[[hooks.Stop]]
+hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook" }]
+[[hooks.SessionEnd]]
+hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook" }]
+[[hooks.PermissionRequest]]
+hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook", timeout = 590 }]
+
+[hooks.state]
+"<canonical config.toml path>:permission_request:0:0" = { enabled = true, trusted_hash = "sha256:..." }
+# ... one trusted_hash entry per event ...
+```
+
+**stdin (Codex -> shim, snake_case).** `{session_id, turn_id, cwd, hook_event_name, model,
+permission_mode, tool_name, tool_input, ...}`. `SessionStart` adds `source` (startup|resume|clear|
+compact); `SessionEnd` adds `reason`.
+
+**stdout (shim -> Codex).** Byte-identical to the Claude `PermissionRequest` shape (§C.3):
+`{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"|"deny",
+"message":"..."}}}`. Empty stdout or `{}` = **no verdict** (Codex falls through to its own interactive
+TUI prompt). Any deny wins the fold; exit 2 + stderr also denies.
+
+**Lifecycle -> session state.** `SessionStart` => register (label = cwd basename + git branch),
+`UserPromptSubmit` => working, `Stop` => attention, `SessionEnd` => remove. These POST fire-and-forget
+(shim `curl -m 1`); the hub replies `{"ok":true}`.
+
+**PermissionRequest hold / timeout.** The shim POSTs synchronously (`curl --max-time 585`) and the hub
+HOLDS the connection until the device decides, then returns the allow/deny decision. The hub arms a
+fail-closed 575 s cap; the timers are strictly ordered `hub 575 < curl 585 < Codex hook 590` so the hub
+always fires first while the socket is still open (its deny reaches Codex). A cap equal to the curl
+budget would fire only after curl had already closed the socket, degrading to fail-OPEN passthrough --
+curl's clock starts before the hub even receives the request. If the held connection drops first, the
+user answered in the Codex TUI => the hub withdraws that prompt silently.
+
+**Pass-through (never auto-deny on a toggle).** Coding-Buddy OFF, or a still-held prompt at toggle-off,
+returns `{}` (no verdict) so Codex prompts locally. Device offline denies immediately (named). Hub
+unreachable is handled in the shim: connection refused / timeout => print nothing, exit 0 (fail-open to
+the Codex TUI).
+
+**Trust (CRITICAL, source-verified + reproduced against codex-cli 0.140.0).** A user-config command hook
+only RUNS when Codex marks it `Trusted`, i.e. its `[hooks.state]` `trusted_hash` equals the hash Codex
+derives (`codex-rs/hooks/src/engine/discovery.rs`: `enabled && (bypass || Managed | Trusted)`; else the
+hook is discovered but never dispatched). Codex derives the hash (`config/src/fingerprint.rs
+version_for_toml`) as `sha256:` + hex(sha256(canonical compact JSON of the normalized identity
+`{"event_name":"<label>","hooks":[{"async":false,"command":"<cmd>","timeout":<normalized>,"type":"command"}]}`,
+object keys sorted). Normalized timeouts: 600 for SessionStart/UserPromptSubmit/Stop, 1 for SessionEnd,
+590 for PermissionRequest. The state key is `<fs::canonicalize(config.toml)>:<event label>:<group>:<handler>`
+(group/handler are 0 for our single-group-per-event block). The installer computes and writes these
+hashes, so a fresh install is immediately trusted with **no interactive trust step** (verified end to end:
+`hooks/list` reports every Beacon hook `trusted`). One-time recovery, only if Codex ever reports the
+hooks as untrusted (e.g. a Codex build whose hashing changed, or a pre-existing `[[hooks.<Event>]]`
+group shifting our group index): re-run install, or trust the Beacon hooks once from the Codex TUI
+`/hooks` menu.
+
 ## D. Hub-side policies
 
 - **Short id mapping (`records.h` `BUDDY_ID_LEN`=24 => <=23 chars):** the hub mints a short id per
@@ -262,14 +346,19 @@ command passed as args), so the user's status bar is unchanged. Bind port is the
 
 ### D.1 Onboarding, lifecycle & error recovery (epic #20 — `docs/research/2026-06-08-hub-ux-audit.md`)
 
-- **First-run setup window (#15):** on first launch (gated by `BeaconFirstRunComplete`) the hub shows a
-  setup window with live **Bluetooth / Claude Code hooks / device-connected** rows, each with one-click
-  remediation; reachable later via the menu **Setup…**. The hooks **Install** button shells out to
-  `build-app.sh install-hooks` (single source of truth for the idempotent `jq` merge) and installs the
-  statusline shim to the no-space path `~/.beacon/beacon-statusline` (`build-app.sh` honours a `BEACON_SHIM`
-  override so install + detection agree). "Hooks installed" is detected by requiring BOTH the
-  `PermissionRequest` hook (`url=http://127.0.0.1:8765/hook`) AND a `statusLine.command` containing the shim
-  — not any beacon URL anywhere. Replaces hand-editing `~/.claude/settings.json`.
+- **Settings window + first-run setup (#15):** a single **Settings** window (reachable via the menu
+  **Settings…**) presents providers as a table — one row per provider with **Usage / Coding buddy**
+  toggle columns plus an inline **Set up** chip beside the provider name — over a global **Connection**
+  section (**Bluetooth / device-connected** checks) and the forget/re-pair guidance. On first launch
+  (gated by `BeaconFirstRunComplete`) it auto-opens until every check passes or the user ticks **Don't
+  open on startup**. **Setup is per provider:** the chip is a **Set up** button until that provider's
+  hooks are detected (a green **Ready** once installed); it runs only
+  that provider's install (`HooksInstaller.install(providerID:)` — Claude shells out to
+  `build-app.sh install-hooks` and installs the statusline shim to the no-space path
+  `~/.beacon/beacon-statusline`; Codex writes its managed `~/.codex/config.toml` block). Claude "hooks
+  installed" requires BOTH the `PermissionRequest` hook (`url=http://127.0.0.1:8765/hook`) AND a
+  `statusLine.command` containing the shim — not any beacon URL anywhere. Replaces hand-editing
+  `~/.claude/settings.json` and the separate first-run/forget windows.
 - **Login item (#16):** `SMAppService.mainApp`, toggled by the menu **Start at login**. The menu reflects the
   REAL registration state (re-read on every menu open), and `.requiresApproval` is surfaced honestly
   (guidance dialog), never a silent false "on".
@@ -280,8 +369,9 @@ command passed as args), so the user's status bar is unchanged. Bind port is the
   no in-flight CC call is ever left without a responder (fail-OPEN per §C.3 is avoided).
 - **Forget device / re-pair (#16):** app-side reset only — cancel the link, drop the cached peripheral,
   rescan. CoreBluetooth has **no API to remove an OS-level bond**, so a truly stuck bond (e.g. keys changed
-  after a firmware re-flash) still needs the user's System Settings **Forget This Device**; the menu action
-  guides there with a one-click "Open Bluetooth Settings".
+  after a firmware re-flash) still needs the user's System Settings **Forget This Device**; the Settings
+  window's forget section guides there with a one-click **Open Bluetooth & forget** button (app-side reset,
+  then jump to Bluetooth settings where the user taps **Forget This Device**).
 - **401 token self-heal (#17):** on a usage 401 the hub re-reads the **CLI-rotated** credential (Claude
   Keychain blob / `~/.codex/auth.json`) and retries the request **exactly once** if the token changed; a
   one-shot guard makes a second 401 unable to loop. Self-heals the common case (active user whose CLI already

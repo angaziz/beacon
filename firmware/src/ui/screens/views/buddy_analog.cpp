@@ -67,7 +67,7 @@ static void build(lv_obj_t* page) {
   const beacon_theme_t* t = theme_active();
 
   lv_obj_t* eyebrow = lv_label_create(page);
-  lv_label_set_text(eyebrow, "claude");
+  lv_label_set_text(eyebrow, "agents");
   lv_obj_set_style_text_font(eyebrow, t->f_mono, 0);
   lv_obj_set_style_text_color(eyebrow, t->ink_dim, 0);
   lv_obj_align(eyebrow, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET);

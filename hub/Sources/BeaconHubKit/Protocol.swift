@@ -26,10 +26,24 @@ public struct ProviderUsage: Codable, Equatable {
     }
 }
 
+// One provider's usage entry on the wire (design 2026-07-19). Replaces the old fixed claude/codex
+// slots; the hub now sends 0..4 entries, one per usage-enabled provider, in hub display order.
+// `stale` mirrors ProviderUsage.stale (emitted ONLY when true). `id`/`label` name the provider so the
+// device renders whatever it is sent instead of hardcoding provider names.
+public struct UsageEntry: Codable, Equatable {
+    public var id: String       // stable lowercase ascii, <=12 chars
+    public var label: String    // display string, <=10 chars, uppercase preferred
+    public var h5: UsageWindow
+    public var d7: UsageWindow
+    public var stale: Bool?     // true => last-known-good held through a transient failure; else omitted
+    public init(id: String, label: String, h5: UsageWindow, d7: UsageWindow, stale: Bool? = nil) {
+        self.id = id; self.label = label; self.h5 = h5; self.d7 = d7; self.stale = stale
+    }
+}
+
 public struct Usage: Codable, Equatable {
-    public var claude: ProviderUsage
-    public var codex: ProviderUsage
-    public init(claude: ProviderUsage, codex: ProviderUsage) { self.claude = claude; self.codex = codex }
+    public var providers: [UsageEntry]   // 0..4 entries, hub display order (StatusFrame.usage type name unchanged)
+    public init(providers: [UsageEntry] = []) { self.providers = providers }
 }
 
 public struct BuddyPrompt: Codable, Equatable {
@@ -37,8 +51,9 @@ public struct BuddyPrompt: Codable, Equatable {
     public var tool: String
     public var hint: String
     public var qlen: Int?   // total pending prompts incl. this front one; nil/<=1 => lone prompt (omitted)
-    public init(id: String, tool: String, hint: String, qlen: Int? = nil) {
-        self.id = id; self.tool = tool; self.hint = hint; self.qlen = qlen
+    public var agent: String?   // owning provider id (additive, design 2026-07-19); encoded only when non-nil
+    public init(id: String, tool: String, hint: String, qlen: Int? = nil, agent: String? = nil) {
+        self.id = id; self.tool = tool; self.hint = hint; self.qlen = qlen; self.agent = agent
     }
 }
 
@@ -85,8 +100,9 @@ public struct Session: Codable, Equatable {
     public var label: String
     public var state: SessionState
     public var ts: Int            // Unix epoch seconds of last update
-    public init(id: String, label: String, state: SessionState, ts: Int) {
-        self.id = id; self.label = label; self.state = state; self.ts = ts
+    public var agent: String?     // owning provider id (additive, design 2026-07-19); encoded only when non-nil
+    public init(id: String, label: String, state: SessionState, ts: Int, agent: String? = nil) {
+        self.id = id; self.label = label; self.state = state; self.ts = ts; self.agent = agent
     }
 }
 
@@ -102,7 +118,9 @@ public struct SessionsFrame: Codable {
         self.sessions = sessions.prefix(SessionLimits.maxCount).map {
             Session(id: String($0.id.prefix(SessionLimits.idMaxChars)),
                     label: String($0.label.prefix(SessionLimits.labelMaxChars)),
-                    state: $0.state, ts: $0.ts)
+                    state: $0.state, ts: $0.ts,
+                    // agent capped at 12 chars (USAGE_ID_LEN-1); nil stays nil (omitted on the wire).
+                    agent: $0.agent.map { String($0.prefix(12)) })
         }
         self.v = 1
     }

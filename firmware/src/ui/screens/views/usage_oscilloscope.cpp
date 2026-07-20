@@ -4,9 +4,10 @@
 #include "ui/theme.h"
 #include "config/layout.h"
 #include "core/datastore.h"
+#include "ui/screens/screen_common.h"
 #include <Arduino.h>
 
-// Oscilloscope / Signal LIMITS. FOUR scope CHANNELS in a 2x2 grid (CLAUDE 5H | 7D ; CODEX 5H | 7D),
+// Oscilloscope / Signal LIMITS. FOUR scope CHANNELS in a 2x2 grid (provider 0 5H | 7D ; provider 1 5H | 7D),
 // each a bordered scope box with a phosphor level fill rising from the bottom to pct (custom
 // DRAW_MAIN rect + glow top line), a percent figure, and a "rst <countdown>" line. pct<0 (or
 // loading) => "--" and NO fill. Dim values when stale/offline. HUB_OFFLINE via u.hdr.
@@ -23,9 +24,7 @@ static lv_obj_t* s_box[N_CH];
 static int16_t s_lvl[N_CH] = { -1, -1, -1, -1 };
 static bool s_dim[N_CH] = { false, false, false, false };
 
-static const char* const CH_NAME[N_CH] = {
-  "CLAUDE . 5H", "CLAUDE . 7D", "CODEX . 5H", "CODEX . 7D"
-};
+static lv_obj_t* s_name[N_CH];
 
 static void update(void);
 
@@ -64,11 +63,11 @@ static void make_channel(lv_obj_t* parent, const beacon_theme_t* t, int idx) {
   lv_obj_set_size(ch, lv_pct(48), LV_SIZE_CONTENT);
   lv_obj_clear_flag(ch, LV_OBJ_FLAG_SCROLLABLE);
 
-  lv_obj_t* lab = lv_label_create(ch);
-  lv_label_set_text(lab, CH_NAME[idx]);
-  lv_obj_set_style_text_color(lab, t->ink_dim, 0);
-  lv_obj_set_style_text_font(lab, t->f_mono, 0);
-  lv_obj_align(lab, LV_ALIGN_TOP_LEFT, 0, 0);
+  s_name[idx] = lv_label_create(ch);
+  lv_label_set_text(s_name[idx], "");
+  lv_obj_set_style_text_color(s_name[idx], t->ink_dim, 0);
+  lv_obj_set_style_text_font(s_name[idx], t->f_mono, 0);
+  lv_obj_align(s_name[idx], LV_ALIGN_TOP_LEFT, 0, 0);
 
   s_pct[idx] = lv_label_create(ch);
   lv_obj_set_style_text_color(s_pct[idx], t->ink, 0);
@@ -154,12 +153,22 @@ static void update(void) {
 
   bool ph = sv_placeholder(u.hdr.state);
   bool dim = sv_dim(u.hdr.state);
-  bool cdim = dim || u.claude.stale, xdim = dim || u.codex.stale;   // #108: dim last-good per provider.
+  const usage_provider_t* p0 = usage_slot(&u, 0);
+  const usage_provider_t* p1 = usage_slot(&u, 1);
+  usage_window_t none = usage_none();
+  bool cdim = dim || (p0 && p0->stale), xdim = dim || (p1 && p1->stale);  // #108: dim last-good per provider.
 
-  apply_channel(t, 0, &u.claude.h5, ph, cdim, now);
-  apply_channel(t, 1, &u.claude.d7, ph, cdim, now);
-  apply_channel(t, 2, &u.codex.h5,  ph, xdim, now);
-  apply_channel(t, 3, &u.codex.d7,  ph, xdim, now);
+  // Channel name tags come from the record label ("<LABEL> . 5H"); blank for an absent provider.
+  char nb[24];
+  usage_tag(nb, sizeof(nb), p0, " . ", "5H", false); lv_label_set_text(s_name[0], nb);
+  usage_tag(nb, sizeof(nb), p0, " . ", "7D", false); lv_label_set_text(s_name[1], nb);
+  usage_tag(nb, sizeof(nb), p1, " . ", "5H", false); lv_label_set_text(s_name[2], nb);
+  usage_tag(nb, sizeof(nb), p1, " . ", "7D", false); lv_label_set_text(s_name[3], nb);
+
+  apply_channel(t, 0, p0 ? &p0->h5 : &none, ph, cdim, now);
+  apply_channel(t, 1, p0 ? &p0->d7 : &none, ph, cdim, now);
+  apply_channel(t, 2, p1 ? &p1->h5 : &none, ph, xdim, now);
+  apply_channel(t, 3, p1 ? &p1->d7 : &none, ph, xdim, now);
 }
 
 extern const screen_view_t usage_oscilloscope_view = { build, update };

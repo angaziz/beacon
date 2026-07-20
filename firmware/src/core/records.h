@@ -14,6 +14,9 @@
 #define BUDDY_SID_LEN      8   // "s" + up to 6 digits + NUL
 #define BUDDY_LABEL_LEN   29   // 28 chars + NUL (design §4 cap)
 #define BUDDY_SESSIONS_MAX 5
+#define USAGE_PROVIDERS_MAX 4
+#define USAGE_ID_LEN        13   // wire id <=12 ascii chars + NUL
+#define USAGE_LABEL_LEN     11   // display label <=10 chars + NUL
 
 enum {                          // wire `state` string => firmware enum
   BST_WORKING = 0,
@@ -26,6 +29,7 @@ enum {                          // wire `state` string => firmware enum
 typedef struct {
   char     id[BUDDY_SID_LEN];   // opaque hub-minted s<n>, echoed back on tap (Phase 2)
   char     label[BUDDY_LABEL_LEN];
+  char     agent[USAGE_ID_LEN]; // owning provider id (wire "agent"); empty when absent
   uint8_t  state;               // BST_*
   uint32_t ts;                  // epoch seconds of last update (sort key, age source)
 } buddy_session_t;
@@ -65,10 +69,16 @@ typedef struct {
 } usage_window_t;
 // `stale` (#108): the windows carry last-known-good held by the hub through a transient failure (e.g.
 // Claude oauth 429). Views dim the provider's windows; the shared hdr stays for hub-link state.
-typedef struct { usage_window_t h5, d7; bool stale; } usage_provider_t;
+typedef struct {
+  char id[USAGE_ID_LEN];        // stable lowercase provider id (wire "id"); empty slot => ""
+  char label[USAGE_LABEL_LEN];  // display label (wire "label")
+  usage_window_t h5, d7;
+  bool stale;
+} usage_provider_t;
 typedef struct {
   record_hdr_t     hdr;        // ST_HUB_OFFLINE when the hub link drops
-  usage_provider_t claude, codex;
+  uint8_t          count;      // active providers in p[] (0..USAGE_PROVIDERS_MAX)
+  usage_provider_t p[USAGE_PROVIDERS_MAX];
 } usage_rec_t;
 
 // --- Coding buddy (FR-BUDDY, hub-plane) ---
@@ -100,6 +110,7 @@ typedef struct {
   char id[BUDDY_ID_LEN];       // prompt id (echoed back on decide)
   char tool[BUDDY_TOOL_LEN];   // tool name
   char hint[BUDDY_HINT_LEN];   // command hint
+  char agent[USAGE_ID_LEN];    // owning provider id (wire "agent"); empty when absent
   uint8_t queue_len;           // total pending prompts incl. this front one (1 = lone); from qlen, NOT a local stamp
   uint8_t decision_state;      // device-local confirm lifecycle (PROMPT_*); NOT serialized
   // Device-local monotonic-uptime stamps (uptime_s()), NOT serialized; live in a different epoch from

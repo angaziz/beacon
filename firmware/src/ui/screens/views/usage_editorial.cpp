@@ -4,6 +4,8 @@
 #include "core/datastore.h"
 
 static lv_obj_t* s_slot;
+static lv_obj_t* s_prov0;   // provider-0 row label (data-driven; was "CLAUDE")
+static lv_obj_t* s_prov1;   // provider-1 row label (data-driven; was "CODEX")
 struct Cell { lv_obj_t *pct, *bar, *resets; };
 static Cell s_c5, s_c7, s_x5, s_x7;
 
@@ -39,10 +41,10 @@ static void build(lv_obj_t* page) {
   s_slot = build_header(page, "LIMITS");
   lv_obj_t* title = lv_label_create(page); lv_obj_add_style(title, &S.display, 0);
   lv_label_set_text(title, "AI USAGE"); lv_obj_align(title, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET + 34);
-  lv_obj_t* cl = lv_label_create(page); lv_obj_add_style(cl, &S.slot, 0); lv_label_set_text(cl, "CLAUDE");
-  lv_obj_align(cl, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET + 90);
-  lv_obj_t* cx = lv_label_create(page); lv_obj_add_style(cx, &S.slot, 0); lv_label_set_text(cx, "CODEX");
-  lv_obj_align(cx, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET + 220);
+  s_prov0 = lv_label_create(page); lv_obj_add_style(s_prov0, &S.slot, 0); lv_label_set_text(s_prov0, "");
+  lv_obj_align(s_prov0, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET + 90);
+  s_prov1 = lv_label_create(page); lv_obj_add_style(s_prov1, &S.slot, 0); lv_label_set_text(s_prov1, "");
+  lv_obj_align(s_prov1, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET + 220);
   s_c5 = make_cell(page, SAFE_INSET,       SAFE_INSET + 120, "5H");
   s_c7 = make_cell(page, SAFE_INSET + 200, SAFE_INSET + 120, "7D");
   s_x5 = make_cell(page, SAFE_INSET,       SAFE_INSET + 250, "5H");
@@ -52,10 +54,16 @@ static void build(lv_obj_t* page) {
 static void update(void) {
   usage_rec_t u = ds_get_usage(); const beacon_theme_t* th = theme_active(); uint32_t now = now_s();
   bool ph = sv_placeholder(u.hdr.state);
-  bool cdim = u.claude.stale, xdim = u.codex.stale;   // #108: dim last-good per provider.
   slot_set(s_slot, "POLL 30S", &u.hdr, now);
-  set_cell(s_c5, u.claude.h5, th, now, ph, cdim); set_cell(s_c7, u.claude.d7, th, now, ph, cdim);
-  set_cell(s_x5, u.codex.h5, th, now, ph, xdim);  set_cell(s_x7, u.codex.d7, th, now, ph, xdim);
+  const usage_provider_t* p0 = usage_slot(&u, 0);   // first two providers; >2 not shown
+  const usage_provider_t* p1 = usage_slot(&u, 1);
+  usage_window_t none = usage_none();
+  txt_set(s_prov0, p0 ? p0->label : "");
+  txt_set(s_prov1, p1 ? p1->label : "");
+  set_cell(s_c5, p0 ? p0->h5 : none, th, now, ph, p0 && p0->stale);
+  set_cell(s_c7, p0 ? p0->d7 : none, th, now, ph, p0 && p0->stale);
+  set_cell(s_x5, p1 ? p1->h5 : none, th, now, ph, p1 && p1->stale);
+  set_cell(s_x7, p1 ? p1->d7 : none, th, now, ph, p1 && p1->stale);
 }
 
 extern const screen_view_t usage_editorial_view = { build, update };

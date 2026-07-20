@@ -61,7 +61,7 @@ static lv_obj_t* mk_btn(lv_obj_t* page, const char* txt, lv_align_t al, long app
 }
 
 static void build(lv_obj_t* page) {
-  s_slot = build_header(page, "CLAUDE");
+  s_slot = build_header(page, "AGENTS");
   s_status = lv_label_create(page); lv_obj_add_style(s_status, &S.slot, 0);
   lv_obj_align(s_status, LV_ALIGN_TOP_LEFT, SAFE_INSET, SAFE_INSET + 26);
   s_kicker = lv_label_create(page); lv_obj_add_style(s_kicker, &S.eyebrow, 0);

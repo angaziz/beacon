@@ -68,10 +68,11 @@ static void test_hub_offline_flip_and_recovery(void) {
   ds_set_hub_offline();
   TEST_ASSERT_EQUAL_INT(ST_HUB_OFFLINE, ds_get_usage().hdr.state);
   TEST_ASSERT_EQUAL_INT(ST_HUB_OFFLINE, ds_get_buddy().hdr.state);
-  usage_rec_t u; memset(&u, 0, sizeof(u)); u.claude.h5.pct = 24; u.hdr.last_updated = 1000;
+  usage_rec_t u; memset(&u, 0, sizeof(u));
+  u.count = 1; u.p[0].h5.pct = 24; u.hdr.last_updated = 1000;
   ds_set_usage(&u);
   TEST_ASSERT_EQUAL_INT(ST_LIVE, ds_get_usage().hdr.state);      // recovered
-  TEST_ASSERT_EQUAL_INT16(24, ds_get_usage().claude.h5.pct);
+  TEST_ASSERT_EQUAL_INT16(24, ds_get_usage().p[0].h5.pct);
 }
 
 static void test_explicit_failure_preserves_payload(void) {

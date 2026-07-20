@@ -12,6 +12,7 @@ static inline void buddy_queue_badge(uint8_t queue_len, char* out, size_t cap) {
 #if !BEACON_NATIVE
 #include <lvgl.h>
 #include <Arduino.h>
+#include <ctype.h>
 #include <string.h>
 #include <stdarg.h>
 #include "config/layout.h"
@@ -111,6 +112,34 @@ static inline lv_obj_t* build_header(lv_obj_t* page, const char* id) {
   lv_label_set_text(slot, "");
   lv_obj_align(slot, LV_ALIGN_TOP_RIGHT, -SAFE_INSET, SAFE_INSET);
   return slot;
+}
+
+// --- Usage screen provider tags (data-driven; multi-provider design 2026-07-19) ---
+// Placeholder window for an empty provider slot: pct<0 renders as "--" with no gauge fill.
+// Returned by value (inline) so unused TUs get no dangling-const warnings.
+static inline usage_window_t usage_none(void) { usage_window_t w = { -1, 0 }; return w; }
+// Pointer to display provider i (0/1) or NULL when the record carries fewer providers. Only the
+// first two are rendered (themes show a 2x2 grid); u.count may be up to USAGE_PROVIDERS_MAX.
+static inline const usage_provider_t* usage_slot(const usage_rec_t* u, uint8_t i) {
+  return i < u->count ? &u->p[i] : NULL;
+}
+// Compose "<label><sep><win>" into out (e.g. "CLAUDE . 5H" or "claude 5h"). `lower` lowercases the
+// provider label. NULL/empty provider => empty string (blank tag for an absent slot).
+static inline void usage_tag(char* out, size_t cap, const usage_provider_t* p,
+                             const char* sep, const char* win, bool lower) {
+  if (!p || !p->label[0]) { if (cap) out[0] = '\0'; return; }
+  size_t o = 0;
+  for (const char* c = p->label; *c && o + 1 < cap; c++)
+    out[o++] = lower ? (char)tolower((unsigned char)*c) : *c;
+  out[o] = '\0';
+  snprintf(out + o, cap - o, "%s%s", sep, win);
+}
+// Two-letter uppercase abbreviation of a provider label ("CLAUDE" => "CL"); NULL/empty => "".
+static inline void usage_abbr2(char* out, size_t cap, const usage_provider_t* p) {
+  size_t o = 0;
+  if (p) for (const char* c = p->label; *c && o < 2 && o + 1 < cap; c++)
+    out[o++] = (char)toupper((unsigned char)*c);
+  if (cap) out[o] = '\0';
 }
 
 #endif // !BEACON_NATIVE
