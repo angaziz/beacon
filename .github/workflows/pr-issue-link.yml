@@ -1,0 +1,96 @@
+name: PR issue link
+
+# Flags PRs that aren't tied to any issue (issue-first workflow, CONTRIBUTING.md).
+# Non-blocking: labels + comments so a human can still merge deliberately.
+# pull_request_target is safe here: no checkout, metadata-only via the API.
+on:
+  pull_request_target:
+    types: [opened, edited, reopened]
+
+permissions:
+  pull-requests: write
+  issues: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Require a linked issue
+    runs-on: ubuntu-latest
+    if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') }}
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const LABEL = 'needs-issue';
+            const MARKER = '<!-- pr-issue-link-check -->';
+
+            // 1) Issues formally linked (closing keywords or the "Development" sidebar).
+            const gql = await github.graphql(`
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $number) {
+                    closingIssuesReferences(first: 1) { totalCount }
+                  }
+                }
+              }`, { owner, repo, number: pr.number });
+            const linked = gql.repository.pullRequest.closingIssuesReferences.totalCount > 0;
+
+            // 2) Plain references in the body: "#12" or a full issue URL.
+            const body = pr.body ?? '';
+            const referenced =
+              /(^|\s)#\d+\b/.test(body) ||
+              new RegExp(`github\\.com/${owner}/${repo}/issues/\\d+`).test(body);
+
+            const hasIssue = linked || referenced;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner, repo, issue_number: pr.number, per_page: 100,
+            });
+            const existing = comments.find(c => c.body.includes(MARKER));
+
+            if (hasIssue) {
+              // Clean up a previous flag, if any.
+              if (existing) {
+                await github.rest.issues.deleteComment({ owner, repo, comment_id: existing.id });
+              }
+              if (pr.labels.some(l => l.name === LABEL)) {
+                await github.rest.issues.removeLabel({
+                  owner, repo, issue_number: pr.number, name: LABEL,
+                });
+              }
+              core.info('Linked or referenced issue found.');
+              return;
+            }
+
+            await github.rest.issues.addLabels({
+              owner, repo, issue_number: pr.number, labels: [LABEL],
+            });
+
+            const message = [
+              MARKER,
+              ':warning: **This PR is not linked to any issue.**',
+              '',
+              `Beacon uses an issue-first workflow ([CONTRIBUTING.md](https://github.com/${owner}/${repo}/blob/main/CONTRIBUTING.md#workflow)): open an issue describing the change and get direction agreed before sending a PR. PRs that introduce significant changes without prior discussion **may be rejected regardless of code quality**.`,
+              '',
+              'To resolve this flag:',
+              '- Link an existing issue in the PR body (`Closes #N`), or',
+              '- Open an issue describing the problem and intended direction, then link it.',
+              '',
+              'This check re-runs when the PR description is edited.',
+            ].join('\n');
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body: message,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: pr.number, body: message,
+              });
+            }
+            core.notice(`PR #${pr.number} has no linked issue — flagged with '${LABEL}'.`);

@@ -71,11 +71,23 @@ Pushing a `firmware-v*` or `hub-v*` tag triggers that component's release workfl
 
 ## Workflow
 
-1. Open an issue describing the change (especially for hardware-facing or architectural work).
-2. Branch from `main`.
+**Issue first, PR second.** Every PR must be tied to an issue that was opened *before* the work
+started. This is where direction gets agreed — scope, approach, whether the change is wanted at
+all. A large PR that lands without prior discussion may be rejected regardless of code quality;
+nobody enjoys that, so don't skip the issue. (Trivial fixes — typos, obvious one-liners — can
+open the issue and PR together, but still link them.)
+
+CI flags any PR with no linked issue: it gets a `needs-issue` label and a bot comment warning of
+potential rejection. The flag clears when you link an issue (`Closes #N` in the PR body or the
+"Development" sidebar) — merging past it is a deliberate maintainer decision, not the default.
+
+1. Open an issue describing the problem and intended direction. For hardware-facing or
+   architectural work, wait for alignment before building; a small spike as evidence is welcome.
+2. Branch from `main` and keep the PR scoped to that issue — unrelated changes go in their own
+   issue + PR.
 3. For firmware: confirm it compiles and runs on the board; note the board settings used. CI builds the device firmware and runs the host unit tests (`pio test -e native`) and the hub tests (`swift test`) on every PR.
 4. For design: include rendered PNG(s) of the affected screen(s).
-5. Open a PR with a clear description and any before/after evidence.
+5. Open a PR with a clear description, `Closes #N`, and any before/after evidence.
 
 ## Hardware note
 
