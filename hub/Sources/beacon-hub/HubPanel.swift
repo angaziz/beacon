@@ -36,9 +36,6 @@ struct HubPanel: View {
                     }
                 }
             }
-            if !model.providers.isEmpty {
-                ProviderTogglesModule(model: model)
-            }
             TogglesModule(model: model)
             ActionBar(model: model, closeAndRun: closeAndRun)
         }
@@ -222,50 +219,6 @@ private struct LevelBar: View {
     }
 }
 
-// MARK: - Provider toggles
-
-// One card per registered provider (design 2026-07-19): Usage / Coding Buddy switches shown only for
-// the capabilities that provider supports. Flipping a switch calls the live setEnabled path.
-private struct ProviderTogglesModule: View {
-    @ObservedObject var model: HubViewModel
-
-    var body: some View {
-        Module(padding: 0) {
-            VStack(spacing: 0) {
-                ForEach(Array(model.providers.enumerated()), id: \.element.id) { idx, p in
-                    if idx > 0 { Divider().padding(.leading, 12) }
-                    VStack(spacing: 0) {
-                        if p.supportsUsage {
-                            ToggleRow(icon: "gauge.with.dots.needle.67percent",
-                                      title: "\(p.label) usage", isOn: usageBinding(p.id))
-                        }
-                        if p.supportsUsage && p.supportsBuddy { Divider().padding(.leading, 12) }
-                        if p.supportsBuddy {
-                            ToggleRow(icon: "person.2.fill",
-                                      title: "\(p.label) coding buddy", isOn: buddyBinding(p.id))
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func usageBinding(_ id: String) -> Binding<Bool> {
-        Binding(get: { model.providers.first { $0.id == id }?.usageOn ?? true },
-                set: { on in
-                    if let i = model.providers.firstIndex(where: { $0.id == id }) { model.providers[i].usageOn = on }
-                    model.onSetProviderUsage(id, on)
-                })
-    }
-    private func buddyBinding(_ id: String) -> Binding<Bool> {
-        Binding(get: { model.providers.first { $0.id == id }?.buddyOn ?? true },
-                set: { on in
-                    if let i = model.providers.firstIndex(where: { $0.id == id }) { model.providers[i].buddyOn = on }
-                    model.onSetProviderBuddy(id, on)
-                })
-    }
-}
-
 // MARK: - Toggles
 
 private struct TogglesModule: View {
@@ -293,30 +246,6 @@ private struct TogglesModule: View {
     }
 }
 
-// Text + icon pinned left, switch pinned right (built-in Toggle layout centered the label).
-private struct ToggleRow: View {
-    let icon: String
-    let title: String
-    var subtitle: String? = nil
-    let isOn: Binding<Bool>
-
-    var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: icon).frame(width: 16).foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.system(size: 13))
-                if let subtitle {
-                    Text(subtitle).font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-            }
-            Spacer(minLength: 8)
-            Toggle("", isOn: isOn).labelsHidden().toggleStyle(.switch)
-        }
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .frame(maxWidth: .infinity)
-    }
-}
-
 // MARK: - Actions
 
 private struct ActionBar: View {
@@ -326,8 +255,7 @@ private struct ActionBar: View {
     var body: some View {
         HStack(spacing: 10) {
             ActionButton("Tickers…", systemImage: "chart.line.uptrend.xyaxis") { closeAndRun(model.onOpenTickerEditor) }
-            ActionButton("Setup…", systemImage: "gearshape") { closeAndRun(model.onSetup) }
-            ActionButton("Forget / re-pair", systemImage: "arrow.triangle.2.circlepath") { closeAndRun(model.onForget) }
+            ActionButton("Settings…", systemImage: "gearshape") { closeAndRun(model.onOpenSettings) }
             ActionButton("Quit Beacon", systemImage: "power", tint: .red) { closeAndRun(model.onQuit) }
         }
     }

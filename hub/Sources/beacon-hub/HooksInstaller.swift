@@ -36,7 +36,26 @@ enum HooksInstaller {
         return HooksDetection.isInstalled(settings: settings, shimPath: shimPath)
     }
 
-    static func install() throws {
+    // Per-provider dispatch: install only the named provider's hooks. Unknown ids no-op (a provider
+    // without a hook install path is "ready" by default).
+    static func install(providerID: String) throws {
+        switch providerID {
+        case "claude": try installClaude()
+        case "codex":  try installCodex()
+        default:       break
+        }
+    }
+
+    // Per-provider detection dispatch; providers with no hook path report installed (nothing to do).
+    static func isInstalled(providerID: String) -> Bool {
+        switch providerID {
+        case "claude": return isInstalled()
+        case "codex":  return isCodexInstalled()
+        default:       return true
+        }
+    }
+
+    static func installClaude() throws {
         let fm = FileManager.default
         let shimDir = (shimInstallPath as NSString).deletingLastPathComponent
         try fm.createDirectory(atPath: shimDir, withIntermediateDirectories: true)
@@ -70,7 +89,6 @@ enum HooksInstaller {
             let msg = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
             throw HooksError(message: msg?.isEmpty == false ? msg! : "Install failed (exit \(process.terminationStatus)).")
         }
-        try installCodex()
     }
 
     // ~/.codex/config.toml home (honors CODEX_HOME, matching Codex's own resolution).

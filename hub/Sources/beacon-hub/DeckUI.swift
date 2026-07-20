@@ -57,3 +57,28 @@ private struct DeckButtonStyle: ButtonStyle {
         }
     }
 }
+
+// Text + icon pinned left, switch pinned right (built-in Toggle layout centered the label). Shared by
+// the popover panel (mute/login) and the Settings window (provider switches).
+struct ToggleRow: View {
+    let icon: String
+    let title: String
+    var subtitle: String? = nil
+    let isOn: Binding<Bool>
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon).frame(width: 16).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 13))
+                if let subtitle {
+                    Text(subtitle).font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 8)
+            Toggle("", isOn: isOn).labelsHidden().toggleStyle(.switch)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .frame(maxWidth: .infinity)
+    }
+}

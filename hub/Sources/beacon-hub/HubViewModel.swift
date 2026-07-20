@@ -10,7 +10,12 @@ import BeaconHubKit
 // the device's config_ack; synced(count) = device applied N rows; error(reason) = device rejected.
 enum TickerSyncStatus: Equatable { case idle, pending, synced(Int), error(String) }
 
-// One provider's menubar card state (design 2026-07-19). Capabilities gate which toggles render.
+// Per-check state for setup rows. checking = neutral glyph until the first read resolves it, so we never
+// flash a failed state before it's known. Shared by the global connection checks and per-provider hooks.
+enum CheckState: Equatable { case checking, ok, bad }
+
+// One provider's settings-row state (design 2026-07-19, extended 2026-07-20). Capabilities gate which
+// toggles render; `hooks`/`installing`/`note` drive the per-provider setup line blended into the row.
 struct ProviderToggle: Identifiable, Equatable {
     let id: String
     let label: String
@@ -18,6 +23,9 @@ struct ProviderToggle: Identifiable, Equatable {
     let supportsBuddy: Bool
     var usageOn: Bool
     var buddyOn: Bool
+    var hooks: CheckState = .checking
+    var installing: Bool = false
+    var note: String? = nil
 }
 
 @MainActor
@@ -32,6 +40,10 @@ final class HubViewModel: ObservableObject {
     @Published var muted: Bool
     @Published var now: Date
     @Published var tickerSync: TickerSyncStatus = .idle
+    // Global (non-provider) setup checks surfaced in the Settings window.
+    @Published var setupBluetooth: CheckState = .checking
+    @Published var setupPaired: CheckState = .checking
+    @Published var dontShowOnStartup: Bool = false   // first-run auto-open suppression (BeaconFirstRunComplete)
     @Published var tickerRows: [TickerRow] = []   // issue #92: current desired list, seeds the B4 editor
     // One dynamic card per registered provider (design 2026-07-19): the Usage / Coding Buddy toggles the
     // menubar shows, each gated by the provider's declared capabilities. Backed by ProviderSettings.
@@ -40,8 +52,11 @@ final class HubViewModel: ObservableObject {
     // Intent closures, populated by MenubarController (weakly, so VM<->controller is not a retain cycle).
     var onToggleMute: () -> Void = {}
     var onRequestLoginItem: (Bool) -> Void = { _ in }   // desired on/off; truth re-read async
-    var onSetup: () -> Void = {}
     var onForget: () -> Void = {}
+    var onOpenSettings: () -> Void = {}          // opens the dedicated Settings window (from the popover)
+    var onOpenBluetooth: () -> Void = {}         // jump to System Settings > Bluetooth
+    var onInstallProviderHooks: (String) -> Void = { _ in }   // install the named provider's hooks
+    var onToggleDontShow: (Bool) -> Void = { _ in }           // persist first-run auto-open suppression
     var onRetryPairing: () -> Void = {}
     var onApplyTickerEdit: ([TickerRow]) -> Void = { _ in }   // issue #92: B4 editor commits the desired list
     var onOpenTickerEditor: () -> Void = {}                    // issue #92: open the dedicated editor window

@@ -19,13 +19,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var claude: ClaudeCodeProvider?            // typed ref for drain + device-connected + statusline
     private var codex: CodexProvider?                  // typed ref for drain + device-connected
     private var poller: UsagePoller!                   // built once providers exist
-    private let firstRun = FirstRunWindowController()
-    private let forgetWindow = ForgetWindowController()
     private let location = LocationProvider()
     private let tickerStore = TickerConfigStore()   // desired ticker list + monotonic rev (issue #92)
     private var reportAssembler = ReportAssembler()   // reassembles device->hub ticker report chunks (#105)
     private let tickerSearch = TickerSearch()        // Binance(cached) + Yahoo(live) discovery (issue #92 B4)
     private lazy var tickerEditor = TickerEditorWindowController(model: menubar.viewModel)
+    private lazy var settingsWindow = SettingsWindowController(model: menubar.viewModel)
     private var binanceCandidates: [TickerCandidate] = []   // warmed-once cache for local Binance filtering
 
     // A single ephemeral session (15s timeout) shared by every provider's usage source (#64).
@@ -54,12 +53,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statuslineClaude: ProviderUsage?   // #59 dedup
     private var statuslineClaudeAt: Date?          // #93 source-precedence gate
     private var claudeTransientReason: String?     // #108 backoff-window recheck reason
+    // Per-provider hooks/setup state surfaced in the Settings window; AppDelegate owns the truth so a
+    // toggle-driven refreshProviderToggles never clobbers a transient install spinner/note.
+    private var providerHooks: [String: CheckState] = [:]
+    private var providerInstalling: Set<String> = []
+    private var providerNote: [String: String] = [:]
+    private var checkBluetooth: CheckState = .checking
+    private var checkPaired: CheckState = .checking
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         startProviders()
         startCentral()
         startPoller()
-        startFirstRun()
+        startSettings()
         startLoginItem()
         startLocation()
         startTickerEditor()
@@ -73,12 +79,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        // Hooks can change out-of-band (manual edit) between launches; re-check on re-focus. The check
-        // does sync file IO + JSON parse of ~/.claude/settings.json, so run it off the main thread (#66 L8).
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let ok = HooksInstaller.isInstalled()
-            Task { @MainActor in self?.firstRun.setHooks(ok ? .ok : .bad) }
-        }
+        // Hooks can change out-of-band (manual edit) between launches; re-check on re-focus (off-main).
+        refreshProviderHooks()
         refreshLoginItem()   // cheap re-sync; the menu-open refresh is the reliable path for this accessory app.
     }
 
@@ -99,28 +101,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 
-    // --- first-run window ---
+    // --- settings window + per-provider setup ---
 
-    private func startFirstRun() {
-        firstRun.onInstallHooks = { [weak self] in self?.installHooksAndRefresh() }
-        menubar.onOpenSetup = { [weak self] in self?.firstRun.show() }
-        firstRun.setHooks(HooksInstaller.isInstalled() ? .ok : .bad)
-        firstRun.showIfNeeded()
+    private func startSettings() {
+        menubar.onOpenSettings = { [weak self] in self?.settingsWindow.show() }
+        menubar.onInstallProviderHooks = { [weak self] id in self?.installHooks(for: id) }
+        menubar.onOpenBluetooth = { SettingsLinks.open(SettingsLinks.bluetooth) }
+        refreshProviderHooks()
+        settingsWindow.showIfNeeded()
     }
 
-    // Run the (Process-backed) install off the main thread so the window stays responsive, then hop
-    // back to update the row + surface any stderr-derived error.
-    private func installHooksAndRefresh() {
-        Task.detached { [weak self] in
-            let errorMessage: String?
-            do { try HooksInstaller.install(); errorMessage = nil }
-            catch { errorMessage = error.localizedDescription }
-            let installed = HooksInstaller.isInstalled()
-            guard let self else { return }
-            await MainActor.run {
-                self.firstRun.finishInstall(installed: installed ? .ok : .bad, error: errorMessage)
+    // Re-read every provider's hooks state off the main thread (sync file IO + parse), then apply on main
+    // without stomping a provider mid-install.
+    private func refreshProviderHooks() {
+        let ids = providers.map { $0.descriptor.id }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let states = ids.map { ($0, HooksInstaller.isInstalled(providerID: $0)) }
+            Task { @MainActor in
+                guard let self else { return }
+                for (id, ok) in states where !self.providerInstalling.contains(id) {
+                    self.providerHooks[id] = ok ? .ok : .bad
+                }
+                self.refreshProviderToggles()
+                self.maybeMarkComplete()
             }
         }
+    }
+
+    // Install one provider's hooks (Process-backed, off the main thread), then re-check + surface a note.
+    private func installHooks(for id: String) {
+        guard !providerInstalling.contains(id) else { return }
+        providerInstalling.insert(id)
+        providerNote[id] = nil
+        refreshProviderToggles()
+        let label = descriptors[id]?.label.capitalized ?? id
+        Task.detached { [weak self] in
+            let errorMessage: String?
+            do { try HooksInstaller.install(providerID: id); errorMessage = nil }
+            catch { errorMessage = error.localizedDescription }
+            let ok = HooksInstaller.isInstalled(providerID: id)
+            guard let self else { return }
+            await MainActor.run {
+                self.providerInstalling.remove(id)
+                self.providerHooks[id] = ok ? .ok : .bad
+                self.providerNote[id] = ok ? "Installed. Restart \(label) for hooks to take effect." : errorMessage
+                self.refreshProviderToggles()
+                self.maybeMarkComplete()
+            }
+        }
+    }
+
+    // First-run auto-open stops once Bluetooth + pairing + every provider's hooks are satisfied.
+    private func maybeMarkComplete() {
+        let hooksOk = providers.allSatisfy { (providerHooks[$0.descriptor.id] ?? .checking) == .ok }
+        if checkBluetooth == .ok, checkPaired == .ok, hooksOk { settingsWindow.markComplete() }
     }
 
     // --- login item (issue #16) ---
@@ -170,11 +204,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func forgetDevice() {
         central.forgetAndRescan()
-        // CoreBluetooth cannot clear the OS bond (no API). The app-side reset above just drops the link and
-        // rescans, so a healthy bond reconnects on its own. The only real "forget" is the user doing it in
-        // Bluetooth settings -- so the window spells out the steps and offers a one-click jump there.
-        forgetWindow.onOpenBluetooth = { SettingsLinks.open(SettingsLinks.bluetooth) }
-        forgetWindow.show()
+        // CoreBluetooth cannot clear the OS bond (no API); the app-side reset drops the link + rescans, so
+        // a healthy bond reconnects on its own. The real "forget" is the user removing Beacon in Bluetooth
+        // settings, so we jump straight there (the Settings window spells out the two clicks).
+        SettingsLinks.open(SettingsLinks.bluetooth)
     }
 
     // --- providers + mux ---
@@ -233,11 +266,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshProviderToggles() {
         let toggles = providers.map { p -> ProviderToggle in
-            let e = settings.enabled(for: p.descriptor.id)
-            return ProviderToggle(id: p.descriptor.id, label: p.descriptor.label.capitalized,
+            let id = p.descriptor.id
+            let e = settings.enabled(for: id)
+            return ProviderToggle(id: id, label: p.descriptor.label.capitalized,
                                   supportsUsage: p.descriptor.supportsUsage,
                                   supportsBuddy: p.descriptor.supportsBuddy,
-                                  usageOn: e.usage, buddyOn: e.buddy)
+                                  usageOn: e.usage, buddyOn: e.buddy,
+                                  hooks: providerHooks[id] ?? .checking,
+                                  installing: providerInstalling.contains(id),
+                                  note: providerNote[id])
         }
         menubar.setProviderToggles(toggles)
     }
@@ -301,13 +338,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         codex?.setDeviceConnected(connected)
         poller.setDeviceConnected(connected)   // #64: back off the usage poll cadence while disconnected.
 
-        // Drive the first-run window from the SAME phase stream (no second CBCentralManager): Bluetooth
-        // is bad only when powered-off/unauthorized/unavailable; paired tracks live .connected.
+        // Drive the Settings connection checks from the SAME phase stream (no second CBCentralManager):
+        // Bluetooth is bad only when powered-off/unauthorized/unavailable; paired tracks live .connected.
         switch phase {
-        case .bluetoothOff, .unauthorized, .unavailable: firstRun.setBluetooth(.bad)
-        default:                                          firstRun.setBluetooth(.ok)
+        case .bluetoothOff, .unauthorized, .unavailable: checkBluetooth = .bad
+        default:                                          checkBluetooth = .ok
         }
-        firstRun.setPaired(connected ? .ok : .bad)
+        checkPaired = connected ? .ok : .bad
+        menubar.setBluetoothCheck(checkBluetooth)
+        menubar.setPairedCheck(checkPaired)
+        maybeMarkComplete()
     }
 
     private func handle(_ cmd: DeviceCommand) {
