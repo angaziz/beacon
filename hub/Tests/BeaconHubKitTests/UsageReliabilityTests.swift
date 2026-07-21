@@ -83,7 +83,7 @@ final class UsageReliabilityTests: XCTestCase {
 
     func testTerminalClearsLastGood() {
         let prior = ProviderRetention(lastGood: good(), lastGoodAt: now.addingTimeInterval(-10))
-        let r = UsageReducer.reduceProvider(prior: prior, outcome: .terminal(reason: "re-login"),
+        let r = UsageReducer.reduceProvider(prior: prior, outcome: .terminal(reason: "re-login", kind: .other),
                                             usage: .unavailable, now: now, maxStale: 1800, label: "Claude")
         XCTAssertNil(r.next.lastGood)                 // credential-identity safety.
         XCTAssertNil(r.next.lastGoodAt)
@@ -158,5 +158,30 @@ final class UsageReliabilityTests: XCTestCase {
         XCTAssertEqual(RetryAfter.parse(future, now: now) ?? -1, 300, accuracy: 1)
         let past = fmt.string(from: now.addingTimeInterval(-300))
         XCTAssertEqual(RetryAfter.parse(past, now: now), 0)   // past HTTP-date clamps to 0.
+    }
+
+    func testInactiveClearsLastGoodWithMutedNote() {
+        let prior = ProviderRetention(lastGood: good(), lastGoodAt: now.addingTimeInterval(-10))
+        let r = UsageReducer.reduceProvider(prior: prior, outcome: .inactive(reason: "Claude inactive"),
+                                            usage: .unavailable, now: now, maxStale: 1800, label: "Claude")
+        XCTAssertNil(r.next.lastGood)                 // identity safety, same as terminal.
+        XCTAssertNil(r.next.lastGoodAt)
+        XCTAssertEqual(r.display.usage, .unavailable)
+        XCTAssertEqual(r.display.note, UsageNote(severity: .info, text: "Claude inactive"))   // muted, not red.
+    }
+
+    func testVisibleNotesFiltersDisabledAndPreservesOrder() {
+        let a = UsageNote(severity: .error, text: "a")
+        let b = UsageNote(severity: .info, text: "b")
+        let notes = ["claude": a, "codex": b]
+        // A usage-disabled provider's (possibly frozen) note is filtered out (#126).
+        XCTAssertEqual(UsageReducer.visibleNotes(order: ["claude", "codex"], notes: notes,
+                                                 enabled: { $0 != "codex" }), [a])
+        // All enabled => registration order preserved.
+        XCTAssertEqual(UsageReducer.visibleNotes(order: ["claude", "codex"], notes: notes,
+                                                 enabled: { _ in true }), [a, b])
+        // An enabled id with no note is skipped, no crash.
+        XCTAssertEqual(UsageReducer.visibleNotes(order: ["claude", "missing"], notes: notes,
+                                                 enabled: { _ in true }), [a])
     }
 }

@@ -68,4 +68,26 @@ final class UsagePollDecisionTests: XCTestCase {
                 c.want, c.name)
         }
     }
+
+    // #126 abandonment demotion. threshold 48h; a missing/other credential never auto-demotes (needs its
+    // actionable message). A stale (expired-on-disk) token demotes iff no statusline activity within
+    // threshold; nil age (never observed, persisted across launches) counts as long-idle => demote.
+    func testProviderInactive() {
+        let t: TimeInterval = 48 * 3600
+        let cases: [(name: String, kind: TerminalKind, age: TimeInterval?, want: Bool)] = [
+            ("missing never demotes (nil age)",          .missingCredential, nil,      false),
+            ("missing never demotes (recent)",           .missingCredential, 3600,     false),
+            ("other never demotes",                      .other,             nil,      false),
+            ("stale, never observed => inactive",        .staleToken,        nil,      true),
+            ("stale, activity old => inactive",          .staleToken,        49 * 3600, true),
+            ("stale, activity at threshold => inactive", .staleToken,        t,        true),
+            ("stale, activity just under threshold => active", .staleToken,  t - 1,    false),
+            ("stale, recent activity => active",         .staleToken,        3600,     false),
+        ]
+        for c in cases {
+            XCTAssertEqual(
+                UsagePollDecision.providerInactive(kind: c.kind, statuslineAge: c.age, threshold: t),
+                c.want, c.name)
+        }
+    }
 }

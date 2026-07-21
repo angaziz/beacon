@@ -44,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // rate_limits) becomes last-known-good; a transient failure serves last-good as STALE. Keyed by id
     // so the reducer generalizes across providers. maxStale = 30 min.
     private let maxStale: TimeInterval = 1800
+    private let inactiveThreshold: TimeInterval = 48 * 3600   // #126: demote an abandoned Claude to a quiet note
     private var descriptors: [String: ProviderDescriptor] = [:]
     private var registrationOrder: [String] = []
     private var retentions: [String: ProviderRetention] = [:]
@@ -51,7 +52,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notes: [String: UsageNote] = [:]
     // Claude-only: its authoritative statusline source takes precedence over a late oauth poll (#93).
     private var statuslineClaude: ProviderUsage?   // #59 dedup
-    private var statuslineClaudeAt: Date?          // #93 source-precedence gate
+    // #93 source-precedence gate + #126 abandonment signal, persisted across launches: an in-memory-only
+    // timestamp resets to nil every launch, making an abandoned Claude indistinguishable from a just-
+    // launched active one, so the demotion could only lean on a long expiry gate. Persisting it lets a
+    // returning active user carry a recent last-activity time and never be wrongly demoted. 0/absent => nil.
+    private static let statuslineClaudeAtKey = "BeaconStatuslineClaudeAt"
+    private var statuslineClaudeAt: Date? {
+        get {
+            let t = UserDefaults.standard.double(forKey: Self.statuslineClaudeAtKey)
+            return t > 0 ? Date(timeIntervalSince1970: t) : nil
+        }
+        set { UserDefaults.standard.set(newValue?.timeIntervalSince1970 ?? 0, forKey: Self.statuslineClaudeAtKey) }
+    }
     private var claudeTransientReason: String?     // #108 backoff-window recheck reason
     // Per-provider hooks/setup state surfaced in the Settings window; AppDelegate owns the truth so a
     // toggle-driven refreshProviderToggles never clobbers a transient install spinner/note.
@@ -284,6 +296,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applyEnabled(_ id: String) {
         let caps = settings.enabled(for: id)
+        // Usage off: drop the retained note/retention/reason so a stale banner cannot resurface on
+        // re-enable (#126). statuslineClaudeAt (liveness) and statuslineClaude (value cache, kept synced
+        // by the ungated handler path) are intentionally preserved so re-enable is immediately correct.
+        if !caps.usage {
+            notes.removeValue(forKey: id)
+            retentions.removeValue(forKey: id)
+            if id == "claude" { claudeTransientReason = nil }
+        }
         mux.setEnabled(id, caps)
         providers.first { $0.descriptor.id == id }?.setEnabled(caps)
         refreshProviderToggles()
@@ -408,7 +428,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let r = results[id] {
                     if !fresh {
                         if case .transient(_, let reason) = r.outcome { claudeTransientReason = reason }
-                        reduce(id, r.outcome, r.usage)
+                        var outcome = r.outcome
+                        if case .terminal(_, let kind) = outcome,
+                           UsagePollDecision.providerInactive(kind: kind, statuslineAge: age,
+                                                              threshold: inactiveThreshold) {
+                            outcome = .inactive(reason: "Claude inactive")
+                        }
+                        reduce(id, outcome, r.usage)
                     }
                 } else if !fresh, retentions[id]?.lastGood != nil {
                     reduce(id, .transient(retryAfter: nil,
@@ -430,6 +456,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // flag/note a prior oauth transient left even when the value callback was deduped (#59/#108).
     private func onStatuslineActivity() {
         statuslineClaudeAt = Date()
+        guard usageEnabled("claude") else { return }
         guard let v = statuslineClaude else { return }
         var live = v; live.stale = nil
         if displays["claude"] != live {
@@ -444,6 +471,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func onStatuslineClaude(_ c: ProviderUsage) {
         guard c != statuslineClaude else { return }
         statuslineClaude = c
+        guard usageEnabled("claude") else { return }
         reduce("claude", .live, c); pushMenubarUsage()
     }
 
@@ -462,7 +490,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Push the merged usage + ordered notes to the menubar. The mux gates BLE frames on usage change;
     // menubar refresh is unconditional so a note-only change updates the UI without BLE traffic (#108).
     private func pushMenubarUsage() {
-        let ordered = registrationOrder.compactMap { notes[$0] }
+        let ordered = UsageReducer.visibleNotes(order: registrationOrder, notes: notes,
+                                                enabled: usageEnabled)
         menubar.setUsage(usage, notes: ordered)
     }
 

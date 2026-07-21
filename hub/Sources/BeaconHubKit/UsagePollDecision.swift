@@ -73,4 +73,20 @@ public enum UsagePollDecision {
         guard let since = secondsSinceLastRead else { return true }
         return since >= cooldown
     }
+
+    // Abandonment demotion (#126): an expired-on-disk Claude token (only the CLI refreshes it, so
+    // expired-on-disk => the CLI has stopped running) with no observed Claude Code statusline activity
+    // within `threshold`. statuslineAge is persisted across launches (AppDelegate), so a returning active
+    // user carries a recent last-activity timestamp and is never demoted; nil means we have never observed
+    // activity => treat as long-idle. A missing/other credential never auto-demotes: a logged-out or
+    // shape-drift state needs its actionable message ("run claude login"), and missing has no activity
+    // history to tell a brand-new user from an abandoned one.
+    public static func providerInactive(kind: TerminalKind, statuslineAge: TimeInterval?,
+                                        threshold: TimeInterval) -> Bool {
+        switch kind {
+        case .staleToken:                break
+        case .missingCredential, .other: return false
+        }
+        return statuslineAge.map { $0 >= threshold } ?? true
+    }
 }

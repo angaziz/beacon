@@ -122,16 +122,19 @@ final class ClaudeUsageProvider: UsageProvider {
     private func invalidateToken() { lock.lock(); cachedCredential = nil; lastReadAt = nil; lock.unlock() }
 
     func fetch(completion: @escaping (ProviderResult) -> Void) {
+        let now = Date()
         guard let cred = credential() else {
             completion(ProviderResult(usage: .unavailable,
-                                      outcome: .terminal(reason: "Claude token missing - run claude login")))
+                                      outcome: .terminal(reason: "Claude token missing - run claude login",
+                                                         kind: .missingCredential)))
             return
         }
         // Expired on disk is NOT a logged-out state: only the `claude` CLI can run the (single-use,
         // rotating) refresh grant. Skip the doomed request and say what we are actually waiting for.
-        if cred.isExpired(at: Date()) {
+        if cred.isExpired(at: now) {
             completion(ProviderResult(usage: .unavailable,
-                                      outcome: .terminal(reason: "Claude token stale - open Claude Code to refresh")))
+                                      outcome: .terminal(reason: "Claude token stale - open Claude Code to refresh",
+                                                         kind: .staleToken)))
             return
         }
         fetch(token: cred.accessToken, retryOn401: true, completion: completion)
@@ -142,7 +145,7 @@ final class ClaudeUsageProvider: UsageProvider {
     // iff the token actually changed; an unchanged token or a second 401 surfaces the terminal reason.
     private func fetch(token: String, retryOn401: Bool, completion: @escaping (ProviderResult) -> Void) {
         guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
-            completion(ProviderResult(usage: .unavailable, outcome: .terminal(reason: "Claude endpoint invalid")))
+            completion(ProviderResult(usage: .unavailable, outcome: .terminal(reason: "Claude endpoint invalid", kind: .other)))
             return
         }
         var req = URLRequest(url: url)
@@ -171,7 +174,7 @@ final class ClaudeUsageProvider: UsageProvider {
                     return
                 }
                 completion(ProviderResult(usage: .unavailable,
-                                          outcome: .terminal(reason: "Claude token expired - re-login")))
+                                          outcome: .terminal(reason: "Claude token expired - re-login", kind: .other)))
                 return
             }
             guard code == 200, let data = data else {
@@ -185,7 +188,7 @@ final class ClaudeUsageProvider: UsageProvider {
                 // HTTP 200 but the body did not normalize => the unofficial endpoint's shape likely
                 // drifted. Surface it distinctly so a schema change is visible, not a silent "--".
                 completion(ProviderResult(usage: .unavailable,
-                                          outcome: .terminal(reason: "Claude usage: unexpected response shape")))
+                                          outcome: .terminal(reason: "Claude usage: unexpected response shape", kind: .other)))
                 return
             }
             completion(ProviderResult(usage: usage, outcome: .live))
@@ -218,7 +221,7 @@ final class CodexUsageProvider: UsageProvider {
     func fetch(completion: @escaping (ProviderResult) -> Void) {
         guard let creds = Self.credentials() else {
             completion(ProviderResult(usage: .unavailable,
-                                      outcome: .terminal(reason: "Codex token missing - run codex login")))
+                                      outcome: .terminal(reason: "Codex token missing - run codex login", kind: .other)))
             return
         }
         fetch(token: creds.accessToken, accountId: creds.accountId, retryOn401: true, completion: completion)
@@ -230,7 +233,7 @@ final class CodexUsageProvider: UsageProvider {
     private func fetch(token: String, accountId: String, retryOn401: Bool,
                        completion: @escaping (ProviderResult) -> Void) {
         guard let url = URL(string: "https://chatgpt.com/backend-api/wham/usage") else {
-            completion(ProviderResult(usage: .unavailable, outcome: .terminal(reason: "Codex endpoint invalid")))
+            completion(ProviderResult(usage: .unavailable, outcome: .terminal(reason: "Codex endpoint invalid", kind: .other)))
             return
         }
         var req = URLRequest(url: url)
@@ -254,7 +257,7 @@ final class CodexUsageProvider: UsageProvider {
                     return
                 }
                 completion(ProviderResult(usage: .unavailable,
-                                          outcome: .terminal(reason: "Codex token expired - re-login")))
+                                          outcome: .terminal(reason: "Codex token expired - re-login", kind: .other)))
                 return
             }
             guard code == 200, let data = data else {
@@ -267,7 +270,7 @@ final class CodexUsageProvider: UsageProvider {
                 // HTTP 200 but the body did not normalize => the unofficial endpoint's shape likely
                 // drifted. Surface it distinctly so a schema change is visible, not a silent "--".
                 completion(ProviderResult(usage: .unavailable,
-                                          outcome: .terminal(reason: "Codex usage: unexpected response shape")))
+                                          outcome: .terminal(reason: "Codex usage: unexpected response shape", kind: .other)))
                 return
             }
             completion(ProviderResult(usage: usage, outcome: .live))
