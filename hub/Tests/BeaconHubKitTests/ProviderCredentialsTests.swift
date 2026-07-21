@@ -6,7 +6,7 @@ final class ProviderCredentialsTests: XCTestCase {
     func testParseClaude() {
         struct Case { let name: String; let json: String; let want: ClaudeCredential? }
         let cases: [Case] = [
-            Case(name: "valid, no expiry", json: #"{"claudeAiOauth":{"accessToken":"tok-123","refreshToken":"r"}}"#,
+            Case(name: "valid, no expiry", json: #"{"claudeAiOauth":{"accessToken":"tok-123"}}"#,
                  want: ClaudeCredential(accessToken: "tok-123", expiresAt: nil)),
             Case(name: "valid with expiry (epoch ms)",
                  json: #"{"claudeAiOauth":{"accessToken":"tok-123","expiresAt":1773751428445}}"#,
@@ -19,6 +19,27 @@ final class ProviderCredentialsTests: XCTestCase {
             Case(name: "missing claudeAiOauth", json: #"{"other":{"accessToken":"t"}}"#, want: nil),
             Case(name: "missing accessToken", json: #"{"claudeAiOauth":{"refreshToken":"r"}}"#, want: nil),
             Case(name: "empty token => absent", json: #"{"claudeAiOauth":{"accessToken":""}}"#, want: nil),
+            Case(name: "refreshToken present",
+                 json: #"{"claudeAiOauth":{"accessToken":"tok-123","refreshToken":"r-1"}}"#,
+                 want: ClaudeCredential(accessToken: "tok-123", expiresAt: nil, refreshToken: "r-1")),
+            Case(name: "refreshToken empty => absent",
+                 json: #"{"claudeAiOauth":{"accessToken":"tok-123","refreshToken":""}}"#,
+                 want: ClaudeCredential(accessToken: "tok-123", expiresAt: nil, refreshToken: nil)),
+            Case(name: "refreshToken absent",
+                 json: #"{"claudeAiOauth":{"accessToken":"tok-123"}}"#,
+                 want: ClaudeCredential(accessToken: "tok-123", expiresAt: nil, refreshToken: nil)),
+            Case(name: "refreshTokenExpiresAt valid (epoch ms)",
+                 json: #"{"claudeAiOauth":{"accessToken":"tok-123","refreshTokenExpiresAt":1773751428445}}"#,
+                 want: ClaudeCredential(accessToken: "tok-123", expiresAt: nil, refreshToken: nil,
+                                        refreshTokenExpiresAt: Date(timeIntervalSince1970: 1_773_751_428.445))),
+            Case(name: "refreshTokenExpiresAt non-numeric tolerated",
+                 json: #"{"claudeAiOauth":{"accessToken":"tok-123","refreshTokenExpiresAt":"soon"}}"#,
+                 want: ClaudeCredential(accessToken: "tok-123", expiresAt: nil, refreshToken: nil,
+                                        refreshTokenExpiresAt: nil)),
+            Case(name: "refreshTokenExpiresAt absent",
+                 json: #"{"claudeAiOauth":{"accessToken":"tok-123"}}"#,
+                 want: ClaudeCredential(accessToken: "tok-123", expiresAt: nil, refreshToken: nil,
+                                        refreshTokenExpiresAt: nil)),
         ]
         for c in cases {
             XCTAssertEqual(
@@ -38,6 +59,28 @@ final class ProviderCredentialsTests: XCTestCase {
         for c in cases {
             let cred = ClaudeCredential(accessToken: "t", expiresAt: c.expiresAt)
             XCTAssertEqual(cred.isExpired(at: now), c.want, "case: \(c.name)")
+        }
+    }
+
+    func testRefreshTokenAlive() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        struct Case { let name: String; let refreshToken: String?; let refreshTokenExpiresAt: Date?; let want: Bool }
+        let cases: [Case] = [
+            Case(name: "nil token => not alive", refreshToken: nil, refreshTokenExpiresAt: nil, want: false),
+            Case(name: "empty token => not alive", refreshToken: "", refreshTokenExpiresAt: nil, want: false),
+            Case(name: "no expiry => alive", refreshToken: "r", refreshTokenExpiresAt: nil, want: true),
+            Case(name: "future expiry => alive", refreshToken: "r",
+                 refreshTokenExpiresAt: now.addingTimeInterval(60), want: true),
+            Case(name: "past expiry => not alive", refreshToken: "r",
+                 refreshTokenExpiresAt: now.addingTimeInterval(-60), want: false),
+            Case(name: "boundary now==expiry => not alive", refreshToken: "r",
+                 refreshTokenExpiresAt: now, want: false),
+        ]
+        for c in cases {
+            let cred = ClaudeCredential(accessToken: "t", expiresAt: nil,
+                                        refreshToken: c.refreshToken,
+                                        refreshTokenExpiresAt: c.refreshTokenExpiresAt)
+            XCTAssertEqual(cred.refreshTokenAlive(at: now), c.want, "case: \(c.name)")
         }
     }
 
