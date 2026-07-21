@@ -102,6 +102,7 @@ final class ClaudeUsageProvider: UsageProvider {
     private var lastReadAt: Date?
     private let rereadCooldown: TimeInterval = 300
     private let lock = NSLock()
+    private let refresher = ClaudeTokenRefresher()
     init(session: URLSession = .shared) { self.session = session }
 
     private func credential() -> ClaudeCredential? {
@@ -129,12 +130,26 @@ final class ClaudeUsageProvider: UsageProvider {
                                                          kind: .missingCredential)))
             return
         }
-        // Expired on disk is NOT a logged-out state: only the `claude` CLI can run the (single-use,
-        // rotating) refresh grant. Skip the doomed request and say what we are actually waiting for.
+        // Expired on disk is NOT a logged-out state. If the refresh token is still alive, delegate to
+        // (or, CLI-absent, directly perform) the #132 source ladder instead of giving up; only a dead
+        // refresh token means only `claude login` can recover this session.
         if cred.isExpired(at: now) {
-            completion(ProviderResult(usage: .unavailable,
-                                      outcome: .terminal(reason: "Claude token stale - open Claude Code to refresh",
-                                                         kind: .staleToken)))
+            guard cred.refreshTokenAlive(at: now) else {
+                completion(ProviderResult(usage: .unavailable,
+                                          outcome: .terminal(reason: "Claude session expired - run claude login",
+                                                             kind: .staleToken)))
+                return
+            }
+            refresher.refresh(current: cred, now: now) { fresh in
+                guard let fresh else {
+                    completion(ProviderResult(usage: .unavailable,
+                                              outcome: .terminal(reason: "Claude token stale - open Claude Code to refresh",
+                                                                 kind: .staleToken)))
+                    return
+                }
+                self.lock.lock(); self.cachedCredential = fresh; self.lastReadAt = Date(); self.lock.unlock()
+                self.fetch(token: fresh.accessToken, retryOn401: true, completion: completion)
+            }
             return
         }
         fetch(token: cred.accessToken, retryOn401: true, completion: completion)
@@ -195,19 +210,17 @@ final class ClaudeUsageProvider: UsageProvider {
         }.resume()
     }
 
-    // Keychain generic-password "Claude Code-credentials"; the JSON shape is parsed by ProviderCredentials.
+    // Keychain generic-password "Claude Code-credentials", with a fallback to Beacon's own cache item
+    // for the CLI-uninstalled #132 world; the JSON shape (either item) is parsed by ProviderCredentials.
+    // Ownership: the CLI item, when present, is always the source of truth (even if it fails to parse --
+    // that is shape drift, not absence, and must surface as missingCredential rather than silently
+    // falling back to a stale cache).
     private static func readCredential() -> ClaudeCredential? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "Claude Code-credentials",
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data
-        else { return nil }
-        return ProviderCredentials.parseClaude(data)
+        if let cliBlob = ClaudeKeychain.readCLIBlob() {
+            return ProviderCredentials.parseClaude(cliBlob)
+        }
+        guard let cacheBlob = ClaudeKeychain.readBeaconCacheBlob() else { return nil }
+        return ProviderCredentials.parseClaude(cacheBlob)
     }
 }
 
