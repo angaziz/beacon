@@ -10,7 +10,7 @@ import Foundation
 // carry meaningful kinds; every other terminal is .other and never demotes.
 public enum TerminalKind: Equatable {
     case missingCredential
-    case staleToken(expiredFor: TimeInterval)
+    case staleToken
     case other
 }
 

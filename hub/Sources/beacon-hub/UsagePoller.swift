@@ -134,7 +134,7 @@ final class ClaudeUsageProvider: UsageProvider {
         if cred.isExpired(at: now) {
             completion(ProviderResult(usage: .unavailable,
                                       outcome: .terminal(reason: "Claude token stale - open Claude Code to refresh",
-                                                         kind: .staleToken(expiredFor: now.timeIntervalSince(cred.expiresAt ?? now)))))
+                                                         kind: .staleToken)))
             return
         }
         fetch(token: cred.accessToken, retryOn401: true, completion: completion)

@@ -69,20 +69,20 @@ final class UsagePollDecisionTests: XCTestCase {
         }
     }
 
-    // #126 abandonment demotion. threshold 48h; a missing credential never auto-demotes (no durable
-    // first-seen timestamp), a stale token demotes only when both it and the statusline pass threshold.
+    // #126 abandonment demotion. threshold 48h; a missing/other credential never auto-demotes (needs its
+    // actionable message). A stale (expired-on-disk) token demotes iff no statusline activity within
+    // threshold; nil age (never observed, persisted across launches) counts as long-idle => demote.
     func testProviderInactive() {
         let t: TimeInterval = 48 * 3600
         let cases: [(name: String, kind: TerminalKind, age: TimeInterval?, want: Bool)] = [
-            ("missing never demotes (nil age)",         .missingCredential,                 nil,       false),
-            ("missing never demotes (recent)",          .missingCredential,                 3600,      false),
-            ("stale>48h, never seen => inactive",       .staleToken(expiredFor: 49 * 3600), nil,       true),
-            ("stale>48h, statusline old => inactive",   .staleToken(expiredFor: 49 * 3600), 49 * 3600, true),
-            ("stale>48h, statusline at boundary => inactive", .staleToken(expiredFor: 49 * 3600), t,   true),
-            ("stale>48h, recent statusline => active",  .staleToken(expiredFor: 49 * 3600), 3600,      false),
-            ("stale exactly 48h => inactive",           .staleToken(expiredFor: t),         nil,       true),
-            ("stale <48h => active",                    .staleToken(expiredFor: 3600),      nil,       false),
-            ("other kind never demotes",                .other,                             nil,       false),
+            ("missing never demotes (nil age)",          .missingCredential, nil,      false),
+            ("missing never demotes (recent)",           .missingCredential, 3600,     false),
+            ("other never demotes",                      .other,             nil,      false),
+            ("stale, never observed => inactive",        .staleToken,        nil,      true),
+            ("stale, activity old => inactive",          .staleToken,        49 * 3600, true),
+            ("stale, activity at threshold => inactive", .staleToken,        t,        true),
+            ("stale, activity just under threshold => active", .staleToken,  t - 1,    false),
+            ("stale, recent activity => active",         .staleToken,        3600,     false),
         ]
         for c in cases {
             XCTAssertEqual(

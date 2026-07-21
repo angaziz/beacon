@@ -74,18 +74,19 @@ public enum UsagePollDecision {
         return since >= cooldown
     }
 
-    // Abandonment demotion (#126): a credential expired past `threshold` with no statusline POST inside
-    // `threshold`. A missing credential is NOT demoted -- no durable first-seen timestamp exists to prove
-    // >= threshold, and it is indistinguishable from a never-logged-in new user who needs the actionable
-    // "run claude login" message. nil statuslineAge (never seen this launch) counts as "no activity".
+    // Abandonment demotion (#126): an expired-on-disk Claude token (only the CLI refreshes it, so
+    // expired-on-disk => the CLI has stopped running) with no observed Claude Code statusline activity
+    // within `threshold`. statuslineAge is persisted across launches (AppDelegate), so a returning active
+    // user carries a recent last-activity timestamp and is never demoted; nil means we have never observed
+    // activity => treat as long-idle. A missing/other credential never auto-demotes: a logged-out or
+    // shape-drift state needs its actionable message ("run claude login"), and missing has no activity
+    // history to tell a brand-new user from an abandoned one.
     public static func providerInactive(kind: TerminalKind, statuslineAge: TimeInterval?,
                                         threshold: TimeInterval) -> Bool {
-        let expiredLongEnough: Bool
         switch kind {
-        case .staleToken(let expiredFor):   expiredLongEnough = expiredFor >= threshold
-        case .missingCredential, .other:    expiredLongEnough = false
+        case .staleToken:                break
+        case .missingCredential, .other: return false
         }
-        guard expiredLongEnough else { return false }
         return statuslineAge.map { $0 >= threshold } ?? true
     }
 }

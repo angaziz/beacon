@@ -52,7 +52,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notes: [String: UsageNote] = [:]
     // Claude-only: its authoritative statusline source takes precedence over a late oauth poll (#93).
     private var statuslineClaude: ProviderUsage?   // #59 dedup
-    private var statuslineClaudeAt: Date?          // #93 source-precedence gate
+    // #93 source-precedence gate + #126 abandonment signal, persisted across launches: an in-memory-only
+    // timestamp resets to nil every launch, making an abandoned Claude indistinguishable from a just-
+    // launched active one, so the demotion could only lean on a long expiry gate. Persisting it lets a
+    // returning active user carry a recent last-activity time and never be wrongly demoted. 0/absent => nil.
+    private static let statuslineClaudeAtKey = "BeaconStatuslineClaudeAt"
+    private var statuslineClaudeAt: Date? {
+        get {
+            let t = UserDefaults.standard.double(forKey: Self.statuslineClaudeAtKey)
+            return t > 0 ? Date(timeIntervalSince1970: t) : nil
+        }
+        set { UserDefaults.standard.set(newValue?.timeIntervalSince1970 ?? 0, forKey: Self.statuslineClaudeAtKey) }
+    }
     private var claudeTransientReason: String?     // #108 backoff-window recheck reason
     // Per-provider hooks/setup state surfaced in the Settings window; AppDelegate owns the truth so a
     // toggle-driven refreshProviderToggles never clobbers a transient install spinner/note.
