@@ -14,7 +14,7 @@
 // rule between rows. >6 rows scroll vertically. Per-row state via each slot's hdr.
 
 
-#define MAX_ROWS 12
+#define MAX_ROWS 16
 
 static lv_obj_t *s_status;
 static lv_obj_t *s_id[MAX_ROWS], *s_val[MAX_ROWS], *s_chg[MAX_ROWS];

@@ -13,7 +13,7 @@
 #include <Arduino.h>
 static void update(void);
 
-#define FIN_ROWS_MAX 12
+#define FIN_ROWS_MAX 16
 #define ROW_H        42
 
 static lv_obj_t *s_status, *s_list;
