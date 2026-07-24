@@ -1,27 +1,30 @@
 import Foundation
 import BeaconHubKit
 
-// The Codex provider (design 2026-07-19). Usage comes from the existing ~/.codex/auth.json poller
-// (CodexUsageProvider, unchanged). The buddy plane (sessions + prompts) rides Codex's command-type
-// hooks, bridged through the beacon-codex-hook shim -> POST /codex/hook on the shared LocalIngestServer:
+// Generic hook-buddy provider (issue #136; generalized from the 2026-07-19 CodexProvider). Drives the
+// buddy plane (sessions + prompts) for any agent that POSTs the Claude/Codex-compatible hook shape to a
+// LocalIngestServer route. Two agents use it today: Codex (via the beacon-codex-hook shim -> /codex/hook,
+// with a ~/.codex/auth.json usage source) and omp (via the managed beacon.ts extension -> /omp/hook, no
+// usage source). Session lifecycle:
 //   SessionStart      => register session (label = cwd basename + git branch)
 //   UserPromptSubmit  => working
 //   Stop              => attention
 //   SessionEnd        => remove
-//   PermissionRequest => held open until the device decides (mirrors ClaudeCodeProvider), fail-closed
-//                        at a ~575s cap, strictly under the shim's 585s curl and Codex's 590s hook timeout.
+//   PermissionRequest => held open until the device decides (mirrors ClaudeCodeProvider), fail-closed at
+//                        `capSeconds`. The cap MUST fire before the caller's own deadline so the deny
+//                        reaches the still-open socket. Two timing chains, per instance:
+//                          Codex: hub 575 < curl --max-time 585 < Codex hook timeout 590
+//                          omp:   device 25 < hub 26 < extension fetch abort 28 < omp handler ceiling 30
 // Byte-compatible with the Claude decision shape via HookResponse. State is confined to the ingest
 // server's `queue`; sink calls hop to the main actor (where the mux lives). Logs only id + decision + ts.
-final class CodexProvider: AgentProvider {
-    static let hookPath = CodexHooks.routePath
+final class HookBuddyProvider: AgentProvider {
 
-    // Capabilities: usage (auth.json poll) + sessions + prompts (Codex hooks). The mux and per-provider
-    // toggles already support the full tier.
-    let descriptor = ProviderDescriptor(id: "codex", label: "CODEX",
-                                        capabilities: [.usage, .sessions, .prompts])
+    let descriptor: ProviderDescriptor
+    let usageSource: UsageProvider?      // nil => no usage capability (omp); Codex passes its poller
 
     private let server: LocalIngestServer
-    private let usageProvider: CodexUsageProvider
+    private let routePath: String        // ingest route this instance registers (e.g. /codex/hook)
+    private let capSeconds: TimeInterval  // fail-closed hold cap; MUST fire before the caller's deadline
     private weak var sink: ProviderSink?
     private var queue: DispatchQueue { server.queue }
 
@@ -47,20 +50,24 @@ final class CodexProvider: AgentProvider {
     var branchResolverForTest: ((String) -> String?)?
     private var branchCache: [String: String] = [:]
     private var branchInFlight: [String: [String]] = [:]
-    private let gitQueue = DispatchQueue(label: "beacon.codex.git", qos: .utility)
+    private let gitQueue = DispatchQueue(label: "beacon.hookbuddy.git", qos: .utility)
 
     private static let isoStamp = ISO8601DateFormatter()
 
-    init(server: LocalIngestServer, usageSession: URLSession = .shared) {
+    init(descriptor: ProviderDescriptor, routePath: String, capSeconds: TimeInterval,
+         server: LocalIngestServer, usageSource: UsageProvider? = nil) {
+        self.descriptor = descriptor
+        self.routePath = routePath
+        self.capSeconds = capSeconds
         self.server = server
-        self.usageProvider = CodexUsageProvider(session: usageSession)
+        self.usageSource = usageSource
     }
 
     // --- AgentProvider ---
 
     func start(sink: ProviderSink) {
         self.sink = sink
-        server.register(path: Self.hookPath) { [weak self] req in self?.handleHook(req) }
+        server.register(path: routePath) { [weak self] req in self?.handleHook(req) }
     }
 
     func setEnabled(_ caps: EnabledCapabilities) {
@@ -90,8 +97,8 @@ final class CodexProvider: AgentProvider {
     // Codex hooks carry no host-context (no beacon-session equivalent), so tap-to-open is unsupported.
     func focusSession(nativeKey: String) -> Bool { false }
 
-    var usageSource: UsageProvider? { usageProvider }
-    // No poll gate: Codex has no statusline-equivalent liveness source, so it always polls when enabled.
+    // No poll gate: neither Codex nor omp has a statusline-equivalent liveness source, so they always
+    // poll when enabled (omp has no usageSource at all).
 
     // Mirror the BLE link state so an arriving prompt can be denied as "offline" instead of held
     // invisibly until the cap. Safe to call from any thread.
@@ -174,11 +181,11 @@ final class CodexProvider: AgentProvider {
         let nativeID = mintNativeId()
         lastNativeId = nativeID
         let cap = DispatchSource.makeTimerSource(queue: queue)
-        // Fail-closed cap. STRICT ordering invariant: hub cap 575 < curl --max-time 585 < Codex hook
-        // timeout 590. The hub MUST fire first so its deny reaches the still-open socket; if the cap
-        // equaled the curl budget the socket would already be dead at the cap and Codex would degrade to
-        // fail-open passthrough (curl's clock starts before the hub even receives the request).
-        cap.schedule(deadline: .now() + 575)
+        // Fail-closed cap. STRICT ordering invariant: the hub cap MUST fire before the caller's own
+        // deadline so its deny reaches the still-open socket (Codex: 575 < curl 585 < hook 590; omp:
+        // 26 < fetch abort 28 < handler ceiling 30). If the cap equaled the caller's budget the socket
+        // would already be dead at the cap and the caller would degrade to fail-open passthrough.
+        cap.schedule(deadline: .now() + capSeconds)
         cap.setEventHandler { [weak self] in self?.finish(id: nativeID, approve: false, capped: true) }
         pending[nativeID] = Pending(respond: respond, timeout: cap)
         cap.resume()
@@ -311,7 +318,7 @@ final class CodexProvider: AgentProvider {
 
     private func log(id: String, decision: String) {
         let ts = Self.isoStamp.string(from: Date())
-        FileHandle.standardError.write(Data("[beacon-hub] codex-perm id=\(id) decision=\(decision) at=\(ts)\n".utf8))
+        FileHandle.standardError.write(Data("[beacon-hub] \(descriptor.id)-perm id=\(id) decision=\(decision) at=\(ts)\n".utf8))
     }
 
     private static func commandHint(from input: Any?) -> String? {

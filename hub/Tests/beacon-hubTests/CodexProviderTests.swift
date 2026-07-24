@@ -21,8 +21,11 @@ final class CodexProviderTests: XCTestCase {
         func provider(_ id: String, didAppendEntry line: String) {}
     }
 
-    private func makeProvider(deviceConnected: Bool = true) -> (CodexProvider, MockSink) {
-        let p = CodexProvider(server: LocalIngestServer())
+    private func makeProvider(deviceConnected: Bool = true) -> (HookBuddyProvider, MockSink) {
+        let p = HookBuddyProvider(
+            descriptor: ProviderDescriptor(id: "codex", label: "CODEX",
+                                           capabilities: [.usage, .sessions, .prompts]),
+            routePath: CodexHooks.routePath, capSeconds: 575, server: LocalIngestServer())
         let sink = MockSink()
         p.branchResolverForTest = { _ in nil }   // never shell git in tests
         p.start(sink: sink)

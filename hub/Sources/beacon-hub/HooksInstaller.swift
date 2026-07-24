@@ -17,6 +17,11 @@ enum HooksInstaller {
     // command string written into ~/.codex/config.toml AND fed into the trust hash.
     static let codexShimInstallPath = NSString(string: "~/.beacon/beacon-codex-hook").expandingTildeInPath
 
+    // omp managed extension install path. omp auto-discovers every module in ~/.omp/agent/extensions/,
+    // so install = write one self-contained file (issue #136). Wholly Beacon-managed; see OmpHooks.
+    static let ompExtensionInstallPath =
+        NSString(string: "~/.omp/agent/extensions/beacon.ts").expandingTildeInPath
+
     private static var defaultSettingsURL: URL {
         URL(fileURLWithPath: NSString(string: "~/.claude/settings.json").expandingTildeInPath)
     }
@@ -42,6 +47,7 @@ enum HooksInstaller {
         switch providerID {
         case "claude": try installClaude()
         case "codex":  try installCodex()
+        case "omp":    try installOmp()
         default:       break
         }
     }
@@ -51,8 +57,44 @@ enum HooksInstaller {
         switch providerID {
         case "claude": return isInstalled()
         case "codex":  return isCodexInstalled()
+        case "omp":    return isOmpInstalled()
         default:       return true
         }
+    }
+
+    // Install the managed omp extension to ~/.omp/agent/extensions/beacon.ts. Idempotent: a byte-current
+    // file is left untouched. An existing UNrecognized file (user's own or a stale Beacon version) is
+    // backed up to <target>.bak-<stamp> before overwrite -- the path is user-owned until proven managed,
+    // matching the Claude/Codex installers' backup safety. Writes through a symlink (resolves the target).
+    static func installOmp(extensionPath: String = ompExtensionInstallPath) throws {
+        let fm = FileManager.default
+        let dir = (extensionPath as NSString).deletingLastPathComponent
+        try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+        let exists = fm.fileExists(atPath: extensionPath)
+        let writeTarget = exists ? realpathOrSelf(extensionPath) : extensionPath
+        let current = (try? String(contentsOfFile: writeTarget, encoding: .utf8)) ?? ""
+        if exists, OmpHooks.isCurrent(current) { return }   // already current: no-op
+
+        if exists, !current.isEmpty {
+            let stamp = Self.backupStamp.string(from: Date())
+            let backup = "\(writeTarget).bak-\(stamp)"
+            do {
+                try fm.copyItem(atPath: writeTarget, toPath: backup)
+            } catch {
+                FileHandle.standardError.write(Data(
+                    "[beacon-hub] omp: WARNING could not back up \(writeTarget) before overwrite: \(error.localizedDescription)\n".utf8))
+            }
+        }
+        try Self.atomicWriteThrough(target: writeTarget, content: OmpHooks.extensionSource)
+    }
+
+    // True iff ~/.omp/agent/extensions/beacon.ts is byte-current with OmpHooks.extensionSource. Any read
+    // failure (missing/unreadable) => not installed. Exact-content check (not a marker substring), so a
+    // truncated/edited/older-or-newer file offers reinstall in Settings.
+    static func isOmpInstalled(extensionPath: String = ompExtensionInstallPath) -> Bool {
+        guard let content = try? String(contentsOfFile: extensionPath, encoding: .utf8) else { return false }
+        return OmpHooks.isCurrent(content)
     }
 
     static func installClaude() throws {
@@ -190,13 +232,16 @@ enum HooksInstaller {
     }
 
     // Write `content` to `target` via a same-dir temp + rename(2): atomic within the volume (never a
-    // window with a missing file) and it replaces the target in place, so a symlinked config.toml stays
-    // a link (callers resolve the link and pass its target here). Preserves the target's existing mode.
+    // window with a missing file) and it replaces the target in place, so a symlinked target stays a
+    // link (callers resolve the link and pass its target here). Preserves the target's existing mode.
+    // Temp basename + error text derive from the target so failures name the real file (config.toml or
+    // beacon.ts), not a hard-coded one.
     static func atomicWriteThrough(target: String, content: String) throws {
         let fm = FileManager.default
         let targetURL = URL(fileURLWithPath: target)
+        let base = targetURL.lastPathComponent
         let tmp = targetURL.deletingLastPathComponent()
-            .appendingPathComponent("config.toml.beacon.\(UUID().uuidString)")
+            .appendingPathComponent("\(base).beacon.\(UUID().uuidString)")
         try content.data(using: .utf8)!.write(to: tmp)
         if let mode = (try? fm.attributesOfItem(atPath: target))?[.posixPermissions] {
             try? fm.setAttributes([.posixPermissions: mode], ofItemAtPath: tmp.path)
@@ -204,7 +249,7 @@ enum HooksInstaller {
         guard rename(tmp.path, target) == 0 else {
             let err = String(cString: strerror(errno))
             try? fm.removeItem(at: tmp)
-            throw HooksError(message: "codex: failed to install config.toml at \(target): \(err)")
+            throw HooksError(message: "failed to install \(base) at \(target): \(err)")
         }
     }
 

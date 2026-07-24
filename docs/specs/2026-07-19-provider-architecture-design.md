@@ -2,6 +2,8 @@
 
 Status: approved design, 2026-07-19. Authority: this doc governs the multi-provider refactor; wire details land in `hub/CONTRACT.md` when implemented.
 
+> **Update 2026-07-24 (issue #136):** omp added as a third provider (buddy plane only — no usage entry). The Codex-specific `CodexProvider` was generalized into `HookBuddyProvider` (injected `descriptor`/`routePath`/`capSeconds`/optional `usageSource`), now shared by Codex (`/codex/hook`, usage source) and omp (`/omp/hook`, none). omp installs a managed extension at `~/.omp/agent/extensions/beacon.ts`; wire shape and fail-closed timing in `hub/CONTRACT.md` §C.6.
+
 ## Goal
 
 Beacon today hardwires exactly two usage providers (Claude, Codex) and one buddy harness (Claude Code). This design makes both planes pluggable:
