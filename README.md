@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/angaziz/beacon)
 
-A dark and futuristic companion on a 2.16" AMOLED touch device — built on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**. It sits next to your keyboard and, at a glance, shows your Claude Code / Codex usage, live markets, weather, and a Claude coding "buddy" you can approve tool-prompts on — without breaking focus on your Mac.
+A dark and futuristic companion on a 2.16" AMOLED touch device — built on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**. It sits next to your keyboard and, at a glance, shows your Claude Code / Codex usage, live markets, weather, and a coding "buddy" for Claude Code, Codex, and Oh My Pi (omp) that you can approve tool-prompts on — without breaking focus on your Mac.
 
 ![Beacon on a desk](docs/assets/hero.jpg)
 
@@ -22,7 +22,7 @@ Five screens, navigated by swipe + motion gestures:
 | Home | clock, date, weather, humidity | WiFi (direct) |
 | Finance | FX, crypto, indices, ETFs — curated from the Mac hub | WiFi (direct) |
 | AI Usage | Claude + Codex, **both** 5h and 7-day windows + reset | Mac hub (BLE) |
-| Coding Buddy | live per-session list (state + folder·branch + age), approve/deny tool-permission prompts, tap a session to focus its terminal | pluggable agent providers (Claude Code today, Codex CLI landing) via the Mac hub (BLE) |
+| Coding Buddy | live per-session list (state + folder·branch + age), approve/deny tool-permission prompts, tap a session to focus its terminal | pluggable agent providers (Claude Code, Codex CLI, Oh My Pi) via the Mac hub (BLE) |
 | Settings | WiFi, brightness, theme picker, sleep, etc. | local (NVS) |
 
 ## What works today
@@ -81,7 +81,7 @@ Just validating a fresh board? Flash the bring-up spike first — [`docs/spikes/
 
 ## The macOS hub
 
-Beacon Hub is a small macOS menubar app — the device's private-data plane. It reads your Claude Code + Codex usage and bridges Claude Code's tool-permission prompts to the device over a bonded Bluetooth link. Your Claude/Codex credentials stay on the Mac; only normalized percentages, reset times, and prompt text ever cross BLE.
+Beacon Hub is a small macOS menubar app — the device's private-data plane. It reads your Claude Code + Codex usage and bridges Claude Code, Codex, and Oh My Pi tool-permission prompts to the device over a bonded Bluetooth link. Your Claude/Codex credentials stay on the Mac (omp needs none — it rides a local extension); only normalized percentages, reset times, and prompt text ever cross BLE.
 
 It's also where you **curate the Finance screen**: search Binance + Yahoo from the menubar, pick the tickers you care about, and they sync to the device over BLE and apply on the spot — no firmware edit, no re-flash, no reboot.
 
@@ -89,20 +89,20 @@ Providers are modular: each has independent **Usage** and **Coding Buddy** toggl
 
 ### Provider feature parity
 
-Both providers stream AI usage and bridge tool-permission prompts to the device. Claude Code has the richer coding buddy today: its statusline and session host-context feed the hub data that Codex's command hooks don't carry yet.
+All three providers bridge tool-permission prompts to the device; Claude and Codex also stream AI usage. Claude Code has the richest coding buddy today: its statusline (tokens/context) and question events feed data the other providers' hooks don't carry.
 
-| Capability | Claude Code | Codex CLI |
-|---|---|---|
-| AI usage (5h + 7-day windows) | ✅ | ✅ |
-| Live session list (state · folder·branch · age) | ✅ | ✅ |
-| Approve / deny tool-permission prompts from the device | ✅ | ✅ |
-| Auto-deny on device-offline / hub-quit | ✅ | ✅ |
-| "Tap to answer on Mac" question card | ✅ | ❌ |
-| Tap a session to focus its terminal | ✅ | ❌ |
-| Token + context-window readout | ✅ | ❌ |
-| Recent-activity feed | ✅ | ❌ |
+| Capability | Claude Code | Codex CLI | Oh My Pi |
+|---|---|---|---|
+| AI usage (5h + 7-day windows) | ✅ | ✅ | — |
+| Live session list (state · folder·branch · age) | ✅ | ✅ | ✅ |
+| Approve / deny tool-permission prompts from the device | ✅ | ✅ | ✅ |
+| Auto-deny on device-offline / hub-quit | ✅ | ✅ | ✅ |
+| "Tap to answer on Mac" question card | ✅ | ❌ | ❌ |
+| Tap a session to focus its terminal | ✅ | ❌ | ✅ |
+| Token + context-window readout | ✅ | ❌ | ❌ |
+| Recent-activity feed | ✅ | ❌ | ❌ |
 
-The Codex gaps are hook-surface limits, not menubar toggles: Codex's command hooks expose no statusline (tokens/context), no host context (terminal focus), and no question event.
+omp's tap-to-focus works because its in-process extension reads host context (terminal + Warp pane) from the shell environment; Codex's command hooks carry none. The rest are surface limits, not menubar toggles: Codex exposes no statusline (tokens/context) or question event; omp adds no usage entry by design (it would duplicate the Claude/Codex accounts it proxies) and its extension has no statusline or question event yet.
 
 ![Beacon Hub menubar app](docs/assets/hub.png)
 
@@ -110,7 +110,7 @@ The Codex gaps are hook-surface limits, not menubar toggles: Codex's command hoo
 
 **Install.** Download `Beacon-Hub-<version>-macos-apple-silicon.zip` from [Releases](https://github.com/angaziz/beacon/releases), unzip, and drag it to Applications. If macOS blocks it on first launch, use the Gatekeeper "Open Anyway" step — full details in [`hub/README.md`](hub/README.md). No release published yet? It builds from source in a few minutes.
 
-**Pair.** Open Beacon Hub; the **Set up Beacon** window walks three checks — Bluetooth permission, device pairing, and a one-click **Install hooks** for Claude Code.
+**Pair.** Open Beacon Hub; the **Set up Beacon** window walks three checks — Bluetooth permission, device pairing, and a one-click **Install hooks** for Claude Code. Codex and Oh My Pi each have their own per-provider **Set up** button (Codex writes a managed `~/.codex/config.toml` block; omp installs a managed `~/.omp/agent/extensions/beacon.ts`).
 
 **Permissions.** The hub asks for three on first run. The first two are required for the BLE features; everything else (weather, markets, time) works without the hub.
 
