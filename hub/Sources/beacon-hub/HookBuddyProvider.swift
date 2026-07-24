@@ -46,6 +46,12 @@ final class HookBuddyProvider: AgentProvider {
     private var nativeCounter: UInt32 = 0
     private var lastNativeId: String?
 
+    // Tap-to-open host context (issue #136 follow-up). Populated from the hook body's host_app/
+    // focus_url/bundle_id on SessionStart (the omp extension reads process.env; Codex sends none, so
+    // its focus stays a no-op). Queue-confined like `pending`. focusRunner is injectable for tests.
+    private let hosts = HostContextStore()
+    private var focusRunner: (FocusTarget) -> Bool = { SessionFocus.focus($0) }
+
     // Branch resolution (git) runs off-queue; results hop back and feed the mux as a .branch event.
     var branchResolverForTest: ((String) -> String?)?
     private var branchCache: [String: String] = [:]
@@ -94,8 +100,15 @@ final class HookBuddyProvider: AgentProvider {
         }
     }
 
-    // Codex hooks carry no host-context (no beacon-session equivalent), so tap-to-open is unsupported.
-    func focusSession(nativeKey: String) -> Bool { false }
+    // Tap-to-open: focus the terminal/editor that captured host context on SessionStart. Returns false
+    // when no context was captured (Codex sends none => no-op, preserving its prior behavior). Called
+    // off the main thread by AppDelegate (SessionFocus may briefly block on process launch).
+    func focusSession(nativeKey: String) -> Bool {
+        guard let host = queue.sync(execute: { hosts.host(for: nativeKey) }) else { return false }
+        return focusRunner(FocusTarget(hostApp: host.app, focusURL: host.focusURL,
+                                       bundleId: host.bundleId, cwd: host.cwd))
+    }
+    func setFocusRunnerForTest(_ f: @escaping (FocusTarget) -> Bool) { queue.sync { focusRunner = f } }
 
     // No poll gate: neither Codex nor omp has a statusline-equivalent liveness source, so they always
     // poll when enabled (omp has no usageSource at all).
@@ -240,15 +253,27 @@ final class HookBuddyProvider: AgentProvider {
             emitSession(.stop(nativeKey: sid, cwd: cwd)); ensureBranch(sessionId: sid, cwd: cwd)
         case "SessionEnd":
             branchCache.removeValue(forKey: cwd ?? "")
+            hosts.remove(key: sid)
             emitSession(.end(nativeKey: sid))
         default:   // SessionStart + UserPromptSubmit: activity establishes/keeps the session working.
+            // SessionStart carries tap-to-open host context (omp reads process.env; merge keeps prior
+            // non-empty values so a later UserPromptSubmit without env can't wipe them).
+            hosts.set(key: sid, app: body["host_app"] as? String, focusURL: body["focus_url"] as? String,
+                      bundleId: body["bundle_id"] as? String, cwd: cwd)
             emitSession(.activity(nativeKey: sid, cwd: cwd)); ensureBranch(sessionId: sid, cwd: cwd)
         }
     }
 
     // Test seam: drive the session path without the Network/HTTP stack.
-    func applySessionHookForTest(event: String, sessionId: String, cwd: String) {
-        queue.sync { self.applySessionHook(event: event, body: ["session_id": sessionId, "cwd": cwd, "hook_event_name": event]) }
+    func applySessionHookForTest(event: String, sessionId: String, cwd: String,
+                                 hostApp: String? = nil, focusURL: String? = nil, bundleId: String? = nil) {
+        queue.sync {
+            var body: [String: Any] = ["session_id": sessionId, "cwd": cwd, "hook_event_name": event]
+            if let hostApp { body["host_app"] = hostApp }
+            if let focusURL { body["focus_url"] = focusURL }
+            if let bundleId { body["bundle_id"] = bundleId }
+            self.applySessionHook(event: event, body: body)
+        }
     }
 
     // Test seams for the permission path (mirrors ClaudeCodeProvider's).

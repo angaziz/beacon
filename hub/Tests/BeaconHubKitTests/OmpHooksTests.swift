@@ -7,10 +7,12 @@ final class OmpHooksTests: XCTestCase {
 
     func testExtensionSourceCarriesWireContract() {
         let src = OmpHooks.extensionSource
-        XCTAssertTrue(src.hasPrefix("// beacon-omp v1"), "marker must be on line 1")
+        XCTAssertTrue(src.hasPrefix("// beacon-omp v2"), "marker must be on line 1")
         XCTAssertTrue(src.contains("http://127.0.0.1:8765/omp/hook"))
         XCTAssertTrue(src.contains("\"PermissionRequest\""))
         XCTAssertTrue(src.contains("GATED_TOOLS = new Set([\"bash\"])"))
+        XCTAssertTrue(src.contains("TERM_PROGRAM"), "captures host app for tap-to-open")
+        XCTAssertTrue(src.contains("WARP_FOCUS_URL"), "captures Warp focus handle")
     }
 
     func testIsCurrent() {
@@ -22,7 +24,7 @@ final class OmpHooksTests: XCTestCase {
             ("empty", "", false),
             ("truncated", String(src.dropLast(100)), false),
             ("one char flipped", flipOneChar(src), false),
-            ("v10 marker variant", src.replacingOccurrences(of: "beacon-omp v1", with: "beacon-omp v10"), false),
+            ("v20 marker variant", src.replacingOccurrences(of: "beacon-omp v2", with: "beacon-omp v20"), false),
             ("unrelated content", "export default function () {}", false),
         ]
         for c in cases {

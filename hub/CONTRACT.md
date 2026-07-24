@@ -342,6 +342,14 @@ Only **interactive** sessions gate (`ctx.hasUI` — print mode and task subagent
 extension parses `hookSpecificOutput.decision.behavior`: `allow` => run; anything else => block with
 `decision.message`.
 
+**Tap-to-open host context (v2).** The `SessionStart` POST also carries `host_app` (`TERM_PROGRAM`),
+`focus_url` (`WARP_FOCUS_URL`, Warp per-pane handle), and `bundle_id` (`__CFBundleIdentifier`), read from
+`process.env` at bind time — the same fields the Claude `beacon-session` shim sends to `/session` (§C.4).
+`HookBuddyProvider` merges them into a per-session `HostContextStore` (non-empty-wins) and answers a
+device `open` via `SessionFocus` (Tier 1 Warp focus-url > Tier 2 editor reuse > Tier 3 open-by-bundle/app),
+clearing them on `SessionEnd`. Codex sends none, so its tap-to-open stays a no-op. Extension source bumped
+to marker `beacon-omp v2`; a v1 file reads as not-current and Settings offers reinstall.
+
 **Fail closed (CRITICAL).** omp's default `tools.approvalMode` is `yolo` (built-in approval runs BEFORE
 `tool_call` and would execute `bash` unattended), so the extension treats **every** transport/protocol
 failure — unreachable hub, non-2xx, unreadable/`decision`-less error body, fetch abort — as `{block:true}`

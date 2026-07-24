@@ -30,7 +30,7 @@ public enum OmpHooks {
     // handler ceiling, which itself blocks the tool on timeout): device 25s < hub 26s cap < fetch
     // abort 28s. Every transport/protocol failure fails closed (docs/tech.md §1).
     public static let extensionSource: String = #"""
-// beacon-omp v1 -- managed by Beacon hub; do not edit (reinstall overwrites).
+// beacon-omp v2 -- managed by Beacon hub; do not edit (reinstall overwrites).
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
 const HUB = "http://127.0.0.1:8765/omp/hook";
@@ -68,7 +68,12 @@ export default function beacon(pi: ExtensionAPI) {
     if (prev && prev !== sessionId) {
       post({ hook_event_name: "SessionEnd", session_id: prev }, 3_000).catch(() => {});
     }
-    void lifecycle("SessionStart");
+    // SessionStart carries tap-to-open host context (process.env, read at bind time), mirroring the
+    // Claude beacon-session shim: TERM_PROGRAM, WARP_FOCUS_URL (Warp per-pane handle), bundle id.
+    post({ hook_event_name: "SessionStart",
+           host_app: process.env.TERM_PROGRAM ?? "",
+           focus_url: process.env.WARP_FOCUS_URL ?? "",
+           bundle_id: process.env.__CFBundleIdentifier ?? "" }, 3_000).catch(() => {});
   };
 
   pi.on("session_start", async (_e, ctx) => beginSession(ctx));

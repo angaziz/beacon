@@ -138,4 +138,33 @@ final class CodexProviderTests: XCTestCase {
         wait(for: [done], timeout: 2)
         XCTAssertEqual(p.heldCountForTest(), 0)
     }
+
+    // Tap-to-open: SessionStart host context is captured and drives focusSession with the right target.
+    func testFocusSessionUsesCapturedHostContext() {
+        let (p, _) = makeProvider()
+        var captured: FocusTarget?
+        p.setFocusRunnerForTest { t in captured = t; return true }
+        p.applySessionHookForTest(event: "SessionStart", sessionId: "s1", cwd: "/tmp/proj",
+                                  hostApp: "WarpTerminal", focusURL: "warp://focus/abc", bundleId: "dev.warp.Warp")
+        XCTAssertTrue(p.focusSession(nativeKey: "s1"))
+        XCTAssertEqual(captured, FocusTarget(hostApp: "WarpTerminal", focusURL: "warp://focus/abc",
+                                             bundleId: "dev.warp.Warp", cwd: "/tmp/proj"))
+    }
+
+    // No captured context (Codex sends none) => focusSession is a no-op returning false, never spawning.
+    func testFocusSessionFalseWithoutHostContext() {
+        let (p, _) = makeProvider()
+        p.setFocusRunnerForTest { _ in XCTFail("must not run focus without host context"); return true }
+        XCTAssertFalse(p.focusSession(nativeKey: "unknown"))
+    }
+
+    // SessionEnd clears captured host context so a stale entry can't focus a dead session.
+    func testSessionEndClearsHostContext() {
+        let (p, _) = makeProvider()
+        p.applySessionHookForTest(event: "SessionStart", sessionId: "s1", cwd: "/tmp",
+                                  hostApp: "WarpTerminal", focusURL: "warp://focus/abc", bundleId: nil)
+        p.applySessionHookForTest(event: "SessionEnd", sessionId: "s1", cwd: "/tmp")
+        p.setFocusRunnerForTest { _ in XCTFail("context should be gone after SessionEnd"); return true }
+        XCTAssertFalse(p.focusSession(nativeKey: "s1"))
+    }
 }
