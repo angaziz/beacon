@@ -57,20 +57,41 @@ final class ClaudeCodeProviderTests: XCTestCase {
         XCTAssertEqual(usageCount, 1, "unchanged value must stay deduped (#59)")
     }
 
-    // Device offline => deny immediately (named), never hold; no prompt raised to the mux.
-    func testOfflineDeniesImmediatelyWithoutRaising() {
+    // Device offline => pass-through (no verdict, "{}"), never a deny: the user never saw the prompt,
+    // so the harness must ask on the Mac instead of failing the tool call. No prompt raised to the mux.
+    func testOfflinePassesThroughWithoutRaising() {
         let (p, sink) = makeProvider(deviceConnected: false)
         var responded: Data?
+        var undeliverable: String?
+        p.onPromptUndeliverable = { undeliverable = $0 }
         p.handlePermissionForTest(body: ["hook_event_name": "PermissionRequest", "session_id": "z",
                                          "tool_name": "Bash", "tool_input": ["command": "rm -rf /"]],
                                   respond: { data, _ in responded = data })
         drainMain()
-        XCTAssertNotNil(responded)
-        let obj = try! JSONSerialization.jsonObject(with: responded!) as! [String: Any]
-        let decision = ((obj["hookSpecificOutput"] as! [String: Any])["decision"] as! [String: Any])
-        XCTAssertEqual(decision["behavior"] as? String, "deny")
+        XCTAssertEqual(responded, HookResponse.permissionAsk(event: "PermissionRequest"))
+        XCTAssertEqual(String(decoding: responded ?? Data(), as: UTF8.self), "{}")
+        XCTAssertEqual(undeliverable, "Beacon offline - CLAUDE not gated", "the Mac still gets a menubar alert")
         XCTAssertTrue(sink.raises.isEmpty, "offline prompt must not be raised")
         XCTAssertEqual(p.heldCountForTest(), 0)
+    }
+
+    // Link drops while a prompt is held: it can never be answered on the device, so release it
+    // pass-through immediately instead of letting the 590 s cap deny it.
+    func testDisconnectReleasesHeldPromptsPassthrough() {
+        let (p, sink) = makeProvider()
+        var responded: Data?
+        p.handlePermissionForTest(body: ["hook_event_name": "PermissionRequest", "session_id": "z",
+                                         "tool_name": "Bash"],
+                                  respond: { data, _ in responded = data })
+        drainMain()
+        XCTAssertNil(responded, "held while connected")
+        let nativeID = p.lastNativeIdForTest()!
+
+        p.setDeviceConnected(false)
+        XCTAssertEqual(p.heldCountForTest(), 0)   // queue.sync: flushes the disconnect hop
+        drainMain()
+        XCTAssertEqual(String(decoding: responded ?? Data(), as: UTF8.self), "{}", "no verdict => passthrough")
+        XCTAssertEqual(sink.ends, [nativeID])
     }
 
     // Buddy toggle OFF => pass-through (no verdict, {} for PermissionRequest); never auto-deny, never hold.

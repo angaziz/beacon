@@ -209,7 +209,7 @@ public enum DeviceCommand: Equatable {
 // event, else the device's approve/deny does not gate the tool. Beacon hooks PermissionRequest (fires
 // only when permission is actually needed); PreToolUse is kept for back-compat.
 public enum HookResponse {
-    // `message` names the deny cause in the CC TUI (e.g. "Beacon device offline"); nil falls back to
+    // `message` names the deny cause in the CC TUI (e.g. "Beacon hub is quitting"); nil falls back to
     // the generic reason. Ignored on allow (CONTRACT.md §C.3: message only on deny).
     public static func permission(event: String, allow: Bool, message: String? = nil) -> Data {
         let denyReason = message ?? "Denied on Beacon device"

@@ -22,6 +22,11 @@ final class HookBuddyProvider: AgentProvider {
     let descriptor: ProviderDescriptor
     let usageSource: UsageProvider?      // nil => no usage capability (omp); Codex passes its poller
 
+    // A prompt couldn't be shown (device offline) => the app raises a menubar alert: the buddy is not
+    // gating this agent until the link is back. Under omp's default `yolo` approvalMode a pass-through
+    // means the tool simply runs, so this alert is the only signal the gate is absent.
+    var onPromptUndeliverable: ((String) -> Void)?
+
     private let server: LocalIngestServer
     private let routePath: String        // ingest route this instance registers (e.g. /codex/hook)
     private let capSeconds: TimeInterval  // fail-closed hold cap; MUST fire before the caller's deadline
@@ -84,7 +89,9 @@ final class HookBuddyProvider: AgentProvider {
             // Buddy toggled OFF: release every held prompt pass-through (no verdict => Codex falls back
             // to its own TUI prompt); never auto-deny because a toggle is off (spec).
             if wasBuddy && !caps.buddy {
-                for id in self.pending.filter({ !$0.value.done }).map(\.key) { self.releasePassthrough(id) }
+                for id in self.pending.filter({ !$0.value.done }).map(\.key) {
+                    self.releasePassthrough(id, reason: "buddy-off")
+                }
             }
         }
     }
@@ -113,10 +120,20 @@ final class HookBuddyProvider: AgentProvider {
     // No poll gate: neither Codex nor omp has a statusline-equivalent liveness source, so they always
     // poll when enabled (omp has no usageSource at all).
 
-    // Mirror the BLE link state so an arriving prompt can be denied as "offline" instead of held
-    // invisibly until the cap. Safe to call from any thread.
+    // Mirror the BLE link state: an arriving prompt passes through instead of being held invisibly, and
+    // prompts already held when the link drops are released pass-through (they can no longer be
+    // answered on the device). Safe to call from any thread.
     func setDeviceConnected(_ connected: Bool) {
-        queue.async { [weak self] in self?.deviceConnected = connected }
+        queue.async { [weak self] in
+            guard let self else { return }
+            let wasConnected = self.deviceConnected
+            self.deviceConnected = connected
+            if wasConnected && !connected {
+                for id in self.pending.filter({ !$0.value.done }).map(\.key) {
+                    self.releasePassthrough(id, reason: "offline")
+                }
+            }
+        }
     }
 
     // Quit drain (mirrors ClaudeCodeProvider / issue #16): deny every still-held prompt (fail-closed),
@@ -158,8 +175,8 @@ final class HookBuddyProvider: AgentProvider {
     }
 
     // Connection-agnostic permission logic (split out so tests drive it without a socket). Mirrors
-    // ClaudeCodeProvider: fail-closed on quit/offline, pass-through on buddy-off, else hold for the
-    // device. All responses use the Codex-compatible HookResponse shapes ({} = no verdict).
+    // ClaudeCodeProvider: fail-closed on quit, pass-through on buddy-off or an unreachable device, else
+    // hold for the device. All responses use the Codex-compatible HookResponse shapes ({} = no verdict).
     private func permissionCore(body: [String: Any],
                                 respond: @escaping (Data, (() -> Void)?) -> Void,
                                 registerClose: (@escaping () -> Void) -> Void) {
@@ -175,11 +192,15 @@ final class HookBuddyProvider: AgentProvider {
             respond(HookResponse.permissionAsk(event: "PermissionRequest"), nil)
             return
         }
-        // Device offline => the prompt can't be shown. Deny immediately (named) rather than hold it
-        // invisibly until the cap.
+        // Device offline => the prompt can't be shown. Pass through (no verdict): "unreachable" is not a
+        // decision, and a deny would fail a tool call the user never saw. Codex falls back to its own TUI
+        // prompt; omp (built-in approval already done) just runs -- hence the menubar alert.
         if !deviceConnected {
-            log(id: "-", decision: "auto-deny-offline")
-            respond(HookResponse.permission(event: "PermissionRequest", allow: false, message: "Beacon device offline"), nil)
+            log(id: "-", decision: "offline-passthrough")
+            respond(HookResponse.permissionAsk(event: "PermissionRequest"), nil)
+            let cb = onPromptUndeliverable
+            let label = descriptor.label
+            DispatchQueue.main.async { cb?("Beacon offline - \(label) not gated") }
             return
         }
         enqueuePrompt(body: body, respond: respond, registerClose: registerClose)
@@ -220,13 +241,14 @@ final class HookBuddyProvider: AgentProvider {
         emitEndPrompt(id)
     }
 
-    // Release a held prompt pass-through (buddy toggled off): no verdict, Codex falls back to its TUI.
-    private func releasePassthrough(_ id: String) {
+    // Release a held prompt pass-through (buddy toggled off, or the link dropped): no verdict, the agent
+    // falls back to its own TUI prompt. `reason` only labels the log line.
+    private func releasePassthrough(_ id: String, reason: String) {
         guard let p = pending[id], !p.done else { return }
         p.done = true
         p.timeout.cancel()
         pending.removeValue(forKey: id)
-        log(id: id, decision: "buddy-off-release-passthrough")
+        log(id: id, decision: "\(reason)-release-passthrough")
         p.respond(HookResponse.permissionAsk(event: "PermissionRequest"), nil)
         emitEndPrompt(id)
     }

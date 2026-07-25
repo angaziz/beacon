@@ -306,10 +306,11 @@ budget would fire only after curl had already closed the socket, degrading to fa
 curl's clock starts before the hub even receives the request. If the held connection drops first, the
 user answered in the Codex TUI => the hub withdraws that prompt silently.
 
-**Pass-through (never auto-deny on a toggle).** Coding-Buddy OFF, or a still-held prompt at toggle-off,
-returns `{}` (no verdict) so Codex prompts locally. Device offline denies immediately (named). Hub
-unreachable is handled in the shim: connection refused / timeout => print nothing, exit 0 (fail-open to
-the Codex TUI).
+**Pass-through (never auto-deny what the user never saw).** Coding-Buddy OFF, a still-held prompt at
+toggle-off, **or an unreachable device** (offline on arrival, or the link dropping while the prompt is
+held) returns `{}` (no verdict) so Codex prompts locally; the hub raises a menubar alert naming the
+agent ("Beacon offline - CODEX not gated"). Hub unreachable is handled in the shim: connection refused /
+timeout => print nothing, exit 0 (fail-open to the Codex TUI).
 
 **Trust (CRITICAL, source-verified + reproduced against codex-cli 0.140.0).** A user-config command hook
 only RUNS when Codex marks it `Trusted`, i.e. its `[hooks.state]` `trusted_hash` equals the hash Codex
@@ -356,9 +357,13 @@ parent session, issue #136 follow-up); a v1/v2 file reads as not-current and Set
 **Fail closed (CRITICAL).** omp's default `tools.approvalMode` is `yolo` (built-in approval runs BEFORE
 `tool_call` and would execute `bash` unattended), so the extension treats **every** transport/protocol
 failure — unreachable hub, non-2xx, unreadable/`decision`-less error body, fetch abort — as `{block:true}`
-(`docs/tech.md` §1). The ONLY passthrough is a successful `200` with no `decision` (hub buddy-off/ask).
-Consequence: extension installed + hub app not running => gated `bash` is blocked ("Beacon hub unreachable")
-until the hub runs, omp buddy is toggled off, or the file is removed.
+(`docs/tech.md` §1). The ONLY passthrough is a successful `200` with no `decision` (hub buddy-off/ask, or
+device offline). Consequence: extension installed + hub app not running => gated `bash` is blocked
+("Beacon hub unreachable") until the hub runs, omp buddy is toggled off, or the file is removed. Second
+consequence, accepted by the owner (2026-07-25): with the hub running but the **device** offline, omp
+`bash` runs unattended — omp's `tool_call` result is `{block, reason}` only, it has no "ask" escalation,
+and its own approval already ran. The hub's menubar alert ("Beacon offline - OMP not gated") is the only
+signal. Claude Code and Codex instead fall back to their own interactive prompt on the same `{}`.
 
 **Timing (source-verified against omp 17.1.1).** omp hard-caps every `tool_call` handler at 30 s
 (`EXTENSION_HANDLER_TIMEOUT_MS`, blocks the tool on timeout) and waits <=2 s for `session_shutdown`
@@ -384,6 +389,11 @@ socket would already be closed and omp would fall through to its own approval.
   ~590 s hold (below CC's/Codex's ~600 s hook timeout; Codex chain `hub 575 < curl 585 < hook 590`), omp
   26 s hold (chain `device 25 < hub 26 < fetch abort 28 < omp handler ceiling 30`, §C.6). Only a queued
   prompt's own cap expiry denies it (silently); `deny` + label on cap (`tech.md` §8, FR-BUDDY-3).
+- **Undeliverable prompt (device offline) => pass-through, never deny.** A prompt that arrives while the
+  link is down, or is still held when the link drops, is answered `{}` (no verdict) and the hub raises a
+  menubar alert "Beacon offline - <AGENT> not gated" (cleared on reconnect). Denying a prompt the user
+  never saw fails the tool call with nothing to act on; fail-closed applies to prompts the device DID
+  show (cap expiry) and to the quit drain, which still deny.
 - **Logging:** id + decision + timestamp only. NEVER the command `hint` or any token (`tech.md` §9).
 
 ### D.1 Onboarding, lifecycle & error recovery (epic #20 — `docs/research/2026-06-08-hub-ux-audit.md`)

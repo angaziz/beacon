@@ -251,9 +251,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let claude = ClaudeCodeProvider(server: ingest, usageSession: usageSession)
         claude.onClaudeUsage = { [weak self] c in Task { @MainActor in self?.onStatuslineClaude(c) } }
         claude.onStatuslineActivity = { [weak self] in Task { @MainActor in self?.onStatuslineActivity() } }
-        claude.onPromptUndeliverable = { [weak self] reason in
-            Task { @MainActor in self?.menubar.setAlert("Auto-denied: \(reason)") }
+        // Providers report a prompt they couldn't show (device offline); the message already names the
+        // agent. Cleared on reconnect in refreshLink.
+        let undeliverable: (String) -> Void = { [weak self] message in
+            Task { @MainActor in self?.menubar.setAlert(message) }
         }
+        claude.onPromptUndeliverable = undeliverable
         self.claude = claude
 
         let codex = HookBuddyProvider(
@@ -263,6 +266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             capSeconds: 575,
             server: ingest,
             usageSource: CodexUsageProvider(session: usageSession))
+        codex.onPromptUndeliverable = undeliverable
         self.codex = codex
 
         // omp: buddy plane only (no usage entry -- omp quota reports duplicate Claude/Codex). Fed by the
@@ -273,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             routePath: OmpHooks.routePath,
             capSeconds: 26,
             server: ingest)
+        omp.onPromptUndeliverable = undeliverable
         self.omp = omp
         providers = [claude, codex, omp]
 

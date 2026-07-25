@@ -3,8 +3,8 @@ import BeaconHubKit
 @testable import beacon_hub
 
 // Codex buddy adapter: event -> session-state mapping and the PermissionRequest decision paths
-// (buddy-off pass-through, offline deny, held resolve, quit drain). Mirrors ClaudeCodeProviderTests;
-// the FIFO/qlen/session-state aggregation lives in ProviderMux (its own tests).
+// (buddy-off pass-through, offline pass-through, held resolve, quit drain). Mirrors
+// ClaudeCodeProviderTests; the FIFO/qlen/session-state aggregation lives in ProviderMux (its own tests).
 final class CodexProviderTests: XCTestCase {
 
     private final class MockSink: ProviderSink {
@@ -69,15 +69,38 @@ final class CodexProviderTests: XCTestCase {
         XCTAssertTrue(sink.raises.isEmpty)
     }
 
-    // Device offline => deny immediately (named), never hold; no prompt raised.
-    func testOfflineDeniesImmediatelyWithoutRaising() {
+    // Device offline => pass-through (no verdict, "{}"), never a deny: the user never saw the prompt,
+    // so Codex/omp must ask locally instead of failing the tool call. No prompt raised.
+    func testOfflinePassesThroughWithoutRaising() {
         let (p, sink) = makeProvider(deviceConnected: false)
+        var body: Data?
+        var undeliverable: String?
+        p.onPromptUndeliverable = { undeliverable = $0 }
+        p.handlePermissionForTest(body: ["hook_event_name": "PermissionRequest", "tool_name": "Bash"]) { d, _ in body = d }
+        drainMain()
+        XCTAssertEqual(body, HookResponse.permissionAsk(event: "PermissionRequest"))
+        XCTAssertEqual(body, Data("{}".utf8))
+        XCTAssertEqual(undeliverable, "Beacon offline - CODEX not gated",
+                       "pass-through is silent to the agent, so the Mac must say the gate is absent")
+        XCTAssertEqual(p.heldCountForTest(), 0)
+        XCTAssertTrue(sink.raises.isEmpty)
+    }
+
+    // Link drops while a prompt is held: release it pass-through immediately instead of letting the
+    // cap deny it after the caller has been blocked for the whole window.
+    func testDisconnectReleasesHeldPromptsPassthrough() {
+        let (p, sink) = makeProvider()
         var body: Data?
         p.handlePermissionForTest(body: ["hook_event_name": "PermissionRequest", "tool_name": "Bash"]) { d, _ in body = d }
         drainMain()
-        XCTAssertEqual(body, HookResponse.permission(event: "PermissionRequest", allow: false, message: "Beacon device offline"))
-        XCTAssertEqual(p.heldCountForTest(), 0)
-        XCTAssertTrue(sink.raises.isEmpty)
+        XCTAssertNil(body, "held while connected")
+        guard let nid = p.lastNativeIdForTest() else { return XCTFail("no native id") }
+
+        p.setDeviceConnected(false)
+        XCTAssertEqual(p.heldCountForTest(), 0)   // queue.sync: flushes the disconnect hop
+        drainMain()
+        XCTAssertEqual(body, HookResponse.permissionAsk(event: "PermissionRequest"))
+        XCTAssertEqual(sink.ends, [nid])
     }
 
     // A deliverable prompt is HELD (no response yet) and raised to the mux; resolving it fulfills the
