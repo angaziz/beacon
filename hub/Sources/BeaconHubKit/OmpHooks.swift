@@ -30,7 +30,7 @@ public enum OmpHooks {
     // handler ceiling, which itself blocks the tool on timeout): device 25s < hub 26s cap < fetch
     // abort 28s. Every transport/protocol failure fails closed (docs/tech.md §1).
     public static let extensionSource: String = #"""
-// beacon-omp v2 -- managed by Beacon hub; do not edit (reinstall overwrites).
+// beacon-omp v3 -- managed by Beacon hub; do not edit (reinstall overwrites).
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
 const HUB = "http://127.0.0.1:8765/omp/hook";
@@ -56,8 +56,9 @@ export default function beacon(pi: ExtensionAPI) {
 
   // (Re)bind identity on start/switch/branch: omp emits session_switch for new/resumed/forked
   // sessions and session_branch after branching; binding only on session_start would pin later
-  // activity to a dead id. hasUI=false covers print mode AND task subagents: buddy gates
-  // interactive sessions only (empty sessionId disables everything).
+  // activity to a dead id. hasUI=false covers print mode AND task subagents: skip lifecycle binding
+  // for those here, but tool_call below MUST re-check ctx.hasUI independently -- a subagent runs
+  // inside an already-bound interactive session, so the cached sessionId alone can't tell them apart.
   const beginSession = (ctx: { hasUI: boolean; cwd: string; sessionManager: { getSessionId(): string | undefined } }) => {
     if (!ctx.hasUI) return;
     const prev = sessionId;
@@ -89,8 +90,8 @@ export default function beacon(pi: ExtensionAPI) {
   // omp waits <=2s for shutdown handlers; awaiting a bounded POST gets SessionEnd out before exit.
   pi.on("session_shutdown", async () => { await lifecycle("SessionEnd", 1_500); });
 
-  pi.on("tool_call", async (event) => {
-    if (!sessionId || !GATED_TOOLS.has(event.toolName)) return;
+  pi.on("tool_call", async (event, ctx) => {
+    if (!ctx.hasUI || !sessionId || !GATED_TOOLS.has(event.toolName)) return;
     const deny = (reason: string) => ({ block: true, reason });
     let res: Response;
     try {

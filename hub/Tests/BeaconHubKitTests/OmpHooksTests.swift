@@ -7,12 +7,14 @@ final class OmpHooksTests: XCTestCase {
 
     func testExtensionSourceCarriesWireContract() {
         let src = OmpHooks.extensionSource
-        XCTAssertTrue(src.hasPrefix("// beacon-omp v2"), "marker must be on line 1")
+        XCTAssertTrue(src.hasPrefix("// beacon-omp v3"), "marker must be on line 1")
         XCTAssertTrue(src.contains("http://127.0.0.1:8765/omp/hook"))
         XCTAssertTrue(src.contains("\"PermissionRequest\""))
         XCTAssertTrue(src.contains("GATED_TOOLS = new Set([\"bash\"])"))
         XCTAssertTrue(src.contains("TERM_PROGRAM"), "captures host app for tap-to-open")
         XCTAssertTrue(src.contains("WARP_FOCUS_URL"), "captures Warp focus handle")
+        XCTAssertTrue(src.contains("if (!ctx.hasUI || !sessionId"),
+                      "tool_call must gate on ctx.hasUI, not just the cached session id (subagents share it)")
     }
 
     func testIsCurrent() {
@@ -24,7 +26,7 @@ final class OmpHooksTests: XCTestCase {
             ("empty", "", false),
             ("truncated", String(src.dropLast(100)), false),
             ("one char flipped", flipOneChar(src), false),
-            ("v20 marker variant", src.replacingOccurrences(of: "beacon-omp v2", with: "beacon-omp v20"), false),
+            ("v30 marker variant", src.replacingOccurrences(of: "beacon-omp v3", with: "beacon-omp v30"), false),
             ("unrelated content", "export default function () {}", false),
         ]
         for c in cases {

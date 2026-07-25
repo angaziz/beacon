@@ -336,7 +336,9 @@ generic `HookBuddyProvider` as Codex). Request body is byte-shaped like §C.3:
 events: `session_start`/`session_switch`/`session_branch` => `SessionStart` (rebinds `session_id` from
 `ctx.sessionManager.getSessionId()`), `agent_start` => `UserPromptSubmit`, `agent_end` (unless
 `willContinue`) => `Stop`, `session_shutdown` => `SessionEnd`. Gated tools: **`bash`** only (`GATED_TOOLS`).
-Only **interactive** sessions gate (`ctx.hasUI` — print mode and task subagents skip, matching Claude).
+Only **interactive** sessions gate (`ctx.hasUI` on the `tool_call` event itself, not just the cached
+`session_id` -- a task subagent runs inside an already-bound interactive session and must be excluded
+independently; print mode and subagents both skip, matching Claude).
 
 **Response (hub -> extension).** The §C.3 `PermissionRequest` decision shape; `{}` = passthrough. The
 extension parses `hookSpecificOutput.decision.behavior`: `allow` => run; anything else => block with
@@ -348,7 +350,8 @@ extension parses `hookSpecificOutput.decision.behavior`: `allow` => run; anythin
 `HookBuddyProvider` merges them into a per-session `HostContextStore` (non-empty-wins) and answers a
 device `open` via `SessionFocus` (Tier 1 Warp focus-url > Tier 2 editor reuse > Tier 3 open-by-bundle/app),
 clearing them on `SessionEnd`. Codex sends none, so its tap-to-open stays a no-op. Extension source bumped
-to marker `beacon-omp v2`; a v1 file reads as not-current and Settings offers reinstall.
+to marker `beacon-omp v3` (v3 also fixes `tool_call` gating task-subagent `bash` calls under a bound
+parent session, issue #136 follow-up); a v1/v2 file reads as not-current and Settings offers reinstall.
 
 **Fail closed (CRITICAL).** omp's default `tools.approvalMode` is `yolo` (built-in approval runs BEFORE
 `tool_call` and would execute `bash` unattended), so the extension treats **every** transport/protocol
