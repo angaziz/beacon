@@ -3,8 +3,8 @@ import BeaconHubKit
 @testable import beacon_hub
 
 // Codex buddy adapter: event -> session-state mapping and the PermissionRequest decision paths
-// (buddy-off pass-through, offline deny, held resolve, quit drain). Mirrors ClaudeCodeProviderTests;
-// the FIFO/qlen/session-state aggregation lives in ProviderMux (its own tests).
+// (buddy-off pass-through, offline pass-through, held resolve, quit drain). Mirrors
+// ClaudeCodeProviderTests; the FIFO/qlen/session-state aggregation lives in ProviderMux (its own tests).
 final class CodexProviderTests: XCTestCase {
 
     private final class MockSink: ProviderSink {
@@ -21,8 +21,11 @@ final class CodexProviderTests: XCTestCase {
         func provider(_ id: String, didAppendEntry line: String) {}
     }
 
-    private func makeProvider(deviceConnected: Bool = true) -> (CodexProvider, MockSink) {
-        let p = CodexProvider(server: LocalIngestServer())
+    private func makeProvider(deviceConnected: Bool = true) -> (HookBuddyProvider, MockSink) {
+        let p = HookBuddyProvider(
+            descriptor: ProviderDescriptor(id: "codex", label: "CODEX",
+                                           capabilities: [.usage, .sessions, .prompts]),
+            routePath: CodexHooks.routePath, capSeconds: 575, server: LocalIngestServer())
         let sink = MockSink()
         p.branchResolverForTest = { _ in nil }   // never shell git in tests
         p.start(sink: sink)
@@ -66,15 +69,38 @@ final class CodexProviderTests: XCTestCase {
         XCTAssertTrue(sink.raises.isEmpty)
     }
 
-    // Device offline => deny immediately (named), never hold; no prompt raised.
-    func testOfflineDeniesImmediatelyWithoutRaising() {
+    // Device offline => pass-through (no verdict, "{}"), never a deny: the user never saw the prompt,
+    // so Codex/omp must ask locally instead of failing the tool call. No prompt raised.
+    func testOfflinePassesThroughWithoutRaising() {
         let (p, sink) = makeProvider(deviceConnected: false)
+        var body: Data?
+        var undeliverable: String?
+        p.onPromptUndeliverable = { undeliverable = $0 }
+        p.handlePermissionForTest(body: ["hook_event_name": "PermissionRequest", "tool_name": "Bash"]) { d, _ in body = d }
+        drainMain()
+        XCTAssertEqual(body, HookResponse.permissionAsk(event: "PermissionRequest"))
+        XCTAssertEqual(body, Data("{}".utf8))
+        XCTAssertEqual(undeliverable, "Beacon offline - CODEX not gated",
+                       "pass-through is silent to the agent, so the Mac must say the gate is absent")
+        XCTAssertEqual(p.heldCountForTest(), 0)
+        XCTAssertTrue(sink.raises.isEmpty)
+    }
+
+    // Link drops while a prompt is held: release it pass-through immediately instead of letting the
+    // cap deny it after the caller has been blocked for the whole window.
+    func testDisconnectReleasesHeldPromptsPassthrough() {
+        let (p, sink) = makeProvider()
         var body: Data?
         p.handlePermissionForTest(body: ["hook_event_name": "PermissionRequest", "tool_name": "Bash"]) { d, _ in body = d }
         drainMain()
-        XCTAssertEqual(body, HookResponse.permission(event: "PermissionRequest", allow: false, message: "Beacon device offline"))
-        XCTAssertEqual(p.heldCountForTest(), 0)
-        XCTAssertTrue(sink.raises.isEmpty)
+        XCTAssertNil(body, "held while connected")
+        guard let nid = p.lastNativeIdForTest() else { return XCTFail("no native id") }
+
+        p.setDeviceConnected(false)
+        XCTAssertEqual(p.heldCountForTest(), 0)   // queue.sync: flushes the disconnect hop
+        drainMain()
+        XCTAssertEqual(body, HookResponse.permissionAsk(event: "PermissionRequest"))
+        XCTAssertEqual(sink.ends, [nid])
     }
 
     // A deliverable prompt is HELD (no response yet) and raised to the mux; resolving it fulfills the
@@ -134,5 +160,34 @@ final class CodexProviderTests: XCTestCase {
         p.drainHeldPrompts(reason: "quitting") { done.fulfill() }
         wait(for: [done], timeout: 2)
         XCTAssertEqual(p.heldCountForTest(), 0)
+    }
+
+    // Tap-to-open: SessionStart host context is captured and drives focusSession with the right target.
+    func testFocusSessionUsesCapturedHostContext() {
+        let (p, _) = makeProvider()
+        var captured: FocusTarget?
+        p.setFocusRunnerForTest { t in captured = t; return true }
+        p.applySessionHookForTest(event: "SessionStart", sessionId: "s1", cwd: "/tmp/proj",
+                                  hostApp: "WarpTerminal", focusURL: "warp://focus/abc", bundleId: "dev.warp.Warp")
+        XCTAssertTrue(p.focusSession(nativeKey: "s1"))
+        XCTAssertEqual(captured, FocusTarget(hostApp: "WarpTerminal", focusURL: "warp://focus/abc",
+                                             bundleId: "dev.warp.Warp", cwd: "/tmp/proj"))
+    }
+
+    // No captured context (Codex sends none) => focusSession is a no-op returning false, never spawning.
+    func testFocusSessionFalseWithoutHostContext() {
+        let (p, _) = makeProvider()
+        p.setFocusRunnerForTest { _ in XCTFail("must not run focus without host context"); return true }
+        XCTAssertFalse(p.focusSession(nativeKey: "unknown"))
+    }
+
+    // SessionEnd clears captured host context so a stale entry can't focus a dead session.
+    func testSessionEndClearsHostContext() {
+        let (p, _) = makeProvider()
+        p.applySessionHookForTest(event: "SessionStart", sessionId: "s1", cwd: "/tmp",
+                                  hostApp: "WarpTerminal", focusURL: "warp://focus/abc", bundleId: nil)
+        p.applySessionHookForTest(event: "SessionEnd", sessionId: "s1", cwd: "/tmp")
+        p.setFocusRunnerForTest { _ in XCTFail("context should be gone after SessionEnd"); return true }
+        XCTAssertFalse(p.focusSession(nativeKey: "s1"))
     }
 }

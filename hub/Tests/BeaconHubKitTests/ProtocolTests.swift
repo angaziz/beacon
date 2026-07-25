@@ -209,7 +209,7 @@ final class ProtocolTests: XCTestCase {
     }
 
     func testPermissionDenyMessageNamesCause() throws {
-        // A custom deny message (e.g. "Beacon device offline") must surface in the TUI for both event
+        // A custom deny message (e.g. "Beacon hub is quitting") must surface in the TUI for both event
         // shapes; nil falls back to the generic reason; allow never carries a message.
         func reason(_ obj: [String: Any], event: String) -> String? {
             // The user-visible reason: PermissionRequest carries it in decision.message (deny only),
@@ -219,13 +219,13 @@ final class ProtocolTests: XCTestCase {
             return out["permissionDecisionReason"] as? String
         }
         let cases: [(event: String, allow: Bool, message: String?, want: String?)] = [
-            ("PermissionRequest", false, "Beacon device offline", "Beacon device offline"),
+            ("PermissionRequest", false, "Beacon hub is quitting", "Beacon hub is quitting"),
             ("PermissionRequest", false, "another prompt is pending", "another prompt is pending"),
             ("PermissionRequest", false, nil, "Denied on Beacon device"),
-            ("PermissionRequest", true, "Beacon device offline", nil),   // allow ignores message
-            ("PreToolUse", false, "Beacon device offline", "Beacon device offline"),
+            ("PermissionRequest", true, "Beacon hub is quitting", nil),   // allow ignores message
+            ("PreToolUse", false, "Beacon hub is quitting", "Beacon hub is quitting"),
             ("PreToolUse", false, nil, "Denied on Beacon device"),
-            ("PreToolUse", true, "Beacon device offline", "Approved on Beacon device"),
+            ("PreToolUse", true, "Beacon hub is quitting", "Approved on Beacon device"),
         ]
         for c in cases {
             let obj = try JSONSerialization.jsonObject(

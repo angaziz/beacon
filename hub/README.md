@@ -3,7 +3,7 @@
 The menubar app that feeds the Beacon device its private-plane data over Bluetooth LE:
 
 - **AI Usage** — reads Claude Code and Codex usage/limits on the Mac and streams the normalized numbers to the device (Claude via the Claude Code statusline `rate_limits`; Codex via `~/.codex`).
-- **Coding Buddy** — bridges Claude Code session state and tool-permission prompts to the device, so you can approve or deny from the desk gadget. The decision is enforced on the Mac.
+- **Coding Buddy** — bridges Claude Code, Codex, and Oh My Pi (omp) session state and tool-permission prompts to the device, so you can approve or deny from the desk gadget. The decision is enforced on the Mac.
 - **Secrets stay here.** Tokens and credentials never leave the Mac; the BLE frames carry only normalized usage values and prompt metadata. Protocol + policies: [`CONTRACT.md`](CONTRACT.md).
 
 <img src="../docs/assets/hub.png" alt="Beacon Hub menubar panel" width="380">
@@ -40,6 +40,8 @@ What the hooks actually do:
 
 - The hook entries POST Claude Code lifecycle events (session state, tool-permission prompts) to the hub at `127.0.0.1:8765` — see [`claude-code-settings.snippet.json`](claude-code-settings.snippet.json).
 - The statusline shim ([`statusline-shim/beacon-statusline`](statusline-shim/beacon-statusline), installed to `~/.beacon/`) forwards the `rate_limits` payload Claude Code already computes, which is where the usage numbers come from.
+
+For **Codex** and **omp**, use the per-provider **Set up** chip in Settings instead of **Install hooks** (that button is Claude-only): Codex gets a managed block in `~/.codex/config.toml`; omp gets a managed extension at `~/.omp/agent/extensions/beacon.ts` (any unrecognized file already there is backed up first). The omp permission gate **fails closed** — while the omp extension is installed but the hub app is not running, gated `bash` calls are blocked ("Beacon hub unreachable"); start the hub, toggle omp's Coding buddy off in Settings, or delete the extension file to lift it.
 
 ## Day to day
 

@@ -98,7 +98,9 @@ final class ClaudeCodeProvider: AgentProvider {
             // Buddy toggled OFF: release every held prompt pass-through (no verdict => the harness falls
             // back to its own interactive prompt), never auto-deny because a toggle is off (spec).
             if wasBuddy && !caps.buddy {
-                for (id, _) in self.pending where !self.pending[id]!.done { self.releasePassthrough(id) }
+                for id in self.pending.filter({ !$0.value.done }).map(\.key) {
+                    self.releasePassthrough(id, reason: "buddy-off")
+                }
             }
         }
     }
@@ -149,10 +151,20 @@ final class ClaudeCodeProvider: AgentProvider {
         }
     }
 
-    // Mirror the BLE link state so an arriving prompt can be denied as "offline" instead of held
-    // invisibly until the cap. Safe to call from any thread.
+    // Mirror the BLE link state: an arriving prompt passes through instead of being held invisibly, and
+    // prompts already held when the link drops are released pass-through (they can no longer be
+    // answered on the device). Safe to call from any thread.
     func setDeviceConnected(_ connected: Bool) {
-        queue.async { [weak self] in self?.deviceConnected = connected }
+        queue.async { [weak self] in
+            guard let self else { return }
+            let wasConnected = self.deviceConnected
+            self.deviceConnected = connected
+            if wasConnected && !connected {
+                for id in self.pending.filter({ !$0.value.done }).map(\.key) {
+                    self.releasePassthrough(id, reason: "offline")
+                }
+            }
+        }
     }
 
     // --- reaper ---
@@ -231,13 +243,15 @@ final class ClaudeCodeProvider: AgentProvider {
             return
         }
 
-        // Device offline => the prompt can't be shown. Deny immediately (named) rather than hold it
-        // invisibly until the cap. Respond first, THEN raise the alert.
+        // Device offline => the prompt can't be shown. Pass through (no verdict) so Claude Code prompts
+        // on the Mac: "unreachable" is not a decision, and a deny would fail a tool call the user never
+        // saw. Respond first, THEN raise the alert (the buddy is not gating until the link is back).
         if !deviceConnected {
-            log(id: "-", decision: "auto-deny-offline")
-            respond(HookResponse.permission(event: event, allow: false, message: "Beacon device offline"), nil)
+            log(id: "-", decision: "offline-passthrough")
+            respond(HookResponse.permissionAsk(event: event), nil)
             let cb = onPromptUndeliverable
-            DispatchQueue.main.async { cb?("Beacon device offline") }
+            let label = descriptor.label
+            DispatchQueue.main.async { cb?("Beacon offline - \(label) not gated") }
             return
         }
 
@@ -245,7 +259,7 @@ final class ClaudeCodeProvider: AgentProvider {
                       registerClose: registerClose)
     }
 
-    // Test seam: drive the full permission path (offline-deny / buddy-off / AskUserQuestion / hold)
+    // Test seam: drive the full permission path (offline-passthrough / buddy-off / AskUserQuestion / hold)
     // without the Network/HTTP stack; `respond` captures the decision bytes.
     func handlePermissionForTest(body: [String: Any], respond: @escaping (Data, (() -> Void)?) -> Void) {
         queue.sync { self.permissionCore(body: body, respond: respond, registerClose: { _ in }) }
@@ -296,13 +310,14 @@ final class ClaudeCodeProvider: AgentProvider {
         emitEndPrompt(id)
     }
 
-    // Release a held prompt pass-through (buddy toggled off): no verdict, harness falls back to its UI.
-    private func releasePassthrough(_ id: String) {
+    // Release a held prompt pass-through (buddy toggled off, or the link dropped): no verdict, harness
+    // falls back to its own UI. `reason` only labels the log line.
+    private func releasePassthrough(_ id: String, reason: String) {
         guard let p = pending[id], !p.done else { return }
         p.done = true
         p.timeout.cancel()
         pending.removeValue(forKey: id)
-        log(id: id, decision: "buddy-off-release-passthrough")
+        log(id: id, decision: "\(reason)-release-passthrough")
         p.respond(HookResponse.permissionAsk(event: p.event), nil)
         emitEndPrompt(id)
     }

@@ -13,7 +13,7 @@
 1. **Evidence over assertion.** Risky/unknown → spike on real hardware before spec or build (`docs/spikes/`).
 2. **The device is peripheral.** Optimize for glanceability + a fast action. Latency and legibility beat richness.
 3. **Honest state, always.** Never render stale/guessed data as live. Every data path has loading/stale/offline/error states.
-4. **Fail safe, never hang.** Transport failure degrades the UI gracefully; never blocks the render loop. Permission decisions fail **closed** (deny).
+4. **Fail safe, never hang.** Transport failure degrades the UI gracefully; never blocks the render loop. A permission the device actually showed fails **closed** (deny on cap/quit); one it could never show (device offline) is handed back as **no verdict**, never a deny — the agent asks locally (`hub/CONTRACT.md` §D).
 5. **Secrets stay off the device** except a few scoped device-plane tokens (see §9 token-boundary table). Nothing secret in the repo.
 6. **Tokens, not forks.** UI = design tokens + a gauge-style selector; a new theme is data.
 7. **Black is free.** Pure-black backgrounds (AMOLED off-pixels) — aesthetic + power.

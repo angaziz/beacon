@@ -1,27 +1,35 @@
 import Foundation
 import BeaconHubKit
 
-// The Codex provider (design 2026-07-19). Usage comes from the existing ~/.codex/auth.json poller
-// (CodexUsageProvider, unchanged). The buddy plane (sessions + prompts) rides Codex's command-type
-// hooks, bridged through the beacon-codex-hook shim -> POST /codex/hook on the shared LocalIngestServer:
+// Generic hook-buddy provider (issue #136; generalized from the 2026-07-19 CodexProvider). Drives the
+// buddy plane (sessions + prompts) for any agent that POSTs the Claude/Codex-compatible hook shape to a
+// LocalIngestServer route. Two agents use it today: Codex (via the beacon-codex-hook shim -> /codex/hook,
+// with a ~/.codex/auth.json usage source) and omp (via the managed beacon.ts extension -> /omp/hook, no
+// usage source). Session lifecycle:
 //   SessionStart      => register session (label = cwd basename + git branch)
 //   UserPromptSubmit  => working
 //   Stop              => attention
 //   SessionEnd        => remove
-//   PermissionRequest => held open until the device decides (mirrors ClaudeCodeProvider), fail-closed
-//                        at a ~575s cap, strictly under the shim's 585s curl and Codex's 590s hook timeout.
+//   PermissionRequest => held open until the device decides (mirrors ClaudeCodeProvider), fail-closed at
+//                        `capSeconds`. The cap MUST fire before the caller's own deadline so the deny
+//                        reaches the still-open socket. Two timing chains, per instance:
+//                          Codex: hub 575 < curl --max-time 585 < Codex hook timeout 590
+//                          omp:   device 25 < hub 26 < extension fetch abort 28 < omp handler ceiling 30
 // Byte-compatible with the Claude decision shape via HookResponse. State is confined to the ingest
 // server's `queue`; sink calls hop to the main actor (where the mux lives). Logs only id + decision + ts.
-final class CodexProvider: AgentProvider {
-    static let hookPath = CodexHooks.routePath
+final class HookBuddyProvider: AgentProvider {
 
-    // Capabilities: usage (auth.json poll) + sessions + prompts (Codex hooks). The mux and per-provider
-    // toggles already support the full tier.
-    let descriptor = ProviderDescriptor(id: "codex", label: "CODEX",
-                                        capabilities: [.usage, .sessions, .prompts])
+    let descriptor: ProviderDescriptor
+    let usageSource: UsageProvider?      // nil => no usage capability (omp); Codex passes its poller
+
+    // A prompt couldn't be shown (device offline) => the app raises a menubar alert: the buddy is not
+    // gating this agent until the link is back. Under omp's default `yolo` approvalMode a pass-through
+    // means the tool simply runs, so this alert is the only signal the gate is absent.
+    var onPromptUndeliverable: ((String) -> Void)?
 
     private let server: LocalIngestServer
-    private let usageProvider: CodexUsageProvider
+    private let routePath: String        // ingest route this instance registers (e.g. /codex/hook)
+    private let capSeconds: TimeInterval  // fail-closed hold cap; MUST fire before the caller's deadline
     private weak var sink: ProviderSink?
     private var queue: DispatchQueue { server.queue }
 
@@ -43,24 +51,34 @@ final class CodexProvider: AgentProvider {
     private var nativeCounter: UInt32 = 0
     private var lastNativeId: String?
 
+    // Tap-to-open host context (issue #136 follow-up). Populated from the hook body's host_app/
+    // focus_url/bundle_id on SessionStart (the omp extension reads process.env; Codex sends none, so
+    // its focus stays a no-op). Queue-confined like `pending`. focusRunner is injectable for tests.
+    private let hosts = HostContextStore()
+    private var focusRunner: (FocusTarget) -> Bool = { SessionFocus.focus($0) }
+
     // Branch resolution (git) runs off-queue; results hop back and feed the mux as a .branch event.
     var branchResolverForTest: ((String) -> String?)?
     private var branchCache: [String: String] = [:]
     private var branchInFlight: [String: [String]] = [:]
-    private let gitQueue = DispatchQueue(label: "beacon.codex.git", qos: .utility)
+    private let gitQueue = DispatchQueue(label: "beacon.hookbuddy.git", qos: .utility)
 
     private static let isoStamp = ISO8601DateFormatter()
 
-    init(server: LocalIngestServer, usageSession: URLSession = .shared) {
+    init(descriptor: ProviderDescriptor, routePath: String, capSeconds: TimeInterval,
+         server: LocalIngestServer, usageSource: UsageProvider? = nil) {
+        self.descriptor = descriptor
+        self.routePath = routePath
+        self.capSeconds = capSeconds
         self.server = server
-        self.usageProvider = CodexUsageProvider(session: usageSession)
+        self.usageSource = usageSource
     }
 
     // --- AgentProvider ---
 
     func start(sink: ProviderSink) {
         self.sink = sink
-        server.register(path: Self.hookPath) { [weak self] req in self?.handleHook(req) }
+        server.register(path: routePath) { [weak self] req in self?.handleHook(req) }
     }
 
     func setEnabled(_ caps: EnabledCapabilities) {
@@ -71,7 +89,9 @@ final class CodexProvider: AgentProvider {
             // Buddy toggled OFF: release every held prompt pass-through (no verdict => Codex falls back
             // to its own TUI prompt); never auto-deny because a toggle is off (spec).
             if wasBuddy && !caps.buddy {
-                for id in self.pending.filter({ !$0.value.done }).map(\.key) { self.releasePassthrough(id) }
+                for id in self.pending.filter({ !$0.value.done }).map(\.key) {
+                    self.releasePassthrough(id, reason: "buddy-off")
+                }
             }
         }
     }
@@ -87,16 +107,33 @@ final class CodexProvider: AgentProvider {
         }
     }
 
-    // Codex hooks carry no host-context (no beacon-session equivalent), so tap-to-open is unsupported.
-    func focusSession(nativeKey: String) -> Bool { false }
+    // Tap-to-open: focus the terminal/editor that captured host context on SessionStart. Returns false
+    // when no context was captured (Codex sends none => no-op, preserving its prior behavior). Called
+    // off the main thread by AppDelegate (SessionFocus may briefly block on process launch).
+    func focusSession(nativeKey: String) -> Bool {
+        guard let host = queue.sync(execute: { hosts.host(for: nativeKey) }) else { return false }
+        return focusRunner(FocusTarget(hostApp: host.app, focusURL: host.focusURL,
+                                       bundleId: host.bundleId, cwd: host.cwd))
+    }
+    func setFocusRunnerForTest(_ f: @escaping (FocusTarget) -> Bool) { queue.sync { focusRunner = f } }
 
-    var usageSource: UsageProvider? { usageProvider }
-    // No poll gate: Codex has no statusline-equivalent liveness source, so it always polls when enabled.
+    // No poll gate: neither Codex nor omp has a statusline-equivalent liveness source, so they always
+    // poll when enabled (omp has no usageSource at all).
 
-    // Mirror the BLE link state so an arriving prompt can be denied as "offline" instead of held
-    // invisibly until the cap. Safe to call from any thread.
+    // Mirror the BLE link state: an arriving prompt passes through instead of being held invisibly, and
+    // prompts already held when the link drops are released pass-through (they can no longer be
+    // answered on the device). Safe to call from any thread.
     func setDeviceConnected(_ connected: Bool) {
-        queue.async { [weak self] in self?.deviceConnected = connected }
+        queue.async { [weak self] in
+            guard let self else { return }
+            let wasConnected = self.deviceConnected
+            self.deviceConnected = connected
+            if wasConnected && !connected {
+                for id in self.pending.filter({ !$0.value.done }).map(\.key) {
+                    self.releasePassthrough(id, reason: "offline")
+                }
+            }
+        }
     }
 
     // Quit drain (mirrors ClaudeCodeProvider / issue #16): deny every still-held prompt (fail-closed),
@@ -138,8 +175,8 @@ final class CodexProvider: AgentProvider {
     }
 
     // Connection-agnostic permission logic (split out so tests drive it without a socket). Mirrors
-    // ClaudeCodeProvider: fail-closed on quit/offline, pass-through on buddy-off, else hold for the
-    // device. All responses use the Codex-compatible HookResponse shapes ({} = no verdict).
+    // ClaudeCodeProvider: fail-closed on quit, pass-through on buddy-off or an unreachable device, else
+    // hold for the device. All responses use the Codex-compatible HookResponse shapes ({} = no verdict).
     private func permissionCore(body: [String: Any],
                                 respond: @escaping (Data, (() -> Void)?) -> Void,
                                 registerClose: (@escaping () -> Void) -> Void) {
@@ -155,11 +192,15 @@ final class CodexProvider: AgentProvider {
             respond(HookResponse.permissionAsk(event: "PermissionRequest"), nil)
             return
         }
-        // Device offline => the prompt can't be shown. Deny immediately (named) rather than hold it
-        // invisibly until the cap.
+        // Device offline => the prompt can't be shown. Pass through (no verdict): "unreachable" is not a
+        // decision, and a deny would fail a tool call the user never saw. Codex falls back to its own TUI
+        // prompt; omp (built-in approval already done) just runs -- hence the menubar alert.
         if !deviceConnected {
-            log(id: "-", decision: "auto-deny-offline")
-            respond(HookResponse.permission(event: "PermissionRequest", allow: false, message: "Beacon device offline"), nil)
+            log(id: "-", decision: "offline-passthrough")
+            respond(HookResponse.permissionAsk(event: "PermissionRequest"), nil)
+            let cb = onPromptUndeliverable
+            let label = descriptor.label
+            DispatchQueue.main.async { cb?("Beacon offline - \(label) not gated") }
             return
         }
         enqueuePrompt(body: body, respond: respond, registerClose: registerClose)
@@ -174,11 +215,11 @@ final class CodexProvider: AgentProvider {
         let nativeID = mintNativeId()
         lastNativeId = nativeID
         let cap = DispatchSource.makeTimerSource(queue: queue)
-        // Fail-closed cap. STRICT ordering invariant: hub cap 575 < curl --max-time 585 < Codex hook
-        // timeout 590. The hub MUST fire first so its deny reaches the still-open socket; if the cap
-        // equaled the curl budget the socket would already be dead at the cap and Codex would degrade to
-        // fail-open passthrough (curl's clock starts before the hub even receives the request).
-        cap.schedule(deadline: .now() + 575)
+        // Fail-closed cap. STRICT ordering invariant: the hub cap MUST fire before the caller's own
+        // deadline so its deny reaches the still-open socket (Codex: 575 < curl 585 < hook 590; omp:
+        // 26 < fetch abort 28 < handler ceiling 30). If the cap equaled the caller's budget the socket
+        // would already be dead at the cap and the caller would degrade to fail-open passthrough.
+        cap.schedule(deadline: .now() + capSeconds)
         cap.setEventHandler { [weak self] in self?.finish(id: nativeID, approve: false, capped: true) }
         pending[nativeID] = Pending(respond: respond, timeout: cap)
         cap.resume()
@@ -200,13 +241,14 @@ final class CodexProvider: AgentProvider {
         emitEndPrompt(id)
     }
 
-    // Release a held prompt pass-through (buddy toggled off): no verdict, Codex falls back to its TUI.
-    private func releasePassthrough(_ id: String) {
+    // Release a held prompt pass-through (buddy toggled off, or the link dropped): no verdict, the agent
+    // falls back to its own TUI prompt. `reason` only labels the log line.
+    private func releasePassthrough(_ id: String, reason: String) {
         guard let p = pending[id], !p.done else { return }
         p.done = true
         p.timeout.cancel()
         pending.removeValue(forKey: id)
-        log(id: id, decision: "buddy-off-release-passthrough")
+        log(id: id, decision: "\(reason)-release-passthrough")
         p.respond(HookResponse.permissionAsk(event: "PermissionRequest"), nil)
         emitEndPrompt(id)
     }
@@ -233,15 +275,27 @@ final class CodexProvider: AgentProvider {
             emitSession(.stop(nativeKey: sid, cwd: cwd)); ensureBranch(sessionId: sid, cwd: cwd)
         case "SessionEnd":
             branchCache.removeValue(forKey: cwd ?? "")
+            hosts.remove(key: sid)
             emitSession(.end(nativeKey: sid))
         default:   // SessionStart + UserPromptSubmit: activity establishes/keeps the session working.
+            // SessionStart carries tap-to-open host context (omp reads process.env; merge keeps prior
+            // non-empty values so a later UserPromptSubmit without env can't wipe them).
+            hosts.set(key: sid, app: body["host_app"] as? String, focusURL: body["focus_url"] as? String,
+                      bundleId: body["bundle_id"] as? String, cwd: cwd)
             emitSession(.activity(nativeKey: sid, cwd: cwd)); ensureBranch(sessionId: sid, cwd: cwd)
         }
     }
 
     // Test seam: drive the session path without the Network/HTTP stack.
-    func applySessionHookForTest(event: String, sessionId: String, cwd: String) {
-        queue.sync { self.applySessionHook(event: event, body: ["session_id": sessionId, "cwd": cwd, "hook_event_name": event]) }
+    func applySessionHookForTest(event: String, sessionId: String, cwd: String,
+                                 hostApp: String? = nil, focusURL: String? = nil, bundleId: String? = nil) {
+        queue.sync {
+            var body: [String: Any] = ["session_id": sessionId, "cwd": cwd, "hook_event_name": event]
+            if let hostApp { body["host_app"] = hostApp }
+            if let focusURL { body["focus_url"] = focusURL }
+            if let bundleId { body["bundle_id"] = bundleId }
+            self.applySessionHook(event: event, body: body)
+        }
     }
 
     // Test seams for the permission path (mirrors ClaudeCodeProvider's).
@@ -311,7 +365,7 @@ final class CodexProvider: AgentProvider {
 
     private func log(id: String, decision: String) {
         let ts = Self.isoStamp.string(from: Date())
-        FileHandle.standardError.write(Data("[beacon-hub] codex-perm id=\(id) decision=\(decision) at=\(ts)\n".utf8))
+        FileHandle.standardError.write(Data("[beacon-hub] \(descriptor.id)-perm id=\(id) decision=\(decision) at=\(ts)\n".utf8))
     }
 
     private static func commandHint(from input: Any?) -> String? {

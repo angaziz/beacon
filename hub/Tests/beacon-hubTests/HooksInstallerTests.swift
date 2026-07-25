@@ -1,4 +1,5 @@
 import XCTest
+import BeaconHubKit
 @testable import beacon_hub
 
 // Codex config install internals: the canonical [hooks.state] key derivation and the symlink-preserving
@@ -84,5 +85,65 @@ final class HooksInstallerTests: XCTestCase {
         XCTAssertEqual(mode?.int16Value, 0o600, "preserves the existing file mode")
         let leftover = try fm.contentsOfDirectory(atPath: tmp.path).filter { $0.contains("config.toml.beacon.") }
         XCTAssertTrue(leftover.isEmpty, "temp file renamed away, none left behind")
+    }
+
+    // --- installOmp / isOmpInstalled (file IO) ---
+
+    private func ompPath() -> String { tmp.appendingPathComponent("beacon.ts").path }
+
+    // Fresh install writes content that detection accepts as current.
+    func testInstallOmpFreshWritesCurrent() throws {
+        let path = ompPath()
+        XCTAssertFalse(HooksInstaller.isOmpInstalled(extensionPath: path), "missing file => not installed")
+        try HooksInstaller.installOmp(extensionPath: path)
+        XCTAssertTrue(HooksInstaller.isOmpInstalled(extensionPath: path))
+        XCTAssertEqual(try String(contentsOfFile: path, encoding: .utf8), OmpHooks.extensionSource)
+    }
+
+    // Detection is exact-content: truncated and version-bumped variants read as NOT current.
+    func testIsOmpInstalledRejectsStale() throws {
+        let path = ompPath()
+        try String(OmpHooks.extensionSource.dropLast(80)).write(toFile: path, atomically: true, encoding: .utf8)
+        XCTAssertFalse(HooksInstaller.isOmpInstalled(extensionPath: path), "truncated => not current")
+        try OmpHooks.extensionSource.replacingOccurrences(of: "beacon-omp v3", with: "beacon-omp v30")
+            .write(toFile: path, atomically: true, encoding: .utf8)
+        XCTAssertFalse(HooksInstaller.isOmpInstalled(extensionPath: path), "v30 => not current")
+    }
+
+    // Install over an unrecognized file backs up the prior bytes and writes current content.
+    func testInstallOmpBacksUpUnrecognized() throws {
+        let fm = FileManager.default
+        let path = ompPath()
+        try "// my own extension\n".write(toFile: path, atomically: true, encoding: .utf8)
+        try HooksInstaller.installOmp(extensionPath: path)
+        XCTAssertTrue(HooksInstaller.isOmpInstalled(extensionPath: path))
+        let backups = try fm.contentsOfDirectory(atPath: tmp.path).filter { $0.hasPrefix("beacon.ts.bak-") }
+        XCTAssertEqual(backups.count, 1, "one timestamped backup of the prior file")
+        let saved = try String(contentsOfFile: tmp.appendingPathComponent(backups[0]).path, encoding: .utf8)
+        XCTAssertEqual(saved, "// my own extension\n", "backup preserves prior bytes")
+    }
+
+    // Install over an already-current file is a no-op: content unchanged, no backup made.
+    func testInstallOmpIdempotentNoOp() throws {
+        let fm = FileManager.default
+        let path = ompPath()
+        try HooksInstaller.installOmp(extensionPath: path)
+        try HooksInstaller.installOmp(extensionPath: path)   // second install
+        let backups = try fm.contentsOfDirectory(atPath: tmp.path).filter { $0.hasPrefix("beacon.ts.bak-") }
+        XCTAssertTrue(backups.isEmpty, "current file left untouched, no backup")
+        XCTAssertEqual(try String(contentsOfFile: path, encoding: .utf8), OmpHooks.extensionSource)
+    }
+
+    // Install through a symlinked beacon.ts keeps the symlink and updates its target.
+    func testInstallOmpPreservesSymlink() throws {
+        let fm = FileManager.default
+        let real = tmp.appendingPathComponent("real-beacon.ts")
+        let link = tmp.appendingPathComponent("beacon.ts")
+        try "// old\n".write(to: real, atomically: true, encoding: .utf8)
+        try fm.createSymbolicLink(at: link, withDestinationURL: real)
+        try HooksInstaller.installOmp(extensionPath: link.path)
+        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: link.path), real.path,
+                       "beacon.ts stays a symlink pointing at its target")
+        XCTAssertEqual(try String(contentsOf: real, encoding: .utf8), OmpHooks.extensionSource)
     }
 }
