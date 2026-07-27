@@ -7,14 +7,39 @@ final class OmpHooksTests: XCTestCase {
 
     func testExtensionSourceCarriesWireContract() {
         let src = OmpHooks.extensionSource
-        XCTAssertTrue(src.hasPrefix("// beacon-omp v3"), "marker must be on line 1")
+        XCTAssertTrue(src.hasPrefix("// beacon-omp v4"), "marker must be on line 1")
         XCTAssertTrue(src.contains("http://127.0.0.1:8765/omp/hook"))
-        XCTAssertTrue(src.contains("\"PermissionRequest\""))
-        XCTAssertTrue(src.contains("GATED_TOOLS = new Set([\"bash\"])"))
         XCTAssertTrue(src.contains("TERM_PROGRAM"), "captures host app for tap-to-open")
         XCTAssertTrue(src.contains("WARP_FOCUS_URL"), "captures Warp focus handle")
-        XCTAssertTrue(src.contains("if (!ctx.hasUI || !sessionId"),
-                      "tool_call must gate on ctx.hasUI, not just the cached session id (subagents share it)")
+        XCTAssertTrue(src.contains("lifecycle(\"Notification\")"), "approval prompt => question state")
+        XCTAssertTrue(src.contains("lifecycle(\"ApprovalResolved\")"), "answered prompt clears question")
+    }
+
+    // v4 mirrors approvals instead of gating them: omp settles approval before extensions see
+    // `tool_call`, so a gate there would double-prompt (Mac then device) or fire under `yolo`, which
+    // told omp not to ask at all. Nothing in the source may block a tool or send a PermissionRequest.
+    func testExtensionNeverGatesToolCalls() {
+        let src = OmpHooks.extensionSource
+        // Code forms, not bare words: the source comments legitimately explain why the v3 tool_call
+        // gate and its PermissionRequest POST are gone, so a substring match would flag its own rationale.
+        for forbidden in ["pi.on(\"tool_call\"", "hook_event_name: \"PermissionRequest\"",
+                          "GATED_TOOLS", "block: true"] {
+            XCTAssertFalse(src.contains(forbidden), "v4 must not emit \(forbidden)")
+        }
+    }
+
+    // Both approval mirrors re-check ctx.hasUI: a task subagent runs inside an already-bound
+    // interactive session, so the cached sessionId alone cannot exclude it.
+    func testApprovalMirrorsGuardOnHasUI() {
+        let src = OmpHooks.extensionSource
+        let mirrors = ["tool_approval_requested", "tool_approval_resolved"]
+        for event in mirrors {
+            guard let r = src.range(of: "pi.on(\"\(event)\"") else {
+                return XCTFail("missing handler for \(event)")
+            }
+            let body = src[r.upperBound...].prefix(120)
+            XCTAssertTrue(body.contains("if (!ctx.hasUI) return;"), "\(event) must guard on ctx.hasUI")
+        }
     }
 
     func testIsCurrent() {
@@ -26,7 +51,7 @@ final class OmpHooksTests: XCTestCase {
             ("empty", "", false),
             ("truncated", String(src.dropLast(100)), false),
             ("one char flipped", flipOneChar(src), false),
-            ("v30 marker variant", src.replacingOccurrences(of: "beacon-omp v3", with: "beacon-omp v30"), false),
+            ("v40 marker variant", src.replacingOccurrences(of: "beacon-omp v4", with: "beacon-omp v40"), false),
             ("unrelated content", "export default function () {}", false),
         ]
         for c in cases {

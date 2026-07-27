@@ -25,16 +25,14 @@ public enum OmpHooks {
     }
 
     // The managed omp extension. This IS the wire contract with the hub's HookBuddyProvider on
-    // /omp/hook: request {hook_event_name, session_id, cwd, tool_name, tool_input}; response is the
-    // HookResponse.permission shape ({} = passthrough). Timing chain (all under omp's 30s tool_call
-    // handler ceiling, which itself blocks the tool on timeout): device 25s < hub 26s cap < fetch
-    // abort 28s. Every transport/protocol failure fails closed (docs/tech.md §1).
+    // /omp/hook: request {hook_event_name, session_id, cwd}. Every v4 event is fire-and-forget and the
+    // hub answers {"ok":true} -- v4 sends no PermissionRequest, so nothing here can block a tool call
+    // (CONTRACT.md §C.6 records why omp cannot gate the way the Claude/Codex hooks do).
     public static let extensionSource: String = #"""
-// beacon-omp v3 -- managed by Beacon hub; do not edit (reinstall overwrites).
+// beacon-omp v4 -- managed by Beacon hub; do not edit (reinstall overwrites).
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
 const HUB = "http://127.0.0.1:8765/omp/hook";
-const GATED_TOOLS = new Set(["bash"]);
 
 export default function beacon(pi: ExtensionAPI) {
   pi.setLabel("Beacon Buddy");
@@ -57,8 +55,8 @@ export default function beacon(pi: ExtensionAPI) {
   // (Re)bind identity on start/switch/branch: omp emits session_switch for new/resumed/forked
   // sessions and session_branch after branching; binding only on session_start would pin later
   // activity to a dead id. hasUI=false covers print mode AND task subagents: skip lifecycle binding
-  // for those here, but tool_call below MUST re-check ctx.hasUI independently -- a subagent runs
-  // inside an already-bound interactive session, so the cached sessionId alone can't tell them apart.
+  // for those here, but the approval mirrors below MUST re-check ctx.hasUI independently -- a subagent
+  // runs inside an already-bound interactive session, so a cached sessionId alone can't tell them apart.
   const beginSession = (ctx: { hasUI: boolean; cwd: string; sessionManager: { getSessionId(): string | undefined } }) => {
     if (!ctx.hasUI) return;
     const prev = sessionId;
@@ -90,31 +88,20 @@ export default function beacon(pi: ExtensionAPI) {
   // omp waits <=2s for shutdown handlers; awaiting a bounded POST gets SessionEnd out before exit.
   pi.on("session_shutdown", async () => { await lifecycle("SessionEnd", 1_500); });
 
-  pi.on("tool_call", async (event, ctx) => {
-    if (!ctx.hasUI || !sessionId || !GATED_TOOLS.has(event.toolName)) return;
-    const deny = (reason: string) => ({ block: true, reason });
-    let res: Response;
-    try {
-      // 28s abort > hub 26s fail-closed cap > device 25s prompt timeout, all under omp's
-      // 30s tool_call handler ceiling (which itself blocks on timeout).
-      res = await post({
-        hook_event_name: "PermissionRequest",
-        tool_name: event.toolName,
-        tool_input: event.input,
-      }, 28_000);
-    } catch {
-      return deny("Beacon hub unreachable"); // fail closed (docs/tech.md §1)
-    }
-    if (!res.ok) return deny(`Beacon hub error (HTTP ${res.status})`);
-    try {
-      const json = await res.json() as { hookSpecificOutput?: { decision?: { behavior?: string; message?: string } } };
-      const decision = json?.hookSpecificOutput?.decision;
-      if (!decision) return; // {} = hub's explicit buddy-off/ask passthrough
-      if (decision.behavior === "allow") return;
-      return deny(decision.message ?? "Denied on Beacon device"); // deny AND any unknown behavior
-    } catch {
-      return deny("Beacon hub returned an unreadable decision");
-    }
+  // Approval MIRRORING, not gating (v4). omp resolves tool approval BEFORE extensions see `tool_call`,
+  // `tool_approval_requested` is notify-only (the runner discards its return value), and the approval
+  // prompt's UI context is mode-owned -- so an extension cannot answer omp's prompt the way the
+  // Claude/Codex PermissionRequest hooks answer theirs. Blocking `tool_call` anyway would either
+  // double-prompt (Mac first, then device) or gate exactly what `yolo` told omp not to ask about.
+  // So Beacon mirrors the wait instead: the device shows that session as `question` and tap-to-open
+  // focuses its terminal, and the user answers where omp is actually asking.
+  pi.on("tool_approval_requested", async (_e, ctx) => {
+    if (!ctx.hasUI) return;
+    void lifecycle("Notification");
+  });
+  pi.on("tool_approval_resolved", async (_e, ctx) => {
+    if (!ctx.hasUI) return;
+    void lifecycle("ApprovalResolved");
   });
 }
 """#
