@@ -269,15 +269,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         codex.onPromptUndeliverable = undeliverable
         self.codex = codex
 
-        // omp: buddy plane only (no usage entry -- omp quota reports duplicate Claude/Codex). Fed by the
-        // managed beacon.ts extension -> /omp/hook. Cap 26s: device 25 < hub 26 < fetch 28 < omp 30.
+        // omp: sessions plane only. No usage entry (omp quota reports duplicate Claude/Codex) and no
+        // .prompts -- omp resolves tool approval before an extension can answer it, so the buddy mirrors
+        // the wait as a `question` session instead of gating (CONTRACT.md §C.6). capSeconds is inert
+        // without .prompts: this provider never holds a request, so it never needs an undeliverable alert.
         let omp = HookBuddyProvider(
             descriptor: ProviderDescriptor(id: "omp", label: "OMP",
-                                           capabilities: [.sessions, .prompts]),
+                                           capabilities: [.sessions]),
             routePath: OmpHooks.routePath,
             capSeconds: 26,
             server: ingest)
-        omp.onPromptUndeliverable = undeliverable
         self.omp = omp
         providers = [claude, codex, omp]
 

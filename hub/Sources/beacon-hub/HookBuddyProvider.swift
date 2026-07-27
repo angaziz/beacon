@@ -157,15 +157,9 @@ final class HookBuddyProvider: AgentProvider {
 
     private func handleHook(_ req: LocalIngestServer.Request) {
         let event = (req.body["hook_event_name"] as? String) ?? ""
-        switch event {
-        case "PermissionRequest":
-            handlePermission(req)
-        case "SessionStart", "UserPromptSubmit", "Stop", "SessionEnd":
-            applySessionHook(event: event, body: req.body)
-            req.respondJSON(["ok": true])
-        default:
-            req.respondJSON(["ok": true])
-        }
+        if event == "PermissionRequest" { return handlePermission(req) }
+        if let kind = SessionHookKind(hookEvent: event) { applySessionHook(kind, body: req.body) }
+        req.respondJSON(["ok": true])
     }
 
     private func handlePermission(_ req: LocalIngestServer.Request) {
@@ -175,11 +169,21 @@ final class HookBuddyProvider: AgentProvider {
     }
 
     // Connection-agnostic permission logic (split out so tests drive it without a socket). Mirrors
-    // ClaudeCodeProvider: fail-closed on quit, pass-through on buddy-off or an unreachable device, else
-    // hold for the device. All responses use the Codex-compatible HookResponse shapes ({} = no verdict).
+    // ClaudeCodeProvider: pass-through when this provider does not gate prompts, fail-closed on quit,
+    // pass-through on buddy-off or an unreachable device, else hold for the device. All responses use
+    // the Codex-compatible HookResponse shapes ({} = no verdict).
     private func permissionCore(body: [String: Any],
                                 respond: @escaping (Data, (() -> Void)?) -> Void,
                                 registerClose: (@escaping () -> Void) -> Void) {
+        // Provider without the .prompts capability (omp since v4): it must never hold a tool call. A
+        // stale v3 extension still POSTing PermissionRequest reads {} as passthrough, so it stops
+        // gating immediately rather than at the next reinstall. Checked before `terminating`: a
+        // non-gating provider has nothing to fail closed.
+        if !descriptor.capabilities.contains(.prompts) {
+            log(id: "-", decision: "no-prompt-capability-passthrough")
+            respond(HookResponse.permissionAsk(event: "PermissionRequest"), nil)
+            return
+        }
         // Quitting => deny any prompt landing in the drain window immediately (never held).
         if terminating {
             log(id: "-", decision: "auto-deny-quit")
@@ -266,18 +270,37 @@ final class HookBuddyProvider: AgentProvider {
 
     // --- session lifecycle ---
 
-    private func applySessionHook(event: String, body: [String: Any]) {
+    // Hook event -> registry transition. This init IS the routed-event allowlist: handleHook forwards
+    // exactly the events it recognizes, so a new event can never half-land (routed but unmapped, or
+    // mapped but unrouted). Unknown events are acknowledged and ignored.
+    enum SessionHookKind {
+        case activity, stop, needsInput, end
+        init?(hookEvent: String) {
+            switch hookEvent {
+            case "SessionStart", "UserPromptSubmit": self = .activity
+            case "ApprovalResolved":                 self = .activity   // omp: approval answered => working
+            case "Notification":                     self = .needsInput // omp: prompt on screen on the Mac
+            case "Stop":                             self = .stop
+            case "SessionEnd":                       self = .end
+            default:                                 return nil
+            }
+        }
+    }
+
+    private func applySessionHook(_ kind: SessionHookKind, body: [String: Any]) {
         let sid = (body["session_id"] as? String) ?? ""
         guard !sid.isEmpty else { return }
         let cwd = body["cwd"] as? String
-        switch event {
-        case "Stop":
+        switch kind {
+        case .stop:
             emitSession(.stop(nativeKey: sid, cwd: cwd)); ensureBranch(sessionId: sid, cwd: cwd)
-        case "SessionEnd":
+        case .end:
             branchCache.removeValue(forKey: cwd ?? "")
             hosts.remove(key: sid)
             emitSession(.end(nativeKey: sid))
-        default:   // SessionStart + UserPromptSubmit: activity establishes/keeps the session working.
+        case .needsInput:
+            emitSession(.needsInput(nativeKey: sid, cwd: cwd)); ensureBranch(sessionId: sid, cwd: cwd)
+        case .activity:
             // SessionStart carries tap-to-open host context (omp reads process.env; merge keeps prior
             // non-empty values so a later UserPromptSubmit without env can't wipe them).
             hosts.set(key: sid, app: body["host_app"] as? String, focusURL: body["focus_url"] as? String,
@@ -286,16 +309,22 @@ final class HookBuddyProvider: AgentProvider {
         }
     }
 
-    // Test seam: drive the session path without the Network/HTTP stack.
+    // Test seam: drive the session path without the Network/HTTP stack. Takes the wire event name and
+    // resolves it through SessionHookKind, so a test also exercises the routed-event allowlist; an
+    // unroutable event returns false rather than silently doing nothing.
+    @discardableResult
     func applySessionHookForTest(event: String, sessionId: String, cwd: String,
-                                 hostApp: String? = nil, focusURL: String? = nil, bundleId: String? = nil) {
+                                 hostApp: String? = nil, focusURL: String? = nil,
+                                 bundleId: String? = nil) -> Bool {
+        guard let kind = SessionHookKind(hookEvent: event) else { return false }
         queue.sync {
             var body: [String: Any] = ["session_id": sessionId, "cwd": cwd, "hook_event_name": event]
             if let hostApp { body["host_app"] = hostApp }
             if let focusURL { body["focus_url"] = focusURL }
             if let bundleId { body["bundle_id"] = bundleId }
-            self.applySessionHook(event: event, body: body)
+            self.applySessionHook(kind, body: body)
         }
+        return true
     }
 
     // Test seams for the permission path (mirrors ClaudeCodeProvider's).

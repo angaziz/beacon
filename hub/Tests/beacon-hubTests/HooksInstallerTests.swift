@@ -105,9 +105,9 @@ final class HooksInstallerTests: XCTestCase {
         let path = ompPath()
         try String(OmpHooks.extensionSource.dropLast(80)).write(toFile: path, atomically: true, encoding: .utf8)
         XCTAssertFalse(HooksInstaller.isOmpInstalled(extensionPath: path), "truncated => not current")
-        try OmpHooks.extensionSource.replacingOccurrences(of: "beacon-omp v3", with: "beacon-omp v30")
+        try OmpHooks.extensionSource.replacingOccurrences(of: "beacon-omp v4", with: "beacon-omp v40")
             .write(toFile: path, atomically: true, encoding: .utf8)
-        XCTAssertFalse(HooksInstaller.isOmpInstalled(extensionPath: path), "v30 => not current")
+        XCTAssertFalse(HooksInstaller.isOmpInstalled(extensionPath: path), "v40 => not current")
     }
 
     // Install over an unrecognized file backs up the prior bytes and writes current content.
