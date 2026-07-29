@@ -28,9 +28,11 @@ case "$input" in
     # dead hub from stalling; --max-time sits between the hub's 590s fail-closed cap and CC's 600s hook
     # timeout, so the hub's deny always lands while the socket is still open. On any curl failure the
     # command substitution yields empty output -> we print nothing -> CC prompts locally (fail-open).
+    # --fail extends that to non-2xx (CONTRACT.md C.3): another service squatting on the port could
+    # answer 4xx/5xx with a body, and forwarding that as a decision would gate on a stranger's output.
     # Payload is piped (--data-binary @-), never argv: a large tool_input would blow past ARG_MAX and
     # silently fail-open an otherwise real PermissionRequest.
-    resp="$(printf '%s' "$input" | curl -s --connect-timeout 2 --max-time 595 -X POST "$url" \
+    resp="$(printf '%s' "$input" | curl -sf --connect-timeout 2 --max-time 595 -X POST "$url" \
       -H 'Content-Type: application/json' --data-binary @- 2>/dev/null)" || resp=""
     [ -n "$resp" ] && printf '%s' "$resp"
     exit 0

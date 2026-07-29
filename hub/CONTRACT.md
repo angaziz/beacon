@@ -421,10 +421,13 @@ Settings offers reinstall.
   hooks are detected (a green **Ready** once installed); it runs only
   that provider's install (`HooksInstaller.install(providerID:)` — Claude shells out to
   `build-app.sh install-hooks` and installs the statusline shim to the no-space path
-  `~/.beacon/beacon-statusline`; Codex writes its managed `~/.codex/config.toml` block; omp writes its
-  managed extension `~/.omp/agent/extensions/beacon.ts`, backing up any unrecognized file already there).
-  Claude detection requires BOTH the `PermissionRequest` hook (`url=http://127.0.0.1:8765/hook`) AND a
-  `statusLine.command` containing the shim — not any beacon URL anywhere. Replaces hand-editing
+  `~/.beacon/beacon-statusline` + the hook shim to `~/.beacon/beacon-claude-hook`; Codex writes its
+  managed `~/.codex/config.toml` block; omp writes its managed extension
+  `~/.omp/agent/extensions/beacon.ts`, backing up any unrecognized file already there).
+  Claude detection requires BOTH the `PermissionRequest` hook (`command` == the installed
+  `~/.beacon/beacon-claude-hook`, exact match) AND a `statusLine.command` containing the statusline
+  shim — not any beacon hook anywhere. A legacy `url=http://127.0.0.1:8765/hook` hook reads as NOT
+  installed, so the chip offers the reinstall that migrates it (§C.3). Replaces hand-editing
   `~/.claude/settings.json` and the separate first-run/forget windows.
 - **Login item (#16):** `SMAppService.mainApp`, toggled by the menu **Start at login**. The menu reflects the
   REAL registration state (re-read on every menu open), and `.requiresApproval` is surfaced honestly
