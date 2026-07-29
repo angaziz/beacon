@@ -212,7 +212,15 @@ from the endpoint's `*_window` (they are null until a window is hit), so a futur
 normalizer, not `UsageNormalizer.codex`.
 
 ### C.3 Claude Code permission hook (`PermissionRequest`, primary; `PreToolUse`, back-compat) — CONFIRMED (CC v2.1.x docs)
-Claude Code supports native **`"type":"http"`** hooks (no curl forwarder needed). `PreToolUse` and
+Claude Code supports native **`"type":"http"`** hooks, but Beacon does **not** use them: CC reports an
+unreachable http hook as a per-event error line (`... hook [http://127.0.0.1:8765/hook] failed: connect
+ECONNREFUSED`), which is noise on every event whenever the hub is not running. All Beacon events go
+through a `type:"command"` shim, `~/.beacon/beacon-claude-hook` (installed alongside the statusline
+shim), which curls the same endpoint and always exits 0 — an unreachable hub is silent. Same
+stdin/stdout contract as `beacon-codex-hook` (§C.5): CC spawns the shim with the event JSON on stdin and
+reads the decision from stdout; empty stdout = no verdict (fail-open to CC's own prompt). Timers are
+ordered `hub 590 < curl 595 < CC hook timeout 600` so the hub's fail-closed deny always lands while the
+socket is open. Lifecycle events are fire-and-forget (`curl -m 1`). `PreToolUse` and
 `PermissionRequest` are **distinct** events, and **`PermissionRequest` is the one Beacon hooks**:
 `PreToolUse` fires on **every** tool call, so holding it open ~590 s would block routine `Read`/`Grep`
 (and a narrow matcher like `Bash` misses `Write`/`Edit`); `PermissionRequest` fires **only when a tool
@@ -242,12 +250,13 @@ one silently fails to gate the tool:
 // interactive prompt.
 {}
 ```
-HTTP 2xx + body, no outer envelope. Hook `timeout` is in **seconds** (config: 600 to cover the
-~590 s hold). Non-2xx/timeout = **non-blocking (CC proceeds, fail-OPEN)** -- so the hub MUST return
-`deny` within the hold window; never let it hang.
+HTTP 2xx + body, no outer envelope; the shim prints that body verbatim on stdout. Hook `timeout` is in
+**seconds** (config: 600 to cover the ~590 s hold). Non-2xx/timeout/hub down = **non-blocking (CC
+proceeds, fail-OPEN)** -- so the hub MUST return `deny` within the hold window; never let it hang.
 
 ### C.4 Session / statusline — CONFIRMED (CC v2.1.x docs)
-`SessionStart`(matcher startup/resume/clear/compact)/`Stop`/`Notification`/`SessionEnd` http hooks =>
+`SessionStart`(matcher startup/resume/clear/compact)/`Stop`/`Notification`/`SessionEnd` hooks (through
+the `beacon-claude-hook` shim, §C.3) =>
 buddy idle. Stop body has `stop_reason`; Notification has `message`; SessionEnd carries `session_id`
 (clean per-session removal). **Statusline** (`statusLine` = `type:command`)
 receives JSON with `session_id` (per-session TOK/CTX aggregation key), `cwd` (attribution basename),
@@ -412,10 +421,13 @@ Settings offers reinstall.
   hooks are detected (a green **Ready** once installed); it runs only
   that provider's install (`HooksInstaller.install(providerID:)` — Claude shells out to
   `build-app.sh install-hooks` and installs the statusline shim to the no-space path
-  `~/.beacon/beacon-statusline`; Codex writes its managed `~/.codex/config.toml` block; omp writes its
-  managed extension `~/.omp/agent/extensions/beacon.ts`, backing up any unrecognized file already there).
-  Claude detection requires BOTH the `PermissionRequest` hook (`url=http://127.0.0.1:8765/hook`) AND a
-  `statusLine.command` containing the shim — not any beacon URL anywhere. Replaces hand-editing
+  `~/.beacon/beacon-statusline` + the hook shim to `~/.beacon/beacon-claude-hook`; Codex writes its
+  managed `~/.codex/config.toml` block; omp writes its managed extension
+  `~/.omp/agent/extensions/beacon.ts`, backing up any unrecognized file already there).
+  Claude detection requires BOTH the `PermissionRequest` hook (`command` == the installed
+  `~/.beacon/beacon-claude-hook`, exact match) AND a `statusLine.command` containing the statusline
+  shim — not any beacon hook anywhere. A legacy `url=http://127.0.0.1:8765/hook` hook reads as NOT
+  installed, so the chip offers the reinstall that migrates it (§C.3). Replaces hand-editing
   `~/.claude/settings.json` and the separate first-run/forget windows.
 - **Login item (#16):** `SMAppService.mainApp`, toggled by the menu **Start at login**. The menu reflects the
   REAL registration state (re-read on every menu open), and `.requiresApproval` is surfaced honestly

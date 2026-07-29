@@ -38,10 +38,10 @@ The **Set up Beacon** window walks three checks:
 
 What the hooks actually do:
 
-- The hook entries POST Claude Code lifecycle events (session state, tool-permission prompts) to the hub at `127.0.0.1:8765` — see [`claude-code-settings.snippet.json`](claude-code-settings.snippet.json).
+- The hook entries run the hook shim ([`statusline-shim/beacon-claude-hook`](statusline-shim/beacon-claude-hook), installed to `~/.beacon/`), which POSTs Claude Code lifecycle events (session state, tool-permission prompts) to the hub at `127.0.0.1:8765` — see [`claude-code-settings.snippet.json`](claude-code-settings.snippet.json). When the hub is not running the shim exits silently, so Claude Code prints nothing (a plain `type: http` hook would report `connect ECONNREFUSED` on every event).
 - The statusline shim ([`statusline-shim/beacon-statusline`](statusline-shim/beacon-statusline), installed to `~/.beacon/`) forwards the `rate_limits` payload Claude Code already computes, which is where the usage numbers come from.
 
-For **Codex** and **omp**, use the per-provider **Set up** chip in Settings instead of **Install hooks** (that button is Claude-only): Codex gets a managed block in `~/.codex/config.toml`; omp gets a managed extension at `~/.omp/agent/extensions/beacon.ts` (any unrecognized file already there is backed up first). The omp permission gate **fails closed** — while the omp extension is installed but the hub app is not running, gated `bash` calls are blocked ("Beacon hub unreachable"); start the hub, toggle omp's Coding buddy off in Settings, or delete the extension file to lift it.
+For **Codex** and **omp**, use the per-provider **Set up** chip in Settings instead of **Install hooks** (that button is Claude-only): Codex gets a managed block in `~/.codex/config.toml`; omp gets a managed extension at `~/.omp/agent/extensions/beacon.ts` (any unrecognized file already there is backed up first). Both shim and extension fail open and stay quiet when the hub is not running: Codex and omp never block, and neither prints a connection error.
 
 ## Day to day
 

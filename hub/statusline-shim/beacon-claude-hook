@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Beacon Claude Code hook shim. Replaces the `type: http` hooks that pointed straight at the hub:
+# Claude Code reports an unreachable http hook as a per-event error line ("... hook [http://127.0.0.1:8765/hook]
+# failed: connect ECONNREFUSED"), which is noise every time the hub is not running. A command hook that
+# exits 0 with empty stdout is silent, so we curl the hub ourselves and swallow the failure.
+#
+# Wired into ~/.claude/settings.json by the installer (PermissionRequest + SessionStart/Stop/Notification/
+# SessionEnd). PermissionRequest is synchronous -- the hub HOLDS the connection until the device decides --
+# so it gets a long curl budget; lifecycle events are fire-and-forget with a 1s cap so a stopped hub never
+# stalls Claude Code. Mirrors beacon-codex-hook; the stdin/stdout contract is the same on both sides.
+#
+# FAIL-OPEN: if the hub is unreachable (not running / connection refused / timeout), print NOTHING and
+# exit 0. Empty stdout is "no verdict" to Claude Code, so it falls through to its own interactive prompt.
+
+input="$(</dev/stdin)"   # builtin slurp; no `cat` fork on the hot path
+
+# Fixed port 8765 (LocalIngestServer), with the port file as a fallback (same pattern as beacon-statusline).
+port=8765
+[ -r "$HOME/.beacon-hub/port" ] && read -r port < "$HOME/.beacon-hub/port"
+url="http://127.0.0.1:${port}/hook"
+
+# PermissionRequest is the only event that needs the hub's decision on stdout. Detect it from the
+# snake_case hook_event_name (CC stdin schema) without a JSON parser. Any decision or an empty body
+# flows straight back to Claude Code.
+case "$input" in
+  *'"hook_event_name":"PermissionRequest"'* | *'"hook_event_name": "PermissionRequest"'*)
+    # Block until the hub resolves (device decision) or the connection dies. --connect-timeout keeps a
+    # dead hub from stalling; --max-time sits between the hub's 590s fail-closed cap and CC's 600s hook
+    # timeout, so the hub's deny always lands while the socket is still open. On any curl failure the
+    # command substitution yields empty output -> we print nothing -> CC prompts locally (fail-open).
+    # --fail extends that to non-2xx (CONTRACT.md C.3): another service squatting on the port could
+    # answer 4xx/5xx with a body, and forwarding that as a decision would gate on a stranger's output.
+    # Payload is piped (--data-binary @-), never argv: a large tool_input would blow past ARG_MAX and
+    # silently fail-open an otherwise real PermissionRequest.
+    resp="$(printf '%s' "$input" | curl -sf --connect-timeout 2 --max-time 595 -X POST "$url" \
+      -H 'Content-Type: application/json' --data-binary @- 2>/dev/null)" || resp=""
+    [ -n "$resp" ] && printf '%s' "$resp"
+    exit 0
+    ;;
+  *)
+    # Lifecycle event: forward for session tracking, fire-and-forget with a 1s cap. Never blocks CC.
+    printf '%s' "$input" | curl -s -m 1 -X POST "$url" \
+      -H 'Content-Type: application/json' --data-binary @- >/dev/null 2>&1 &
+    exit 0
+    ;;
+esac
