@@ -13,6 +13,10 @@ enum HooksInstaller {
     static let shimInstallPath = NSString(string: "~/.beacon/beacon-statusline").expandingTildeInPath
     static let sessionShimInstallPath = NSString(string: "~/.beacon/beacon-session").expandingTildeInPath
 
+    // Claude Code hook shim: every beacon hook event goes through it instead of a `type: http` hook, so
+    // an unreachable hub is silent (CC prints a per-event error for a failed http hook). See the shim.
+    static let hookShimInstallPath = NSString(string: "~/.beacon/beacon-claude-hook").expandingTildeInPath
+
     // Codex buddy shim install path (same ~/.beacon/ home as the Claude statusline shim). The literal
     // command string written into ~/.codex/config.toml AND fed into the trust hash.
     static let codexShimInstallPath = NSString(string: "~/.beacon/beacon-codex-hook").expandingTildeInPath
@@ -33,12 +37,13 @@ enum HooksInstaller {
 
     // Path-injectable core (testable shape; the real read uses the defaults). Any read/parse failure
     // is treated as "not installed".
-    static func isInstalled(settingsURL: URL? = nil, shimPath: String = shimInstallPath) -> Bool {
+    static func isInstalled(settingsURL: URL? = nil, shimPath: String = shimInstallPath,
+                            hookShimPath: String = hookShimInstallPath) -> Bool {
         let url = settingsURL ?? defaultSettingsURL
         guard let data = try? Data(contentsOf: url),
               let settings = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else { return false }
-        return HooksDetection.isInstalled(settings: settings, shimPath: shimPath)
+        return HooksDetection.isInstalled(settings: settings, shimPath: shimPath, hookShimPath: hookShimPath)
     }
 
     // Per-provider dispatch: install only the named provider's hooks. Unknown ids no-op (a provider
@@ -112,6 +117,11 @@ enum HooksInstaller {
         try fm.copyItem(atPath: bundledSessionShim, toPath: sessionShimInstallPath)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sessionShimInstallPath)
 
+        let bundledHookShim = try resolve(resource: "beacon-claude-hook", devPath: "statusline-shim/beacon-claude-hook")
+        if fm.fileExists(atPath: hookShimInstallPath) { try fm.removeItem(atPath: hookShimInstallPath) }
+        try fm.copyItem(atPath: bundledHookShim, toPath: hookShimInstallPath)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookShimInstallPath)
+
         let script = try resolve(resource: "build-app.sh", devPath: "build-app.sh")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -119,6 +129,7 @@ enum HooksInstaller {
         var env = ProcessInfo.processInfo.environment
         env["BEACON_SHIM"] = shimInstallPath
         env["BEACON_SESSION"] = sessionShimInstallPath
+        env["BEACON_HOOK"] = hookShimInstallPath
         process.environment = env
         let stderr = Pipe()
         process.standardError = stderr

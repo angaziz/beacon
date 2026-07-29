@@ -35,6 +35,13 @@ if [ "${1:-}" = "install-hooks" ]; then
     *" "*) echo "warning: session shim path contains spaces." >&2 ;;
   esac
 
+  HOOK_SHIM="${BEACON_HOOK:-$PWD/statusline-shim/beacon-claude-hook}"
+  [ -f "$HOOK_SHIM" ] || { echo "error: hook shim not found at $HOOK_SHIM" >&2; exit 1; }
+  [ -x "$HOOK_SHIM" ] || { echo "error: hook shim not executable: $HOOK_SHIM (chmod +x it)" >&2; exit 1; }
+  case "$HOOK_SHIM" in
+    *" "*) echo "warning: hook shim path contains spaces; the command string may not parse at the Claude Code layer." >&2 ;;
+  esac
+
   SNIPPET="claude-code-settings.snippet.json"
   [ -f "$SNIPPET" ] || { echo "error: snippet not found: $PWD/$SNIPPET" >&2; exit 1; }
 
@@ -62,22 +69,27 @@ if [ "${1:-}" = "install-hooks" ]; then
   trap 'rm -f "$TMP"' EXIT
 
   # Step 5 -- the merge. All external values enter via --arg/--slurpfile; nothing is shell-interpolated
-  # into the jq program. Beacon wrappers are matched by the INNER hook object (type+url) -- hand-installed
-  # entries may lack a matcher, so we match the inner http-8765 object anywhere in an event's wrappers --
-  # then REFRESHED: drop any existing beacon wrapper and re-add the canonical one from the snippet, so a
-  # reinstall propagates field changes (e.g. the timeout bump 35->600); non-beacon wrappers are preserved.
+  # into the jq program. Beacon wrappers are matched by the INNER hook object (type+url/command) --
+  # hand-installed entries may lack a matcher, so we match the inner object anywhere in an event's
+  # wrappers -- then REFRESHED: drop any existing beacon wrapper and re-add the canonical one from the
+  # snippet, so a reinstall propagates field changes; non-beacon wrappers are preserved. The legacy
+  # http-8765 inner is still matched so a pre-shim install is MIGRATED (dropped, replaced by the command
+  # shim) rather than left behind printing ECONNREFUSED whenever the hub is down.
   # Still idempotent (re-running yields the same result). def's must precede the pipeline (a leading/
   # trailing `|` around them is a jq syntax error).
-  jq -n --arg shim "$SHIM" --arg session_shim "$SESSION_SHIM" --slurpfile cur "$SETTINGS" --slurpfile snip "$SNIPPET" '
-    def is_beacon_inner: (.type=="http") and (.url=="http://127.0.0.1:8765/hook");
+  jq -n --arg shim "$SHIM" --arg session_shim "$SESSION_SHIM" --arg hook_shim "$HOOK_SHIM" \
+        --slurpfile cur "$SETTINGS" --slurpfile snip "$SNIPPET" '
+    def is_beacon_inner: ((.type=="http") and (.url=="http://127.0.0.1:8765/hook"))
+                         or ((.type=="command") and ((.command == $hook_shim) or (.command == "__BEACON_HOOK__")));
     # Exact-match only: never select out a user command hook that merely ends in "beacon-session".
     def is_beacon_session_inner: (.type=="command") and ((.command == $session_shim) or (.command == "__BEACON_SESSION__"));
     def wrapper_is_beacon: (.hooks // []) | any(.[]; is_beacon_inner or is_beacon_session_inner);
     ($cur[0]) as $s
-    # Substitute __BEACON_SHIM__ and __BEACON_SESSION__ placeholders before merging.
+    # Substitute __BEACON_HOOK__, __BEACON_SHIM__ and __BEACON_SESSION__ placeholders before merging.
     | ($snip[0] | del(._comment)
        | walk(if type == "string" then
-               gsub("__BEACON_SHIM__"; $shim) | gsub("__BEACON_SESSION__"; $session_shim)
+               gsub("__BEACON_HOOK__"; $hook_shim) | gsub("__BEACON_SHIM__"; $shim)
+               | gsub("__BEACON_SESSION__"; $session_shim)
              else . end)) as $snippet
     | reduce ($snippet.hooks | keys_unsorted[]) as $ev ($s;
         ($snippet.hooks[$ev]) as $beaconWrappers
@@ -108,6 +120,7 @@ if [ "${1:-}" = "install-hooks" ]; then
   echo "  settings:     $SETTINGS"
   echo "  shim:         $SHIM"
   echo "  session shim: $SESSION_SHIM"
+  echo "  hook shim:    $HOOK_SHIM"
   echo "  backup:       $BACKUP"
   echo "Restart Claude Code for the hooks + statusLine to take effect."
   exit 0
@@ -139,6 +152,8 @@ cp statusline-shim/beacon-session "$APP/Contents/Resources/"
 chmod +x "$APP/Contents/Resources/beacon-session"
 cp statusline-shim/beacon-codex-hook "$APP/Contents/Resources/"   # Codex buddy hook shim (HooksInstaller resolves via Bundle.main)
 chmod +x "$APP/Contents/Resources/beacon-codex-hook"
+cp statusline-shim/beacon-claude-hook "$APP/Contents/Resources/"  # Claude Code hook shim (replaces the type:http hooks)
+chmod +x "$APP/Contents/Resources/beacon-claude-hook"
 
 # BEACON_SIGN_IDENTITY (a "Developer ID Application: ..." cert, set by release CI) gets a real
 # signature with hardened runtime + timestamp, which notarization requires. Unset (local dev),

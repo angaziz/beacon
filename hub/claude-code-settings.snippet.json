@@ -1,12 +1,12 @@
 {
-  "_comment": "Merge these keys into ~/.claude/settings.json to wire Claude Code to the Beacon hub (127.0.0.1:8765, ClaudeCodeBridge). ESSENTIAL for the buddy round-trip: the PermissionRequest hook + statusLine. PermissionRequest fires ONLY when a tool actually needs permission (Write, Edit, Bash, MCP, ...) -- unlike PreToolUse, which fires on EVERY tool and would block routine reads if held open. SessionStart/Stop/Notification/SessionEnd are optional (running count + activity feed). RUNNING is NOT a SessionStart counter: SessionStart may not fire via http, so the bridge counts any session it has SEEN recently (first-seen + 10min TTL reaper) and SessionEnd (http, carries session_id) drives clean per-session removal on a normal exit; the TTL backstops SIGKILL/crash. timeout is in SECONDS; PermissionRequest is 600 (its max) to cover the device's ~590s decision window (CC's PermissionRequest default is 600s, so this is the ceiling). If you already have other hooks for these events, ADD these as additional array entries -- do not overwrite. (PreToolUse with a narrow matcher like \"Bash\" is the back-compat alternative; the bridge still accepts it.) Prefer `./build-app.sh install-hooks`, which merges these keys idempotently and rewrites __BEACON_SHIM__ to the absolute shim path on this machine.",
+  "_comment": "Merge these keys into ~/.claude/settings.json to wire Claude Code to the Beacon hub (127.0.0.1:8765, ClaudeCodeBridge). ESSENTIAL for the buddy round-trip: the PermissionRequest hook + statusLine. PermissionRequest fires ONLY when a tool actually needs permission (Write, Edit, Bash, MCP, ...) -- unlike PreToolUse, which fires on EVERY tool and would block routine reads if held open. SessionStart/Stop/Notification/SessionEnd are optional (running count + activity feed). RUNNING is NOT a SessionStart counter: SessionStart may not fire, so the bridge counts any session it has SEEN recently (first-seen + 10min TTL reaper) and SessionEnd (carries session_id) drives clean per-session removal on a normal exit; the TTL backstops SIGKILL/crash. Every event goes through the __BEACON_HOOK__ command shim rather than a `type: http` hook: CC reports an unreachable http hook as a per-event error line, so a stopped hub used to print `... hook [http://127.0.0.1:8765/hook] failed: connect ECONNREFUSED` on every event. The shim curls the same endpoint and exits 0 silently. timeout is in SECONDS; PermissionRequest is 600 (its max) to cover the device's ~590s decision window, and the shim's own curl budget (595) sits between the hub's 590s fail-closed cap and that 600. If you already have other hooks for these events, ADD these as additional array entries -- do not overwrite. (PreToolUse with a narrow matcher like \"Bash\" is the back-compat alternative; the bridge still accepts it.) Prefer `./build-app.sh install-hooks`, which merges these keys idempotently, drops any legacy http-8765 hooks, and rewrites __BEACON_HOOK__/__BEACON_SHIM__/__BEACON_SESSION__ to the absolute shim paths on this machine.",
 
   "hooks": {
     "PermissionRequest": [
       {
         "matcher": "*",
         "hooks": [
-          { "type": "http", "url": "http://127.0.0.1:8765/hook", "timeout": 600 }
+          { "type": "command", "command": "__BEACON_HOOK__", "timeout": 600 }
         ]
       }
     ],
@@ -14,7 +14,7 @@
       {
         "matcher": "startup|resume",
         "hooks": [
-          { "type": "http", "url": "http://127.0.0.1:8765/hook", "timeout": 5 }
+          { "type": "command", "command": "__BEACON_HOOK__", "timeout": 5 }
         ]
       },
       {
@@ -28,7 +28,7 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "http", "url": "http://127.0.0.1:8765/hook", "timeout": 5 }
+          { "type": "command", "command": "__BEACON_HOOK__", "timeout": 5 }
         ]
       }
     ],
@@ -36,7 +36,7 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "http", "url": "http://127.0.0.1:8765/hook", "timeout": 5 }
+          { "type": "command", "command": "__BEACON_HOOK__", "timeout": 5 }
         ]
       }
     ],
@@ -44,7 +44,7 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "http", "url": "http://127.0.0.1:8765/hook", "timeout": 5 }
+          { "type": "command", "command": "__BEACON_HOOK__", "timeout": 5 }
         ]
       }
     ]
