@@ -1,5 +1,5 @@
 // Calm Futurism SETTINGS view. Sparse list: big Doto row label on the left, dim value on the
-// right, hairline rules between rows. Rows: Wi-Fi, Brightness, Theme, Sleep, About.
+// right, hairline rules between rows. Rows: Wi-Fi, Battery, Brightness, Theme, Dim, Sleep, Wake, About.
 // Interactive: Theme tap opens the theme picker (theme_panel); Brightness tap cycles
 // 40/60/80/100% (display_brightness inline).
 // Background + chrome drawn by the carousel.
@@ -21,7 +21,7 @@
 static void update(void);
 
 static lv_obj_t *s_theme_val, *s_bright_val, *s_batt_val, *s_wifi_val;
-static lv_obj_t *s_dim_val, *s_sleep_val;
+static lv_obj_t *s_dim_val, *s_sleep_val, *s_wake_val;
 
 static const uint8_t BRIGHT_PCT[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;  // default 80%
@@ -32,6 +32,7 @@ static void about_cb(lv_event_t*) { about_panel_open(); }
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
 static void dim_cb(lv_event_t*)   { settings_power_open_dim(); }
 static void sleep_cb(lv_event_t*) { settings_power_open_sleep(); }
+static void wake_cb(lv_event_t*)  { settings_power_open_wake(); }
 
 static void on_bright_tap(lv_event_t* e) {
   (void)e;
@@ -49,7 +50,7 @@ static lv_obj_t* mk_row(lv_obj_t* page, const beacon_theme_t* t, int y, const ch
                         const char* val, lv_color_t valcol, lv_event_cb_t tap) {
   lv_obj_t* row = lv_obj_create(page);
   lv_obj_remove_style_all(row);
-  lv_obj_set_size(row, SCREEN_W - 2 * SAFE_INSET, 46);
+  lv_obj_set_size(row, SCREEN_W - 2 * SAFE_INSET, 42);
   lv_obj_align(row, LV_ALIGN_TOP_MID, 0, y);
   if (tap) {
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
@@ -98,7 +99,7 @@ static void build(lv_obj_t* page) {
   lv_obj_align(brand, LV_ALIGN_TOP_LEFT, SAFE_INSET + 20, SAFE_INSET + 8);
 
   int y = SAFE_INSET + 36;
-  const int dy = 48;
+  const int dy = 42;   // 8 rows must clear the bottom arc on the 466px round panel
 
   s_wifi_val = mk_row(page, t, y, "Wi-Fi", "not set >", t->ink_dim, NULL); y += dy;
   lv_obj_t* wifi_row = lv_obj_get_parent(s_wifi_val);   // tap the whole row (big touch target)
@@ -119,6 +120,8 @@ static void build(lv_obj_t* page) {
 
   s_sleep_val = mk_row(page, t, y, "Sleep", "", t->ink_dim, sleep_cb); y += dy;
 
+  s_wake_val = mk_row(page, t, y, "Wake", "", t->ink_dim, wake_cb); y += dy;
+
   mk_row(page, t, y, "About", ">", t->ink_dim, about_cb);
 
   update();
@@ -129,9 +132,10 @@ static void update(void) {
   char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text_fmt(s_wifi_val, "%s >", wbuf);
   lv_label_set_text_fmt(s_theme_val, "%s >", t->id ? t->id : "--");
 
-  char db[12], sb[12];
+  char db[16], sb[16], kb[16];
   settings_power_dim_label(db, sizeof(db));   lv_label_set_text(s_dim_val, db);
   settings_power_sleep_label(sb, sizeof(sb)); lv_label_set_text(s_sleep_val, sb);
+  settings_power_wake_label(kb, sizeof(kb));  lv_label_set_text(s_wake_val, kb);
 
   int pct = power_battery_pct();
   char bt[8];

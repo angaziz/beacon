@@ -17,8 +17,9 @@ bool idle_is_inactive(void);           // true while dimmed or asleep (first tou
 void idle_note_press(bool was_inactive); // call on every touch PRESSED; records if it was a wake press
 bool idle_take_wake_tap(void);           // returns true (and clears flag) if this press woke the device
 
-// Auto-wake watcher: call each loop() iteration (Core-1). Wakes + navigates to the buddy screen
-// on a rising edge of buddy needs-attention, but only when the device is already dim/asleep.
+// Auto-wake watcher: call each loop() iteration (Core-1). Only acts while dim/asleep. Scope comes
+// from the persisted Wake setting (buddy_wake_mode_t): a needs-user event wakes AND navigates to
+// the buddy screen; other notable hub events wake only. See core/buddy_wake.h for the rules.
 void buddy_wake_service(void);
 
 #ifdef __cplusplus

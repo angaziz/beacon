@@ -37,8 +37,9 @@ static void row_cb(lv_event_t* e) {
   lv_async_call(apply_pick, NULL);
 }
 
-void duration_panel_open(const char* title, uint8_t current, duration_pick_cb on_pick) {
-  if (s_root) return;
+void option_panel_open(const char* title, const char* const* labels, uint8_t count,
+                       uint8_t current, duration_pick_cb on_pick) {
+  if (s_root || !labels || count == 0) return;
   const beacon_theme_t* t = theme_active();
   s_cb = on_pick;
   carousel_set_swipe_enabled(false);
@@ -70,7 +71,7 @@ void duration_panel_open(const char* title, uint8_t current, duration_pick_cb on
   lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
   lv_obj_set_style_pad_row(list, 2, 0);
 
-  for (uint8_t i = 0; i < DURATION_COUNT; i++) {
+  for (uint8_t i = 0; i < count; i++) {
     lv_obj_t* row = lv_obj_create(list);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, lv_pct(100), 44);
@@ -87,9 +88,15 @@ void duration_panel_open(const char* title, uint8_t current, duration_pick_cb on
 
     lv_obj_t* lbl = lv_label_create(row);
     mklabel(lbl, t->f_display, i == current ? t->accent : t->ink);
-    lv_label_set_text(lbl, DURATIONS[i].label);
+    lv_label_set_text(lbl, labels[i]);
     lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 22, 0);
   }
+}
+
+void duration_panel_open(const char* title, uint8_t current, duration_pick_cb on_pick) {
+  static const char* labels[DURATION_COUNT];
+  for (uint8_t i = 0; i < DURATION_COUNT; i++) labels[i] = DURATIONS[i].label;
+  option_panel_open(title, labels, DURATION_COUNT, current, on_pick);
 }
 
 bool duration_panel_is_open(void) { return s_root != nullptr; }

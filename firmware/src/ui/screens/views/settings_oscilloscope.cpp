@@ -19,7 +19,7 @@
 // 40/60/80/100% (display_brightness inline).
 
 static lv_obj_t *s_theme_val, *s_bright_val, *s_batt_val, *s_wifi_val;
-static lv_obj_t *s_dim_val, *s_sleep_val;
+static lv_obj_t *s_dim_val, *s_sleep_val, *s_wake_val;
 
 static const uint8_t BRIGHT_PCT[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;   // 80%
@@ -30,6 +30,7 @@ static void about_cb(lv_event_t*) { about_panel_open(); }
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
 static void dim_cb(lv_event_t*)   { settings_power_open_dim(); }
 static void sleep_cb(lv_event_t*) { settings_power_open_sleep(); }
+static void wake_cb(lv_event_t*)  { settings_power_open_wake(); }
 
 static void bright_tap_cb(lv_event_t* e) {
   s_bright_idx = (uint8_t)((s_bright_idx + 1) % (sizeof(BRIGHT_PCT) / sizeof(BRIGHT_PCT[0])));
@@ -91,7 +92,7 @@ static void build(lv_obj_t* page) {
   lv_obj_align(ver, LV_ALIGN_TOP_RIGHT, -SAFE_INSET, SAFE_INSET);
 
   const int top = SAFE_INSET + 36;
-  const int pitch = 42;   // 7 rows must clear the bottom arc on the 466px round panel
+  const int pitch = 42;   // 8 rows must clear the bottom arc on the 466px round panel
   s_bright_idx = bright_step_for_nvs(BRIGHT_PCT, sizeof(BRIGHT_PCT) / sizeof(BRIGHT_PCT[0]));
   char bb[8]; snprintf(bb, sizeof(bb), "%u%%", BRIGHT_PCT[s_bright_idx]);
 
@@ -104,16 +105,18 @@ static void build(lv_obj_t* page) {
   s_theme_val   = make_row(page, t, top + 3 * pitch, "Theme", thv, true, theme_tap_cb);
   s_dim_val     = make_row(page, t, top + 4 * pitch, "Dim", "", false, dim_cb);
   s_sleep_val   = make_row(page, t, top + 5 * pitch, "Sleep", "", false, sleep_cb);
-  make_row(page, t, top + 6 * pitch, "About", ">", false, about_cb);
+  s_wake_val    = make_row(page, t, top + 6 * pitch, "Wake", "", false, wake_cb);
+  make_row(page, t, top + 7 * pitch, "About", ">", false, about_cb);
 }
 
 static void update(void) {
   char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text_fmt(s_wifi_val, "%s >", wbuf);
   lv_label_set_text_fmt(s_theme_val, "%s >", THEME_CATALOG[theme_index()].id);
 
-  char db[12], sb[12];
+  char db[16], sb[16], kb[16];
   settings_power_dim_label(db, sizeof(db));   lv_label_set_text(s_dim_val, db);
   settings_power_sleep_label(sb, sizeof(sb)); lv_label_set_text(s_sleep_val, sb);
+  settings_power_wake_label(kb, sizeof(kb));  lv_label_set_text(s_wake_val, kb);
 
   int pct = power_battery_pct();
   char bt[8];

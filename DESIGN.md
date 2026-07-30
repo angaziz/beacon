@@ -82,7 +82,7 @@ Every theme has bespoke per-screen layouts (each composed from the shared tokens
 2. **Finance** — config-driven ticker list: FX→IDR, BTC, indices/ETFs, IHSG. Value + signed change. [WiFi]
 3. **AI Usage** — Claude and Codex, each showing **both** a 5-hour and a 7-day window (utilization % + reset). All four values, not one per provider. [BLE / Mac hub]
 4. **Coding Buddy** — a per-session list (state + `folder · branch` + age, `running · waiting` header), with two takeover states: a tool-permission prompt (Approve/Deny) and a `question` "tap to answer on Mac" card; tap a session to focus its terminal. See Coding Buddy contract. [BLE / Mac hub]
-5. **Settings** — battery %, Wi-Fi, brightness, **Theme picker**, sleep, about. (Battery shows level + charging, color-coded; low = `down` color.) [local / NVS]
+5. **Settings** — battery %, Wi-Fi, brightness, **Theme picker**, dim, sleep, wake, about. (Battery shows level + charging, color-coded; low = `down` color. Wake picks how much of a hub notification lights a dim/asleep panel — FR-BUDDY-7.) [local / NVS]
 
 Navigation (with `prd.md` phase): horizontal **swipe** = prev/next screen (carousel) — **P0**; **long-press** = screen context action and **swipe-down** = quick brightness — **P3**; **IMU** raise/flick = wake, shake = dismiss overlay / exit a subview (no carousel back-stack) — **P3**. Minimum touch target ~64px (~3mm) given arm's-length use; primary actions get the largest hit areas.
 
