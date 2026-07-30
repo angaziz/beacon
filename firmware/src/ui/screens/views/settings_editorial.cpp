@@ -11,7 +11,7 @@
 #include "ui/settings_power_rows.h"
 
 static lv_obj_t *s_theme_val, *s_bright_val, *s_batt_val, *s_wifi_val;
-static lv_obj_t *s_dim_val, *s_sleep_val;
+static lv_obj_t *s_dim_val, *s_sleep_val, *s_wake_val;
 static const uint8_t BRIGHT[] = {102, 153, 204, 255};   // 40/60/80/100%
 static int s_bright_i = 2;
 
@@ -20,6 +20,7 @@ static void about_cb(lv_event_t*) { about_panel_open(); }
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
 static void dim_cb(lv_event_t*)   { settings_power_open_dim(); }
 static void sleep_cb(lv_event_t*) { settings_power_open_sleep(); }
+static void wake_cb(lv_event_t*)  { settings_power_open_wake(); }
 static void bright_cb(lv_event_t*) {
   s_bright_i = (s_bright_i + 1) % (int)(sizeof(BRIGHT)/sizeof(BRIGHT[0]));
   display_brightness(BRIGHT[s_bright_i]);
@@ -56,16 +57,18 @@ static void build(lv_obj_t* page) {
   s_theme_val    = row(page, "Theme", 126, theme_cb);       lv_obj_add_style(s_theme_val, &S.accent, 0);
   s_dim_val      = row(page, "Dim", 168, dim_cb);
   s_sleep_val    = row(page, "Sleep", 210, sleep_cb);
-  lv_obj_t* abt  = row(page, "About", 252, about_cb);       lv_label_set_text(abt, ">");
+  s_wake_val     = row(page, "Wake", 252, wake_cb);
+  lv_obj_t* abt  = row(page, "About", 294, about_cb);       lv_label_set_text(abt, ">");
 }
 
 static void update(void) {
   char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); txt_fmt(s_wifi_val, "%s >", wbuf);
   if (theme_active()) txt_fmt(s_theme_val, "%s >", theme_active()->id);
 
-  char db[12], sb[12];
+  char db[16], sb[16], kb[16];
   settings_power_dim_label(db, sizeof(db));   txt_set(s_dim_val, db);
   settings_power_sleep_label(sb, sizeof(sb)); txt_set(s_sleep_val, sb);
+  settings_power_wake_label(kb, sizeof(kb));  txt_set(s_wake_val, kb);
 
   int pct = power_battery_pct();
   if (pct >= 0) txt_fmt(s_batt_val, "%d%%%s", pct, power_charging() ? "+" : "");

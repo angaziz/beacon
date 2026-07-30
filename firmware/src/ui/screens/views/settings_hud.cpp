@@ -26,6 +26,7 @@ static lv_obj_t *s_batt_val;
 static lv_obj_t *s_wifi_val;
 static lv_obj_t *s_dim_val;
 static lv_obj_t *s_sleep_val;
+static lv_obj_t *s_wake_val;
 
 static const uint8_t BRIGHT_STEPS[] = { 40, 60, 80, 100 };
 static uint8_t s_bright_idx = 2;   // 80%
@@ -36,6 +37,7 @@ static void about_cb(lv_event_t*) { about_panel_open(); }
 static void wifi_open_cb(lv_event_t*) { wifi_panel_open(); }
 static void dim_cb(lv_event_t*)   { settings_power_open_dim(); }
 static void sleep_cb(lv_event_t*) { settings_power_open_sleep(); }
+static void wake_cb(lv_event_t*)  { settings_power_open_wake(); }
 
 static void bright_tap(lv_event_t* e) {
   (void)e;
@@ -113,6 +115,7 @@ static void build(lv_obj_t* page) {
   s_theme_val    = make_row(list, t, "Theme", thv, theme_tap);
   s_dim_val      = make_row(list, t, "Dim", "", dim_cb);
   s_sleep_val    = make_row(list, t, "Sleep", "", sleep_cb);
+  s_wake_val     = make_row(list, t, "Wake", "", wake_cb);
   make_row(list, t, "About", ">", about_cb);
 }
 
@@ -120,9 +123,10 @@ static void update(void) {
   char wbuf[48]; net_status_str(wbuf, sizeof(wbuf)); lv_label_set_text_fmt(s_wifi_val, "%s >", wbuf);
   lv_label_set_text_fmt(s_theme_val, "%s >", THEME_CATALOG[theme_index()].id);
 
-  char db[12], sb[12];
+  char db[16], sb[16], kb[16];
   settings_power_dim_label(db, sizeof(db));   lv_label_set_text(s_dim_val, db);
   settings_power_sleep_label(sb, sizeof(sb)); lv_label_set_text(s_sleep_val, sb);
+  settings_power_wake_label(kb, sizeof(kb));  lv_label_set_text(s_wake_val, kb);
 
   int pct = power_battery_pct();
   char bt[8];

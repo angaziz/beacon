@@ -26,6 +26,7 @@ uint8_t nvs_get_brightness(uint8_t def); void nvs_set_brightness(uint8_t v);
 uint8_t nvs_get_theme(uint8_t def);      void nvs_set_theme(uint8_t v);
 uint8_t nvs_get_dim_idx(uint8_t def);    void nvs_set_dim_idx(uint8_t v);
 uint8_t nvs_get_sleep_idx(uint8_t def);  void nvs_set_sleep_idx(uint8_t v);
+uint8_t nvs_get_wake_mode(uint8_t def);  void nvs_set_wake_mode(uint8_t v);   // buddy_wake_mode_t (issue #129)
 
 // Saved WiFi networks (canonical store; guarded by an internal mutex; net.cpp consumes it on Core-0).
 // Mutations persist immediately and set a dirty flag the Core-0 net service polls. SSID getters never
