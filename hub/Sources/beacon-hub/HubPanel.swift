@@ -92,6 +92,7 @@ private struct HeaderModule: View {
     private var isConnected: Bool { if case .connected = model.link { return true }; return false }
     private var statusText: String {
         switch model.link {
+        case .disabled:          return "Beacon link off"
         case .bluetoothOff:      return "Bluetooth is off"
         case .unauthorized:      return "Bluetooth permission needed"
         case .unavailable:       return "Bluetooth unavailable"
@@ -227,6 +228,8 @@ private struct TogglesModule: View {
     var body: some View {
         Module(padding: 0) {
             VStack(spacing: 0) {
+                ToggleRow(icon: "antenna.radiowaves.left.and.right", title: "Beacon link", isOn: linkBinding)
+                Divider().padding(.leading, 12)
                 ToggleRow(icon: "speaker.slash.fill", title: "Mute prompt sound", isOn: muteBinding)
                 Divider().padding(.leading, 12)
                 ToggleRow(icon: "person.fill", title: "Start at login",
@@ -238,6 +241,9 @@ private struct TogglesModule: View {
 
     private var muteBinding: Binding<Bool> {
         Binding(get: { model.muted }, set: { model.muted = $0; model.onToggleMute() })
+    }
+    private var linkBinding: Binding<Bool> {
+        Binding(get: { model.linkEnabled }, set: { model.linkEnabled = $0; model.onToggleLink() })
     }
     // No optimistic flip: request the opposite of the re-read truth; the UI only changes when
     // setLoginItemState writes back model.loginItem (ad-hoc signing can land on .requiresApproval).

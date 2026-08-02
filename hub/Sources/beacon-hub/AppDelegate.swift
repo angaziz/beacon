@@ -121,7 +121,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menubar.onInstallProviderHooks = { [weak self] id in self?.installHooks(for: id) }
         menubar.onOpenBluetooth = { SettingsLinks.open(SettingsLinks.bluetooth) }
         refreshProviderHooks()
-        settingsWindow.showIfNeeded()
+        // #146: a user who deliberately turned the BLE link off can never satisfy the pairing check --
+        // don't nag them with the first-run window every launch.
+        if LinkPreference.isEnabled(stored: UserDefaults.standard.object(forKey: LinkPreference.key)) {
+            settingsWindow.showIfNeeded()
+        }
     }
 
     // Re-read every provider's hooks state off the main thread (sync file IO + parse), then apply on main
@@ -356,13 +360,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         menubar.onRetryPairing = { [weak self] in self?.central.retryPairing() }
         menubar.onApplyTickerEdit = { [weak self] rows in self?.applyTickerEdit(rows) }
-        central.start()
+        menubar.onToggleLink = { [weak self] on in
+            if on { self?.central.resume() } else { self?.central.stop() }
+        }
+        central.start(enabled: LinkPreference.isEnabled(stored: UserDefaults.standard.object(forKey: LinkPreference.key)))
     }
 
     // `phase` is computed on BeaconCentral's queue (no cross-thread read of the link state).
     private func refreshLink(_ phase: LinkPhase) {
         let link: MenubarController.Link
         switch phase {
+        case .disabled:            link = .disabled
         case .bluetoothOff:        link = .bluetoothOff
         case .unauthorized:        link = .unauthorized
         case .unavailable:         link = .unavailable

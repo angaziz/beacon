@@ -5,6 +5,7 @@ import BeaconHubKit
 // Distinct link phases the UI distinguishes (issue #11). Rare CBManager states (.resetting/.unsupported/
 // .unknown) fold into .unavailable since none has a distinct user remediation.
 enum LinkPhase: Equatable {
+    case disabled
     case bluetoothOff
     case unauthorized
     case unavailable
@@ -61,10 +62,19 @@ final class BeaconCentral: NSObject {
         TimeInterval(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
     }
     private func setPhase(_ p: LinkPhase) {
+        // Master-flag rule (#146): while the link is user-disabled, .disabled is the only phase that may
+        // reach the UI -- late delegate callbacks and CBManager state flips must not overwrite it. The raw
+        // central.state keeps being tracked, so resume() re-derives the correct phase.
+        if !enabled && p != .disabled { return }
         guard p != phase else { return }
         phase = p
         onPhaseChange?(p)
     }
+
+    // User-facing BLE kill switch (#146). Queue-confined after start(); seeded before the central exists
+    // so the very first delegate callback already sees the persisted choice. While false, no scan or
+    // connect is ever issued and .disabled is the only emitted phase.
+    private var enabled = true
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -79,9 +89,40 @@ final class BeaconCentral: NSObject {
     private var inbound = Data()
     private let queue = DispatchQueue(label: "beacon.central")
 
-    func start() {
+    func start(enabled: Bool = true) {
+        self.enabled = enabled
+        if !enabled { setPhase(.disabled) }
         // Restoration is unused (agent process owns the single link); nil options keep it simple.
         central = CBCentralManager(delegate: self, queue: queue, options: nil)
+    }
+
+    // BLE kill switch OFF (#146): stop scanning (handleDisconnect never does -- the only other stopScan
+    // lives in didDiscover), tear down any live/in-flight link, and pin the phase to .disabled. Keeps
+    // knownId/knownName so resume() within this process can pending-connect without re-pairing.
+    func stop() {
+        queue.async { [weak self] in
+            guard let self, self.central != nil else { return }
+            self.enabled = false
+            if self.central.state == .poweredOn { self.central.stopScan() }
+            self.handleDisconnect()   // teardown only: !enabled skips the escalation count and reconnect tail.
+            self.setPhase(.disabled)
+        }
+    }
+
+    // BLE kill switch ON (#146): re-derive from the live CBManager state -- a bare reconnect() would
+    // no-op while Bluetooth is off and leave the phase stuck at .disabled.
+    func resume() {
+        queue.async { [weak self] in
+            guard let self, self.central != nil else { return }
+            self.enabled = true
+            self.escalation.reset()
+            switch self.central.state {
+            case .poweredOn: self.reconnect()
+            case .poweredOff: self.setPhase(.bluetoothOff)
+            case .unauthorized: self.setPhase(.unauthorized)
+            default: self.setPhase(.unavailable)
+            }
+        }
     }
 
     // Write a full (already newline-terminated) frame to RX, chunked to the negotiated MTU. We use
@@ -129,7 +170,7 @@ final class BeaconCentral: NSObject {
     }
 
     private func beginScan() {
-        guard central.state == .poweredOn else { return }
+        guard enabled, central.state == .poweredOn else { return }
         inbound.removeAll(keepingCapacity: true)
         escalation.recordAttemptStart(now: Self.monotonicNow())   // start the deadline clock at the first scan.
         central.scanForPeripherals(withServices: [Self.service], options: nil)
@@ -141,7 +182,7 @@ final class BeaconCentral: NSObject {
     // advertises, so an off/out-of-range device costs nothing. Scanning (the highest-power CB mode) is
     // reserved for first pair / forget-and-rescan, where there is no known peripheral to target.
     private func reconnect() {
-        guard central.state == .poweredOn else { return }
+        guard enabled, central.state == .poweredOn else { return }
         if hadConnection, let id = knownId,
            let p = central.retrievePeripherals(withIdentifiers: [id]).first {
             inbound.removeAll(keepingCapacity: true)
@@ -179,6 +220,9 @@ final class BeaconCentral: NSObject {
         }
         peripheral = nil
         inbound.removeAll(keepingCapacity: true)
+        // Disabled (#146): stop() owns the phase; the cancel above echoes back through didFailToConnect /
+        // didDisconnectPeripheral and must neither burn the pairing-escalation budget nor reconnect.
+        guard enabled else { return }
         // A genuinely-stuck first-time pair (budget burned / deadline passed) escalates loudly instead of
         // silently rescanning forever; a reconnect blip of a known-good device (hadConnection) never trips.
         if escalation.recordFailure(now: Self.monotonicNow(), hadConnection: hadConnection) {
@@ -205,6 +249,7 @@ final class BeaconCentral: NSObject {
 
 extension BeaconCentral: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        guard enabled else { return }   // disabled pins the phase; resume() re-reads central.state.
         switch central.state {
         case .poweredOn: reconnect()   // pending-connect a known device (e.g. after a BT off/on), else scan.
         case .poweredOff: isConnected = false; setPhase(.bluetoothOff)
@@ -215,6 +260,7 @@ extension BeaconCentral: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
+        guard enabled else { return }   // a discovery queued behind stop()'s stopScan must not start a connect.
         let advName = (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? peripheral.name
         guard let name = advName, name.hasPrefix(Self.namePrefix) else { return }
         central.stopScan()

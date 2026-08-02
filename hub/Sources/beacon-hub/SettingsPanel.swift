@@ -49,7 +49,10 @@ struct SettingsPanel: View {
                         .fixedSize(horizontal: false, vertical: true)
                     HStack {
                         Spacer()
-                        DeckButton(title: "Open Bluetooth & forget", kind: .primary) { model.onForget() }
+                        // Disabled while the BLE link is off (#146): forgetAndRescan would clear the
+                        // pending-connect target and start a scan the user just opted out of.
+                        DeckButton(title: "Open Bluetooth & forget", kind: .primary,
+                                   enabled: model.linkEnabled) { model.onForget() }
                     }
                 }
             }

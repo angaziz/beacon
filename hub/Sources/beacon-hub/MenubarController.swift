@@ -9,6 +9,7 @@ import BeaconHubKit
 @MainActor
 final class MenubarController: NSObject {
     enum Link {
+        case disabled
         case bluetoothOff, unauthorized, unavailable
         case searching, connecting(String), connected(String), reconnecting
         case pairingFailed
@@ -42,6 +43,7 @@ final class MenubarController: NSObject {
 
     // Login-item + forget-device callbacks (issue #16); AppDelegate owns the side effects.
     var onToggleLoginItem: ((Bool) -> Void)?   // desired on/off; AppDelegate re-reads truth + calls setLoginItemState.
+    var onToggleLink: ((Bool) -> Void)?        // BLE kill switch (#146); AppDelegate calls central stop/resume.
     var onForgetDevice: (() -> Void)?
     var onRetryPairing: (() -> Void)?          // in-app "try again" after a .pairingFailed escalation (issue #17).
     var onMenuWillOpen: (() -> Void)?          // accessory app: popoverWillShow is the reliable login-item refresh hook.
@@ -68,6 +70,10 @@ final class MenubarController: NSObject {
         get { UserDefaults.standard.bool(forKey: "BeaconPromptSoundMuted") }
         set { UserDefaults.standard.set(newValue, forKey: "BeaconPromptSoundMuted") }
     }
+    private var linkEnabled: Bool {
+        get { LinkPreference.isEnabled(stored: UserDefaults.standard.object(forKey: LinkPreference.key)) }
+        set { UserDefaults.standard.set(newValue, forKey: LinkPreference.key) }
+    }
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -82,6 +88,12 @@ final class MenubarController: NSObject {
     // owns the model, so a strong capture here would be a retain cycle.
     private func wireModel() {
         model.onToggleMute = { [weak self] in self?.promptSoundMuted = self?.model.muted ?? false }
+        model.onToggleLink = { [weak self] in
+            guard let self else { return }
+            let on = self.model.linkEnabled
+            self.linkEnabled = on
+            self.onToggleLink?(on)
+        }
         model.onRequestLoginItem = { [weak self] on in self?.onToggleLoginItem?(on) }
         model.onInstallProviderHooks = { [weak self] id in self?.onInstallProviderHooks?(id) }
         model.onOpenBluetooth = { [weak self] in self?.onOpenBluetooth?() }
@@ -195,6 +207,9 @@ final class MenubarController: NSObject {
             symbol = "exclamationmark.triangle.fill"; tint = .systemRed; description = "Beacon: alert"
         } else {
             switch link {
+            case .disabled:
+                // Decision (spec 2026-08-02): no distinct icon while the user has the link off.
+                symbol = "antenna.radiowaves.left.and.right.slash"; tint = nil; description = "Beacon: link off"
             case .bluetoothOff:
                 symbol = "exclamationmark.triangle.fill"; tint = .systemOrange; description = "Beacon: Bluetooth off"
             case .unauthorized:
