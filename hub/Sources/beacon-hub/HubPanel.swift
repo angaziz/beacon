@@ -53,21 +53,30 @@ private struct HeaderModule: View {
     var body: some View {
         Module {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle().fill(.blue).frame(width: 30, height: 30)
-                        Image(systemName: "wave.3.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                // Control-Center pattern: the whole row toggles the link; the icon tint shows the state.
+                Button(action: { model.linkEnabled.toggle(); model.onToggleLink() }) {
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(model.linkEnabled ? AnyShapeStyle(.blue) : AnyShapeStyle(.primary.opacity(0.14)))
+                                .frame(width: 30, height: 30)
+                            Image(systemName: "wave.3.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(model.linkEnabled ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                        }
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(deviceName).font(.system(size: 13, weight: .semibold))
+                            Text(statusText).font(.system(size: 11)).foregroundStyle(.secondary)
+                            Text(syncText).font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
+                        Spacer()
                     }
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(deviceName).font(.system(size: 13, weight: .semibold))
-                        Text(statusText).font(.system(size: 11)).foregroundStyle(.secondary)
-                        Text(syncText).font(.system(size: 11)).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if isConnected {
-                        Circle().fill(.green).frame(width: 8, height: 8)
-                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .help(model.linkEnabled ? "Turn Beacon link off" : "Turn Beacon link on")
+                .accessibilityLabel("Beacon link")
+                .accessibilityValue(model.linkEnabled ? "on" : "off")
                 if showPairingHint {
                     Text("Pair: enter the code shown on the device")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
@@ -89,9 +98,9 @@ private struct HeaderModule: View {
         default: return "Beacon"
         }
     }
-    private var isConnected: Bool { if case .connected = model.link { return true }; return false }
     private var statusText: String {
         switch model.link {
+        case .disabled:          return "Beacon link off"
         case .bluetoothOff:      return "Bluetooth is off"
         case .unauthorized:      return "Bluetooth permission needed"
         case .unavailable:       return "Bluetooth unavailable"

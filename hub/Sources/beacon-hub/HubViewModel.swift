@@ -38,6 +38,7 @@ final class HubViewModel: ObservableObject {
     @Published var bridgeAlert: String?    // bridge bind failure; priority over alert
     @Published var loginItem: MenubarController.LoginItemStatus = .disabled
     @Published var muted: Bool
+    @Published var linkEnabled: Bool   // BLE kill switch (#146); absent key means enabled (LinkPreference)
     @Published var now: Date
     @Published var tickerSync: TickerSyncStatus = .idle
     // Global (non-provider) setup checks surfaced in the Settings window.
@@ -51,6 +52,7 @@ final class HubViewModel: ObservableObject {
 
     // Intent closures, populated by MenubarController (weakly, so VM<->controller is not a retain cycle).
     var onToggleMute: () -> Void = {}
+    var onToggleLink: () -> Void = {}   // BLE kill switch (#146); reads the flipped linkEnabled
     var onRequestLoginItem: (Bool) -> Void = { _ in }   // desired on/off; truth re-read async
     var onForget: () -> Void = {}
     var onOpenSettings: () -> Void = {}          // opens the dedicated Settings window (from the popover)
@@ -73,8 +75,10 @@ final class HubViewModel: ObservableObject {
 
     // `now` seeded once; refreshed on poll + popover open so reset hints stay fresh. `muted` seeded from
     // the same UserDefaults key the controller persists, so the first render matches the real state.
-    init(now: Date = Date(), muted: Bool = UserDefaults.standard.bool(forKey: "BeaconPromptSoundMuted")) {
+    init(now: Date = Date(), muted: Bool = UserDefaults.standard.bool(forKey: "BeaconPromptSoundMuted"),
+         linkEnabled: Bool = LinkPreference.isEnabled(stored: UserDefaults.standard.object(forKey: LinkPreference.key))) {
         self.now = now
         self.muted = muted
+        self.linkEnabled = linkEnabled
     }
 }
