@@ -56,6 +56,20 @@ final class PiHooksTests: XCTestCase {
         XCTAssertEqual(PiHooks.mergePpsAuthorizerChain(source), expected)
     }
 
+    // Regression (codex review, PR #153): `{}` is a valid all-defaults config; the merge must not
+    // emit a trailing comma (which would overwrite the user's valid config with invalid JSON).
+    func testPpsAuthorizerChainMergeHandlesEmptyConfig() {
+        let cases: [(name: String, source: String, expected: String)] = [
+            ("bare", "{}", "{\"authorizerChain\":[\"beacon\"]}"),
+            ("whitespace", "{\n}\n", "{\"authorizerChain\":[\"beacon\"]\n}\n"),
+        ]
+        for entry in cases {
+            guard let merged = PiHooks.mergePpsAuthorizerChain(entry.source) else { return XCTFail("\(entry.name): must merge") }
+            XCTAssertEqual(merged, entry.expected, entry.name)
+            XCTAssertNotNil(try? JSONSerialization.jsonObject(with: Data(merged.utf8)), "\(entry.name): merged output must be valid JSON")
+        }
+    }
+
     func testPpsAuthorizerRejectsInvalidConfigs() {
         XCTAssertNil(PiHooks.mergePpsAuthorizerChain("not json"))
         XCTAssertNil(PiHooks.mergePpsAuthorizerChain("{\"unknown\":true}"))

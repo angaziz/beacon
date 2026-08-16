@@ -42,7 +42,10 @@ public enum PiHooks {
             return String(bytes: merged, encoding: .utf8)
         }
         guard let brace = bytes.firstIndex(of: 123) else { return nil }
-        let hasProperties = bytes[(brace + 1)...].contains(where: { !isJSONWhitespace($0) })
+        // First meaningful byte after the brace: `}` means an empty object, not a property (a bare
+        // contains-scan would count the closing brace and emit a trailing comma - invalid JSON for {}).
+        let firstMeaningful = bytes[(brace + 1)...].first(where: { !isJSONWhitespace($0) })
+        let hasProperties = firstMeaningful != nil && firstMeaningful != 125
         let indent = indentation(after: brace, in: bytes)
         var merged = bytes
         let entry = Array("\"authorizerChain\":[\"beacon\"]".utf8) + (hasProperties ? [44] : [])
