@@ -87,5 +87,65 @@ final class HooksInstallerTests: XCTestCase {
         XCTAssertTrue(leftover.isEmpty, "temp file renamed away, none left behind")
     }
 
+    // --- installPi / isPiInstalled (file IO) ---
+
+    private func piPath() -> String { tmp.appendingPathComponent("beacon.ts").path }
+
+    func testInstallPiFreshWritesCurrent() throws {
+        let path = piPath()
+        XCTAssertFalse(HooksInstaller.isPiInstalled(extensionPath: path), "missing file => not installed")
+        try HooksInstaller.installPi(extensionPath: path)
+        XCTAssertTrue(HooksInstaller.isPiInstalled(extensionPath: path))
+        XCTAssertEqual(try String(contentsOfFile: path, encoding: .utf8), PiHooks.extensionSource)
+    }
+
+    func testInstallPiBacksUpUnrecognized() throws {
+        let fileManager = FileManager.default
+        let path = piPath()
+        try "// my own extension\n".write(toFile: path, atomically: true, encoding: .utf8)
+        try HooksInstaller.installPi(extensionPath: path)
+
+        let backups = try fileManager.contentsOfDirectory(atPath: tmp.path).filter { $0.hasPrefix("beacon.ts.bak-") }
+        XCTAssertEqual(backups.count, 1, "one timestamped backup of the prior file")
+        XCTAssertTrue(HooksInstaller.isPiInstalled(extensionPath: path))
+    }
+
+    func testPpsInstallPreservesOrderAndBacksUpOriginal() throws {
+        let config = tmp.appendingPathComponent("config.json")
+        let original = "{\n  \"permission\": {\"bash\": {\"*\": \"allow\", \"rm *\": \"ask\"}},\n  \"authorizerChain\": [\"first\"]\n}\n"
+        try original.write(to: config, atomically: true, encoding: .utf8)
+        try HooksInstaller.installPpsAuthorizerChain(configPath: config.path)
+
+        let installed = try String(contentsOf: config, encoding: .utf8)
+        XCTAssertEqual(installed, original.replacingOccurrences(of: "]", with: ", \"beacon\"]"))
+        let backups = try FileManager.default.contentsOfDirectory(atPath: tmp.path).filter { $0.hasPrefix("config.json.bak-") }
+        XCTAssertEqual(backups.count, 1)
+        XCTAssertEqual(try String(contentsOf: tmp.appendingPathComponent(backups[0]), encoding: .utf8), original)
+        try HooksInstaller.installPpsAuthorizerChain(configPath: config.path)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: tmp.path).filter { $0.hasPrefix("config.json.bak-") }.count, 1)
+    }
+
+    func testPpsInstallDoesNotCreateOrChangeInvalidConfig() throws {
+        let absent = tmp.appendingPathComponent("absent.json")
+        try HooksInstaller.installPpsAuthorizerChain(configPath: absent.path)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: absent.path))
+
+        let invalid = tmp.appendingPathComponent("invalid.json")
+        let original = "{\"unknown\":true}"
+        try original.write(to: invalid, atomically: true, encoding: .utf8)
+        try HooksInstaller.installPpsAuthorizerChain(configPath: invalid.path)
+        XCTAssertEqual(try String(contentsOf: invalid, encoding: .utf8), original)
+        XCTAssertFalse(HooksInstaller.isPiInstalled(extensionPath: piPath(), ppsConfigPath: invalid.path))
+    }
+
+    func testPiReadyRequiresValidPpsChain() throws {
+        let path = piPath()
+        let config = tmp.appendingPathComponent("config.json")
+        try HooksInstaller.installPi(extensionPath: path)
+        try "{\"authorizerChain\":[\"beacon\"]}".write(to: config, atomically: true, encoding: .utf8)
+        XCTAssertTrue(HooksInstaller.isPiInstalled(extensionPath: path, ppsConfigPath: config.path))
+        try "{\"unknown\":true,\"authorizerChain\":[\"beacon\"]}".write(to: config, atomically: true, encoding: .utf8)
+        XCTAssertFalse(HooksInstaller.isPiInstalled(extensionPath: path, ppsConfigPath: config.path))
+    }
 
 }

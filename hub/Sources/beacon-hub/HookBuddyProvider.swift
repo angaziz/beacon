@@ -25,7 +25,10 @@ final class HookBuddyProvider: AgentProvider {
 
     private let server: LocalIngestServer
     private let routePath: String        // ingest route this instance registers (e.g. /codex/hook)
+    private let permissionRoute: String?
+    private let passThroughOperationalFailures: Bool
     private let capSeconds: TimeInterval  // fail-closed hold cap; MUST fire before the caller's deadline
+    private let piCommitSeconds: TimeInterval
     private weak var sink: ProviderSink?
     private var queue: DispatchQueue { server.queue }
 
@@ -38,12 +41,15 @@ final class HookBuddyProvider: AgentProvider {
     private final class Pending {
         let respond: (Data, (() -> Void)?) -> Void
         var done = false
-        let timeout: DispatchSourceTimer
+        var pendingAck: ((ResolveOutcome) -> Void)?
+        var timeout: DispatchSourceTimer
         init(respond: @escaping (Data, (() -> Void)?) -> Void, timeout: DispatchSourceTimer) {
             self.respond = respond; self.timeout = timeout
         }
     }
     private var pending: [String: Pending] = [:]
+    private var piTombstones: [String: Date] = [:]
+    private static let piTombstoneTTL: TimeInterval = 30
     private var nativeCounter: UInt32 = 0
     private var lastNativeId: String?
 
@@ -61,12 +67,16 @@ final class HookBuddyProvider: AgentProvider {
     private static let isoStamp = ISO8601DateFormatter()
 
     init(descriptor: ProviderDescriptor, routePath: String, capSeconds: TimeInterval,
-         server: LocalIngestServer, usageSource: UsageProvider? = nil) {
+         server: LocalIngestServer, usageSource: UsageProvider? = nil, permissionRoute: String? = nil,
+         passThroughOperationalFailures: Bool = false, piCommitSeconds: TimeInterval = 2) {
         self.descriptor = descriptor
         self.routePath = routePath
         self.capSeconds = capSeconds
         self.server = server
         self.usageSource = usageSource
+        self.permissionRoute = permissionRoute
+        self.passThroughOperationalFailures = passThroughOperationalFailures
+        self.piCommitSeconds = piCommitSeconds
     }
 
     // --- AgentProvider ---
@@ -74,6 +84,7 @@ final class HookBuddyProvider: AgentProvider {
     func start(sink: ProviderSink) {
         self.sink = sink
         server.register(path: routePath) { [weak self] req in self?.handleHook(req) }
+        if let permissionRoute { server.register(path: permissionRoute) { [weak self] req in self?.handlePermission(req) } }
     }
 
     func setEnabled(_ caps: EnabledCapabilities) {
@@ -95,10 +106,37 @@ final class HookBuddyProvider: AgentProvider {
 
     func resolvePrompt(nativeID: String, approve: Bool) -> ResolveOutcome {
         queue.sync {
-            guard let p = pending[nativeID] else { return .unknown }
+            guard let p = pending[nativeID] else { return piTombstones[nativeID] != nil ? .late : .unknown }
             guard !p.done else { return .late }
             finish(id: nativeID, approve: approve, capped: false)
             return .applied
+        }
+    }
+
+    // Pi must not ack the device until its extension confirms that the device beat the local TUI race.
+    // Codex keeps the synchronous path above; only the pi permission route opts into this deferred flow.
+    func resolvePrompt(nativeID: String, approve: Bool, completion: @escaping (ResolveOutcome) -> Void) {
+        guard passThroughOperationalFailures else {
+            completion(resolvePrompt(nativeID: nativeID, approve: approve))
+            return
+        }
+        queue.sync {
+            guard let p = pending[nativeID] else { completion(piTombstones[nativeID] != nil ? .late : .unknown); return }
+            guard !p.done, p.pendingAck == nil else { completion(.late); return }
+            p.pendingAck = completion
+            p.timeout.cancel()
+            let commitCap = DispatchSource.makeTimerSource(queue: queue)
+            commitCap.schedule(deadline: .now() + piCommitSeconds)
+            commitCap.setEventHandler { [weak self] in self?.completePiCommit(id: nativeID, applied: false) }
+            // Retain the same Pending so the original long-poll's close callback cannot withdraw the
+            // commit state after its response flushes.
+            p.timeout = commitCap
+            commitCap.resume()
+            guard let reply = try? JSONSerialization.data(withJSONObject: ["id": nativeID, "approve": approve]) else {
+                completePiCommit(id: nativeID, applied: false)
+                return
+            }
+            p.respond(reply, nil)
         }
     }
 
@@ -139,7 +177,8 @@ final class HookBuddyProvider: AgentProvider {
             let group = DispatchGroup()
             for id in heldIds {
                 group.enter()
-                self.finish(id: id, approve: false, capped: false, message: reason, onSent: { group.leave() })
+                if self.passThroughOperationalFailures { self.releasePassthrough(id, reason: "quit") ; group.leave() }
+                else { self.finish(id: id, approve: false, capped: false, message: reason, onSent: { group.leave() }) }
             }
             group.notify(queue: .main, execute: completion)
         }
@@ -155,6 +194,19 @@ final class HookBuddyProvider: AgentProvider {
     }
 
     private func handlePermission(_ req: LocalIngestServer.Request) {
+        if passThroughOperationalFailures, req.body["probe"] as? Bool == true {
+            let response: [String: Bool]
+            if terminating || !enabled.buddy { response = ["unavailable": true] }
+            else { response = ["device": deviceConnected] }
+            req.respondJSON(response)
+            return
+        }
+        if passThroughOperationalFailures, let id = req.body["id"] as? String,
+           let applied = req.body["applied"] as? Bool {
+            queue.async { [weak self] in self?.completePiCommit(id: id, applied: applied) }
+            req.respondJSON(["ok": true])
+            return
+        }
         permissionCore(body: req.body,
                        respond: { data, onSent in req.respondData(data, onSent: onSent) },
                        registerClose: { onClose in req.watchClose(onClose) })
@@ -177,13 +229,13 @@ final class HookBuddyProvider: AgentProvider {
         // Quitting => deny any prompt landing in the drain window immediately (never held).
         if terminating {
             log(id: "-", decision: "auto-deny-quit")
-            respond(HookResponse.permission(event: "PermissionRequest", allow: false, message: "Beacon hub is quitting"), nil)
+            respond(piOperationalResponse() ?? HookResponse.permission(event: "PermissionRequest", allow: false, message: "Beacon hub is quitting"), nil)
             return
         }
         // Buddy toggle OFF => pass-through immediately (no verdict); Codex prompts in its own TUI (spec).
         if !enabled.buddy {
             log(id: "-", decision: "buddy-off-passthrough")
-            respond(HookResponse.permissionAsk(event: "PermissionRequest"), nil)
+            respond(piOperationalResponse() ?? HookResponse.permissionAsk(event: "PermissionRequest"), nil)
             return
         }
         // Device offline => the prompt can't be shown. Pass through (no verdict): "unreachable" is not a
@@ -191,7 +243,7 @@ final class HookBuddyProvider: AgentProvider {
         // prompt.
         if !deviceConnected {
             log(id: "-", decision: "offline-passthrough")
-            respond(HookResponse.permissionAsk(event: "PermissionRequest"), nil)
+            respond(piOfflineResponse() ?? HookResponse.permissionAsk(event: "PermissionRequest"), nil)
             let cb = onPromptUndeliverable
             let label = descriptor.label
             DispatchQueue.main.async { cb?("Beacon offline - \(label) not gated") }
@@ -214,7 +266,11 @@ final class HookBuddyProvider: AgentProvider {
         // If the cap equaled the caller's budget the socket
         // would already be dead at the cap and the caller would degrade to fail-open passthrough.
         cap.schedule(deadline: .now() + capSeconds)
-        cap.setEventHandler { [weak self] in self?.finish(id: nativeID, approve: false, capped: true) }
+        cap.setEventHandler { [weak self] in
+            guard let self else { return }
+            if self.passThroughOperationalFailures { self.releasePassthrough(nativeID, reason: "cap") }
+            else { self.finish(id: nativeID, approve: false, capped: true) }
+        }
         pending[nativeID] = Pending(respond: respond, timeout: cap)
         cap.resume()
         log(id: nativeID, decision: "prompt")
@@ -237,23 +293,59 @@ final class HookBuddyProvider: AgentProvider {
 
     // Release a held prompt pass-through (buddy toggled off, or the link dropped): no verdict, the agent
     // falls back to its own TUI prompt. `reason` only labels the log line.
+    private func completePiCommit(id: String, applied: Bool) {
+        guard let p = pending[id], !p.done else { return }
+        let ack = p.pendingAck
+        p.done = true
+        p.timeout.cancel()
+        pending.removeValue(forKey: id)
+        addPiTombstone(id)
+        log(id: id, decision: applied ? "pi-commit-applied" : "pi-commit-lost-race")
+        emitEndPrompt(id)
+        ack?(applied ? .applied : .late)
+    }
+
+    private func piOperationalResponse() -> Data? {
+        guard passThroughOperationalFailures else { return nil }
+        return try? JSONSerialization.data(withJSONObject: ["unavailable": true])
+    }
+
+    private func piOfflineResponse() -> Data? {
+        guard passThroughOperationalFailures else { return nil }
+        return try? JSONSerialization.data(withJSONObject: ["device": false])
+    }
+
+    private func addPiTombstone(_ id: String) {
+        guard passThroughOperationalFailures else { return }
+        let now = Date()
+        piTombstones[id] = now
+        let cutoff = now.addingTimeInterval(-Self.piTombstoneTTL)
+        piTombstones = piTombstones.filter { $0.value >= cutoff }
+    }
+
     private func releasePassthrough(_ id: String, reason: String) {
         guard let p = pending[id], !p.done else { return }
         p.done = true
         p.timeout.cancel()
         pending.removeValue(forKey: id)
+        addPiTombstone(id)
         log(id: id, decision: "\(reason)-release-passthrough")
-        p.respond(HookResponse.permissionAsk(event: "PermissionRequest"), nil)
+        p.respond(piOperationalResponse() ?? HookResponse.permissionAsk(event: "PermissionRequest"), nil)
         emitEndPrompt(id)
+        p.pendingAck?(.late)
     }
 
     // Peer (Codex) closed the held connection => the user answered in the TUI. Free silently (no HTTP
     // write, no deny) so a stale prompt can't self-expire to a false verdict or block later permissions.
     private func withdraw(id: String) {
         guard let p = pending[id], !p.done else { return }
+        // Pi's held long-poll closes immediately after receiving the device decision; that is not a
+        // local-TUI win. The commit route is now authoritative until its short bounded cap expires.
+        if p.pendingAck != nil { return }
         p.done = true
         p.timeout.cancel()
         pending.removeValue(forKey: id)
+        addPiTombstone(id)
         log(id: id, decision: "withdrawn-resolved-elsewhere")
         emitEndPrompt(id)
     }
@@ -324,6 +416,7 @@ final class HookBuddyProvider: AgentProvider {
                                respond: { _, onSent in onSent?() }, registerClose: { _ in })
         }
     }
+    func commitPiForTest(nativeID: String, applied: Bool) { queue.sync { completePiCommit(id: nativeID, applied: applied) } }
     func lastNativeIdForTest() -> String? { queue.sync { lastNativeId } }
     func heldCountForTest() -> Int { queue.sync { pending.values.filter { !$0.done }.count } }
     func expirePromptForTest(nativeID: String) { queue.sync { self.finish(id: nativeID, approve: false, capped: true) } }
@@ -367,15 +460,15 @@ final class HookBuddyProvider: AgentProvider {
     }
 
     private static func gitBranch(_ cwd: String) -> String? {
-        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        p.arguments = ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"]
-        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = Pipe()
-        do { try p.run() } catch { return nil }
-        p.waitUntilExit()
-        guard p.terminationStatus == 0 else { return nil }
-        let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        let b = out.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (b.isEmpty || b == "HEAD") ? nil : b
+        let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"]
+        let pipe = Pipe(); process.standardOutput = pipe; process.standardError = Pipe()
+        do { try process.run() } catch { return nil }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let branch = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (branch.isEmpty || branch == "HEAD") ? nil : branch
     }
 
     private func log(id: String, decision: String) {

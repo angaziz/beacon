@@ -22,6 +22,7 @@ the device keeps an absent block's last values). A null/omitted window `pct` => 
           "entries":["10:42 git push","10:41 yarn test"],
           "prompt":{"id":"p07","agent":"claude","tool":"Bash","hint":"rm -rf /tmp/build","qlen":2}}}
 ```
+
 - Absent `buddy.prompt` => idle. `pct` is an integer 0..100 or JSON null (device reads null/absent as -1).
 - The device codec (`hub_parse_status`) + `test_hub_proto` assert exactly this shape.
 - `usage.providers` (**BREAKING**, design 2026-07-19, clean cutover from the old fixed
@@ -48,6 +49,7 @@ loc-only frame on meaningful (> ~0.01 deg) change — **never** on the 30s heart
 ```json
 {"v":1,"loc":{"lat":37.76,"lon":-122.42,"tz":"America/Los_Angeles","name":"Mission, San Francisco"}}
 ```
+
 - Device precedence: hub `loc` > cached NVS > IP geolocation; a hub fix is never overwritten by IP.
 - Permission denied / no fix => the hub omits `loc` and the device keeps its IP-based place name.
 
@@ -61,6 +63,7 @@ on any session-state change and on (re)connect; parsed by `hub_parse_sessions` i
 {"v":1,"sessions":[{"id":"s3","agent":"claude","label":"beacon · fix/109","state":"attention","ts":1719400000},
                    {"id":"s1","agent":"codex","label":"api · main","state":"working","ts":1719399860}]}
 ```
+
 - Newest-first (hub-sorted by last update). **Frozen caps** (worst case asserted < 1024 B): `sessions`
   length ≤ **5**; `id` ≤ **6** chars (`s` + monotonic counter, wraps mod 100000); `label` ≤ **28** chars
   (`folder · branch`; default branches `main`/`master` dropped); `state` ∈ {`working`, `waiting`,
@@ -88,6 +91,7 @@ on any session-state change and on (re)connect; parsed by `hub_parse_sessions` i
 {"v":1,"ack":"s3","ok":true}                                 // focus attempted (best-effort tier succeeded)
 {"v":1,"err":"unknown_session","id":"s3"}                    // session id the hub never minted / already reaped
 ```
+
 - `id` echoes the hub-minted short id (see §D). The hub maps it back to the real hook request id.
 - `ok:false` = the device decided but the hub had already resolved the prompt (e.g. the ~590 s fail-closed
   cap fired first, or it was superseded). The device must surface this, not treat it as success.
@@ -136,7 +140,7 @@ prompt-id `ack`. On `ok:true`, `count` = applied ticker count. On reject the dev
 list (fail closed) and reports the first `err`:
 
 | `err` | meaning |
-|---|---|
+| --- | --- |
 | `too_many_tickers` | assembled count > MAX_TICKERS (16) |
 | `empty` | assembled count == 0 |
 | `bad_source` | `src` not `binance`/`yahoo` |
@@ -177,6 +181,7 @@ fields (not a nested `config` object). The hub adopts only when its store is pri
 ## C. Upstream shapes (RECORDED — real token-redacted captures, 2026-06-11)
 
 ### C.1 Claude usage — statusline `rate_limits` (PRIMARY); `oauth/usage` (FALLBACK)
+
 **Live Claude usage comes from the statusline `rate_limits` (§C.4)** — first-party, no token. The
 `oauth/usage` fallback is **intermittent**: it has returned 429 (Anthropic's subscription-limits
 change) but answered 200 at this capture, so keep it best-effort. Fallback endpoint headers:
@@ -185,6 +190,7 @@ change) but answered 200 at this capture, so keep it best-effort. Fallback endpo
 Normalizes to `usage.claude` (`utilization`->`pct`, ISO `resets_at`->epoch). `resets_at` carries
 microsecond precision + a `+00:00` offset; extra windows (`seven_day_sonnet`, `extra_usage`, ...) are
 ignored. Real redacted capture:
+
 ```json
 {"five_hour":{"utilization":8.0,"resets_at":"2026-06-11T03:30:00.110763+00:00"},
  "seven_day":{"utilization":32.0,"resets_at":"2026-06-15T00:00:01.110782+00:00"},
@@ -193,12 +199,14 @@ ignored. Real redacted capture:
 ```
 
 ### C.2 Codex usage — `GET chatgpt.com/backend-api/wham/usage`
+
 Headers: `Authorization: Bearer <tok>`, `chatgpt-account-id: <id>`. Token: `~/.codex/auth.json`
 (`tokens.access_token`, `tokens.account_id`). The draft P2-0 guess matched the live shape: the path is
 `rate_limit.{primary_window,secondary_window}.{used_percent,reset_at}` with `reset_at` in epoch
 seconds. `used_percent` arrives as an Int here (the normalizer also accepts Double/String); extra
 fields (`allowed`, `limit_reached`, `limit_window_seconds`, `reset_after_seconds`, and the top-level
 `credits`/`plan_type`/...) are ignored. Normalizes to `usage.codex`. Real redacted capture:
+
 ```json
 {"plan_type":"plus",
  "rate_limit":{"allowed":false,"limit_reached":true,
@@ -206,12 +214,14 @@ fields (`allowed`, `limit_reached`, `limit_window_seconds`, `reset_after_seconds
    "secondary_window":{"used_percent":100,"limit_window_seconds":604800,"reset_after_seconds":15234,"reset_at":1781148895}},
  "credits":{"has_credits":false,"unlimited":false,"balance":"0"}}
 ```
+
 Local fallback (D1, **unimplemented**): the `codex` CLI also records usage token-free in
 `~/.codex/sessions/**/rollout-*.jsonl` under `rate_limits.{primary,secondary}` — note the keys differ
 from the endpoint's `*_window` (they are null until a window is hit), so a future wiring needs its own
 normalizer, not `UsageNormalizer.codex`.
 
 ### C.3 Claude Code permission hook (`PermissionRequest`, primary; `PreToolUse`, back-compat) — CONFIRMED (CC v2.1.x docs)
+
 Claude Code supports native **`"type":"http"`** hooks, but Beacon does **not** use them: CC reports an
 unreachable http hook as a per-event error line (`... hook [http://127.0.0.1:8765/hook] failed: connect
 ECONNREFUSED`), which is noise on every event whenever the hub is not running. All Beacon events go
@@ -226,15 +236,18 @@ socket is open. Lifecycle events are fire-and-forget (`curl -m 1`). `PreToolUse`
 (and a narrow matcher like `Bash` misses `Write`/`Edit`); `PermissionRequest` fires **only when a tool
 actually needs permission**, so `matcher:"*"` is safe and covers all tools. The bridge still accepts
 `PreToolUse` for back-compat. Request body (same fields both events):
+
 ```json
 {"session_id":"abc","tool_use_id":"toolu_01","hook_event_name":"PermissionRequest",
  "tool_name":"Write","tool_input":{"file_path":"/x","command":"...","description":"..."}}
 ```
+
 Hint = `tool_input.command` (Bash) | `file_path` | `description`. Correlation id = `tool_use_id`/
 `session_id` (the hub mints its own short BLE id and maps it).
 
 **Response shape DIFFERS by event** (`HookResponse.permission`, `Protocol.swift`) — emitting the wrong
 one silently fails to gate the tool:
+
 ```json
 // PermissionRequest (primary): decision.behavior; message only on deny; updatedInput NOT required for allow
 {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}
@@ -250,11 +263,13 @@ one silently fails to gate the tool:
 // interactive prompt.
 {}
 ```
+
 HTTP 2xx + body, no outer envelope; the shim prints that body verbatim on stdout. Hook `timeout` is in
 **seconds** (config: 600 to cover the ~590 s hold). Non-2xx/timeout/hub down = **non-blocking (CC
 proceeds, fail-OPEN)** -- so the hub MUST return `deny` within the hold window; never let it hang.
 
 ### C.4 Session / statusline — CONFIRMED (CC v2.1.x docs)
+
 `SessionStart`(matcher startup/resume/clear/compact)/`Stop`/`Notification`/`SessionEnd` hooks (through
 the `beacon-claude-hook` shim, §C.3) =>
 buddy idle. Stop body has `stop_reason`; Notification has `message`; SessionEnd carries `session_id`
@@ -267,6 +282,7 @@ statusline renderer** (forwards the JSON to `127.0.0.1:8765/statusline`, then de
 command passed as args), so the user's status bar is unchanged. Bind port is the fixed **8765**.
 
 ### C.5 Codex hooks (buddy) — VERIFIED (openai/codex codex-rs/hooks @ 0fb559f0; codex-cli 0.140.0)
+
 Codex ships a Claude-compatible command-hook system (feature `hooks`, stable + default-on). The Codex
 buddy adapter bridges it with a shim, `~/.beacon/beacon-codex-hook` (installed alongside the Claude
 statusline shim). Codex spawns the shim per event with the event JSON on stdin and reads the decision
@@ -336,6 +352,15 @@ hooks as untrusted (e.g. a Codex build whose hashing changed, or a pre-existing 
 group shifting our group index): re-run install, or trust the Beacon hooks once from the Codex TUI
 `/hooks` menu.
 
+### C.6 Pi extension (session mirror)
+
+Pi auto-discovers the Beacon-managed `~/.pi/agent/extensions/beacon.ts` extension. The installer writes a timestamped backup before replacing an unrecognized file; a content-equality check (modulo surrounding whitespace) identifies the current managed source and offers reinstall for edited, truncated, or version-mismatched files.
+
+**Lifecycle -> session state.** Interactive (`ctx.hasUI`) events POST JSON to `http://127.0.0.1:8765/pi/hook`: `session_start` sends `SessionStart` with `session_id`, `cwd`, `host_app`, `focus_url`, and `bundle_id`; `agent_start` sends `UserPromptSubmit`; `agent_settled` sends `Stop`; and `session_shutdown` awaits a bounded `SessionEnd` POST. The native session id is the session-file basename (stable across resume), with a `pi-<timestamp>` fallback. On a new session id the extension ends the prior session first. Pi's `agent_settled`, rather than `agent_end`, means no retry, compaction retry, or queued continuation remains.
+
+**Permission gate.** Without pi-permission-system, `beacon.ts` asks for bash calls and writes/edits outside the project, racing the local Allow/Deny selector with `/pi/permission`; infrastructure failures silently pass through to the selector. With pi-permission-system, Beacon registers the `beacon` authorizer and the installer appends it to `authorizerChain` with a timestamped backup. `path` and `external_directory` defer immediately so pps keeps their local prompt; all other Beacon failures defer to pps. Pi still has no usage entry or question card. The extension harness is `node --experimental-strip-types hub/pi-extension-tests/run.mjs` (see [`pi-extension-tests/README.md`](pi-extension-tests/README.md)).
+
+**Truthful device ack.** Before a tool-call hold, the extension POSTs `{"probe":true}` to `/pi/permission`; the hub responds immediately with `{"device":true}` when gating is available, `{"device":false}` when the device is offline, or `{"unavailable":true}` when Pi gating is disabled or draining. A successful probe is only reachability, not a decision. The subsequent tool-call request is held without a 400 ms timer. After a device choice, the hub returns `{"id":"<native-id>","approve":true|false}` to the extension but holds the BLE command ack for a commit POST `{"id":"<native-id>","applied":true|false}`. `applied:true` yields the unchanged device `{"ack":"<short-id>","ok":true}`; `applied:false`, a duplicate/late commit, an undeliverable held request, or no commit within 2 s yields `ok:false`. Pi asks that cannot be held return `{"device":false}` for an offline device and `{"unavailable":true}` for disabled, cap, drain, or quit states. Codex retains its existing `{}` pass-through wire shape. This prevents a device success state when its decision lost the local-TUI race.
 
 ## D. Hub-side policies
 
@@ -373,7 +398,7 @@ group shifting our group index): re-run install, or trust the Beacon hooks once 
   that provider's install (`HooksInstaller.install(providerID:)` — Claude shells out to
   `build-app.sh install-hooks` and installs the statusline shim to the no-space path
   `~/.beacon/beacon-statusline` + the hook shim to `~/.beacon/beacon-claude-hook`; Codex writes its
-  managed `~/.codex/config.toml` block).
+  managed `~/.codex/config.toml` block; Pi writes its managed `~/.pi/agent/extensions/beacon.ts` extension).
   Claude detection requires BOTH the `PermissionRequest` hook (`command` == the installed
   `~/.beacon/beacon-claude-hook`, exact match) AND a `statusLine.command` containing the statusline
   shim — not any beacon hook anywhere. A legacy `url=http://127.0.0.1:8765/hook` hook reads as NOT

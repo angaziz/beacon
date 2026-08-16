@@ -41,3 +41,4 @@ Thumbs.db
 
 # ---- Capture tool output (regenerable; published copies live in docs/assets/screens) ----
 firmware/tools/capture/shots/
+.pi/
