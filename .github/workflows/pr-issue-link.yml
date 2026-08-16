@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') }}
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@v9
         with:
           script: |
             const { owner, repo } = context.repo;
