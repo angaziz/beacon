@@ -21,6 +21,13 @@ enum HooksInstaller {
     // command string written into ~/.codex/config.toml AND fed into the trust hash.
     static let codexShimInstallPath = NSString(string: "~/.beacon/beacon-codex-hook").expandingTildeInPath
 
+    // Pi auto-discovers every module in ~/.pi/agent/extensions/, so install = write one self-contained
+    // file. Wholly Beacon-managed; see PiHooks.
+    static let piExtensionInstallPath =
+        NSString(string: "~/.pi/agent/extensions/beacon.ts").expandingTildeInPath
+    static let ppsConfigPath =
+        NSString(string: "~/.pi/agent/extensions/pi-permission-system/config.json").expandingTildeInPath
+
     private static var defaultSettingsURL: URL {
         URL(fileURLWithPath: NSString(string: "~/.claude/settings.json").expandingTildeInPath)
     }
@@ -47,7 +54,8 @@ enum HooksInstaller {
         switch providerID {
         case "claude": try installClaude()
         case "codex":  try installCodex()
-        default:       break
+        case "pi":     try installPi()
+        default:        break
         }
     }
 
@@ -56,8 +64,40 @@ enum HooksInstaller {
         switch providerID {
         case "claude": return isInstalled()
         case "codex":  return isCodexInstalled()
-        default:       return true
+        case "pi":     return isPiInstalled()
+        default:        return true
         }
+    }
+
+    // Install the managed pi extension. A byte-current file is left untouched. An existing unrecognized
+    // file is backed up before overwrite, and a symlink is resolved so its target is updated in place.
+    static func installPi(extensionPath: String = piExtensionInstallPath, ppsConfigPath: String = ppsConfigPath) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(atPath: (extensionPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        let exists = fm.fileExists(atPath: extensionPath)
+        let target = exists ? realpathOrSelf(extensionPath) : extensionPath
+        let current = (try? String(contentsOfFile: target, encoding: .utf8)) ?? ""
+        if !exists || !PiHooks.isCurrent(current) {
+            if exists, !current.isEmpty { try? fm.copyItem(atPath: target, toPath: "\(target).bak-\(Self.backupStamp.string(from: Date()))") }
+            try Self.atomicWriteThrough(target: target, content: PiHooks.extensionSource)
+        }
+        try installPpsAuthorizerChain(configPath: ppsConfigPath)
+    }
+
+    static func installPpsAuthorizerChain(configPath: String = ppsConfigPath) throws {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: configPath), let existing = try? String(contentsOfFile: configPath, encoding: .utf8),
+              let merged = PiHooks.mergePpsAuthorizerChain(existing), merged != existing else { return }
+        let target = realpathOrSelf(configPath)
+        try fm.copyItem(atPath: target, toPath: "\(target).bak-\(Self.backupStamp.string(from: Date()))")
+        try atomicWriteThrough(target: target, content: merged)
+    }
+
+    static func isPiInstalled(extensionPath: String = piExtensionInstallPath, ppsConfigPath: String = ppsConfigPath) -> Bool {
+        guard let content = try? String(contentsOfFile: extensionPath, encoding: .utf8), PiHooks.isCurrent(content) else { return false }
+        guard FileManager.default.fileExists(atPath: ppsConfigPath) else { return true }
+        guard let pps = try? String(contentsOfFile: ppsConfigPath, encoding: .utf8) else { return false }
+        return PiHooks.ppsAuthorizerChainContainsBeacon(pps)
     }
 
     static func installClaude() throws {
@@ -223,7 +263,7 @@ enum HooksInstaller {
     }
 
     private static let backupStamp: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"; return f
+        let formatter = DateFormatter(); formatter.dateFormat = "yyyyMMdd-HHmmss"; return formatter
     }()
 
     // Bundled (shipped .app) path takes precedence; dev fallback is the repo's hub/ dir next to Package.swift.

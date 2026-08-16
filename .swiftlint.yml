@@ -1,0 +1,15 @@
+# Editor/lint-integration config (the CI gate is swift build + swift test).
+# Test suites deliberately use terse fixture names (p, sink, d, k) and
+# aligned table-driven case arrays; default thresholds fight that style.
+identifier_name:
+  min_length:
+    warning: 1
+    error: 1
+large_tuple:
+  warning: 3
+  error: 4
+line_length:
+  warning: 130
+  error: 200
+comma: false
+trailing_comma: false

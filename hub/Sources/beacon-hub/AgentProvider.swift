@@ -11,6 +11,9 @@ protocol AgentProvider: AnyObject {
     func setEnabled(_ caps: EnabledCapabilities)   // live toggle; stops holding prompts / polling as needed
     func stop()
     func resolvePrompt(nativeID: String, approve: Bool) -> ResolveOutcome
+    // Most providers resolve synchronously. Pi waits for its extension to commit the race winner before
+    // the device gets a truthful ack; the default preserves the existing synchronous providers.
+    func resolvePrompt(nativeID: String, approve: Bool, completion: @escaping (ResolveOutcome) -> Void)
     func focusSession(nativeKey: String) -> Bool   // sessions capability; false = unsupported / failed
 
     // Usage plane. nil source => the provider has no usage capability (nothing to poll).
@@ -25,5 +28,8 @@ extension AgentProvider {
     func shouldPollUsage(now: Date, interval: TimeInterval) -> Bool { true }
     func noteUsageOutcome(_ outcome: ProviderOutcome) {}
     func resolvePrompt(nativeID: String, approve: Bool) -> ResolveOutcome { .unknown }
+    func resolvePrompt(nativeID: String, approve: Bool, completion: @escaping (ResolveOutcome) -> Void) {
+        completion(resolvePrompt(nativeID: nativeID, approve: approve))
+    }
     func focusSession(nativeKey: String) -> Bool { false }
 }
