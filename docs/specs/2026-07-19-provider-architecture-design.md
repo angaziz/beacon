@@ -3,6 +3,8 @@
 Status: approved design, 2026-07-19. Authority: this doc governs the multi-provider refactor; wire details land in `hub/CONTRACT.md` when implemented.
 
 > **Update 2026-07-24 (issue #136):** omp added as a third provider (buddy plane only — no usage entry). The Codex-specific `CodexProvider` was generalized into `HookBuddyProvider` (injected `descriptor`/`routePath`/`capSeconds`/optional `usageSource`), now shared by Codex (`/codex/hook`, usage source) and omp (`/omp/hook`, none). omp installs a managed extension at `~/.omp/agent/extensions/beacon.ts`; wire shape and fail-closed timing in `hub/CONTRACT.md` §C.6.
+>
+> **Update 2026-08-16 (issue #148):** omp provider removed — no longer used by the maintainer, so it was untested in practice. `HookBuddyProvider` stays (Codex-only again); §C.6 deleted from `hub/CONTRACT.md`.
 
 ## Goal
 
@@ -18,7 +20,7 @@ Non-goals (this iteration): out-of-process third-party plugins (the internal eve
 ## Decisions
 
 | Decision | Choice | Rationale |
-|---|---|---|
+| --- | --- | --- |
 | Plugin mechanism | Compiled-in Swift protocol (`AgentProvider`) + registry | Simplicity first; type-safe; the existing `UsageProvider` seam proves the pattern. Out-of-process API is additive later. |
 | Toggle location | Hub menubar, `UserDefaults` | Providers run on the Mac; toggling starts/stops pollers and hook handling live. |
 | Usage wire format | Clean cutover to a provider array (see below) | Pre-1.0, hub+firmware ship together, web flasher makes reflash trivial. No dual emission. |
@@ -127,7 +129,7 @@ Codex hooks are command-type (spawn argv, JSON on stdin, decision on stdout). Br
 ## Toggle semantics (normative)
 
 | Toggle | OFF effect |
-|---|---|
+| --- | --- |
 | Usage | Provider excluded from `usage.providers`; its poller stops. |
 | Coding Buddy | Provider's sessions and prompts excluded from frames; permission hooks answered with no-verdict immediately (pass-through to the harness's own UI); pending held prompts for that provider are released pass-through on toggle-off. |
 

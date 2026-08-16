@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/angaziz/beacon)
 
-A dark and futuristic companion on a 2.16" AMOLED touch device — built on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**. It sits next to your keyboard and, at a glance, shows your Claude Code / Codex usage, live markets, weather, and a coding "buddy" for Claude Code, Codex, and Oh My Pi (omp) — approve Claude/Codex tool-prompts right on it, and see which omp session is waiting on you — without breaking focus on your Mac.
+A dark and futuristic companion on a 2.16" AMOLED touch device — built on the **Waveshare ESP32-S3-Touch-AMOLED-2.16**. It sits next to your keyboard and, at a glance, shows your Claude Code / Codex usage, live markets, weather, and a coding "buddy" for Claude Code and Codex — approve tool-prompts right on it — without breaking focus on your Mac.
 
 ![Beacon on a desk](docs/assets/hero.jpg)
 
@@ -18,11 +18,11 @@ A dark and futuristic companion on a 2.16" AMOLED touch device — built on the 
 Five screens, navigated by swipe + motion gestures:
 
 | Screen | Shows | Source |
-|---|---|---|
+| --- | --- | --- |
 | Home | clock, date, weather, humidity | WiFi (direct) |
 | Finance | FX, crypto, indices, ETFs — curated from the Mac hub | WiFi (direct) |
 | AI Usage | Claude + Codex, **both** 5h and 7-day windows + reset | Mac hub (BLE) |
-| Coding Buddy | live per-session list (state + folder·branch + age), approve/deny tool-permission prompts (Claude Code + Codex), tap a session to focus its terminal | pluggable agent providers (Claude Code, Codex CLI, Oh My Pi) via the Mac hub (BLE) |
+| Coding Buddy | live per-session list (state + folder·branch + age), approve/deny tool-permission prompts (Claude Code + Codex), tap a session to focus its terminal | pluggable agent providers (Claude Code, Codex CLI) via the Mac hub (BLE) |
 | Settings | WiFi, brightness, theme picker, sleep, etc. | local (NVS) |
 
 ## What works today
@@ -56,7 +56,7 @@ The UI is fully themeable — **7 themes**, each a bespoke per-screen experience
 Every theme, across all five screens plus the two extra Coding Buddy states, captured straight from the device framebuffer:
 
 | Theme | Home | Markets | AI Usage | Coding Buddy | Approval | Question | Settings |
-|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- |
 | **Editorial Index** | <img src="docs/assets/screens/editorial_HOME.png" width="150"> | <img src="docs/assets/screens/editorial_MARKETS.png" width="150"> | <img src="docs/assets/screens/editorial_LIMITS.png" width="150"> | <img src="docs/assets/screens/editorial_CLAUDE.png" width="150"> | <img src="docs/assets/screens/editorial_CLAUDE_prompt.png" width="150"> | <img src="docs/assets/screens/editorial_CLAUDE_question.png" width="150"> | <img src="docs/assets/screens/editorial_SETTINGS.png" width="150"> |
 | **Aerospace HUD** | <img src="docs/assets/screens/hud_HOME.png" width="150"> | <img src="docs/assets/screens/hud_MARKETS.png" width="150"> | <img src="docs/assets/screens/hud_LIMITS.png" width="150"> | <img src="docs/assets/screens/hud_CLAUDE.png" width="150"> | <img src="docs/assets/screens/hud_CLAUDE_prompt.png" width="150"> | <img src="docs/assets/screens/hud_CLAUDE_question.png" width="150"> | <img src="docs/assets/screens/hud_SETTINGS.png" width="150"> |
 | **Dot-Matrix** (default) | <img src="docs/assets/screens/dotmatrix_HOME.png" width="150"> | <img src="docs/assets/screens/dotmatrix_MARKETS.png" width="150"> | <img src="docs/assets/screens/dotmatrix_LIMITS.png" width="150"> | <img src="docs/assets/screens/dotmatrix_CLAUDE.png" width="150"> | <img src="docs/assets/screens/dotmatrix_CLAUDE_prompt.png" width="150"> | <img src="docs/assets/screens/dotmatrix_CLAUDE_question.png" width="150"> | <img src="docs/assets/screens/dotmatrix_SETTINGS.png" width="150"> |
@@ -81,7 +81,7 @@ Just validating a fresh board? Flash the bring-up spike first — [`docs/spikes/
 
 ## The macOS hub
 
-Beacon Hub is a small macOS menubar app — the device's private-data plane. It reads your Claude Code + Codex usage, bridges Claude Code and Codex tool-permission prompts to the device over a bonded Bluetooth link, and tracks live sessions across all three agents. Your Claude/Codex credentials stay on the Mac (omp needs none — it rides a local extension); only normalized percentages, reset times, and prompt text ever cross BLE.
+Beacon Hub is a small macOS menubar app — the device's private-data plane. It reads your Claude Code + Codex usage, bridges Claude Code and Codex tool-permission prompts to the device over a bonded Bluetooth link, and tracks live sessions across both agents. Your Claude/Codex credentials stay on the Mac; only normalized percentages, reset times, and prompt text ever cross BLE.
 
 It's also where you **curate the Finance screen**: search Binance + Yahoo from the menubar, pick the tickers you care about, and they sync to the device over BLE and apply on the spot — no firmware edit, no re-flash, no reboot.
 
@@ -89,20 +89,20 @@ Providers are modular: each has independent **Usage** and **Coding Buddy** toggl
 
 ### Provider feature parity
 
-Claude Code and Codex bridge tool-permission prompts to the device and also stream AI usage. Oh My Pi is session-only: it resolves tool approval internally before any extension can answer, so Beacon shows you *that* an omp session is waiting and jumps you to it, rather than asking twice.
+Claude Code and Codex both bridge tool-permission prompts to the device and stream AI usage.
 
-| Capability | Claude Code | Codex CLI | Oh My Pi |
-|---|---|---|---|
-| AI usage (5h + 7-day windows) | ✅ | ✅ | — |
-| Live session list (state · folder·branch · age) | ✅ | ✅ | ✅ |
-| Approve / deny tool-permission prompts from the device | ✅ | ✅ | — |
-| Auto-deny on device-offline / hub-quit | ✅ | ✅ | — |
-| "Tap to answer on Mac" question card | ✅ | ❌ | ✅ |
-| Tap a session to focus its terminal | ✅ | ❌ | ✅ |
-| Token + context-window readout | ✅ | ❌ | ❌ |
-| Recent-activity feed | ✅ | ❌ | ❌ |
+| Capability | Claude Code | Codex CLI |
+| --- | --- | --- |
+| AI usage (5h + 7-day windows) | ✅ | ✅ |
+| Live session list (state · folder·branch · age) | ✅ | ✅ |
+| Approve / deny tool-permission prompts from the device | ✅ | ✅ |
+| Auto-deny on device-offline / hub-quit | ✅ | ✅ |
+| "Tap to answer on Mac" question card | ✅ | ❌ |
+| Tap a session to focus its terminal | ✅ | ❌ |
+| Token + context-window readout | ✅ | ❌ |
+| Recent-activity feed | ✅ | ❌ |
 
-omp's tap-to-focus and question card work because its in-process extension reads host context (terminal + Warp pane) from the shell environment and sees omp's approval events; Codex's command hooks carry neither. The rest are surface limits, not menubar toggles: Codex exposes no statusline (tokens/context) or question event; omp adds no usage entry by design (it would duplicate the Claude/Codex accounts it proxies) and has no statusline. omp cannot offer remote approve/deny at all: unlike the Claude and Codex permission hooks, which fire only when the agent would prompt and whose answer *replaces* that prompt, omp settles approval before extensions run — so a device prompt could only ever be a second one (details in [`hub/CONTRACT.md`](hub/CONTRACT.md) §C.6).
+Codex's ❌s are surface limits, not menubar toggles: its command hooks carry no host context (terminal + Warp pane) for tap-to-focus, and it exposes no statusline (tokens/context) or question event.
 
 ![Beacon Hub menubar app](docs/assets/hub.png)
 
@@ -110,12 +110,12 @@ omp's tap-to-focus and question card work because its in-process extension reads
 
 **Install.** Download `Beacon-Hub-<version>-macos-apple-silicon.zip` from [Releases](https://github.com/angaziz/beacon/releases), unzip, and drag it to Applications. If macOS blocks it on first launch, use the Gatekeeper "Open Anyway" step — full details in [`hub/README.md`](hub/README.md). No release published yet? It builds from source in a few minutes.
 
-**Pair.** Open Beacon Hub; the **Set up Beacon** window walks three checks — Bluetooth permission, device pairing, and a one-click **Install hooks** for Claude Code. Codex and Oh My Pi each have their own per-provider **Set up** button (Codex writes a managed `~/.codex/config.toml` block; omp installs a managed `~/.omp/agent/extensions/beacon.ts`).
+**Pair.** Open Beacon Hub; the **Set up Beacon** window walks three checks — Bluetooth permission, device pairing, and a one-click **Install hooks** for Claude Code. Codex has its own per-provider **Set up** button (it writes a managed `~/.codex/config.toml` block).
 
 **Permissions.** The hub asks for three on first run. The first two are required for the BLE features; everything else (weather, markets, time) works without the hub.
 
 | Prompt | Why |
-|---|---|
+| --- | --- |
 | **Bluetooth** | The hub is the BLE central that pairs with the device and streams AI usage + Coding Buddy prompts. Deny it and the hub cannot see the device at all. |
 | **Keychain — "Claude Code-credentials"** | Claude Code stores its OAuth token in this Keychain item; the hub reads it to fetch your usage. Choose **Always Allow** to avoid re-prompting on every launch. The token never leaves your Mac — only normalized percentages and reset times go over BLE. |
 | **Location** (optional) | A one-shot fix on launch/wake gives the device an accurate place name and time zone. Deny it and the device simply falls back to IP geolocation. |

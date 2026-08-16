@@ -3,28 +3,24 @@ import BeaconHubKit
 
 // Generic hook-buddy provider (issue #136; generalized from the 2026-07-19 CodexProvider). Drives the
 // buddy plane (sessions + prompts) for any agent that POSTs the Claude/Codex-compatible hook shape to a
-// LocalIngestServer route. Two agents use it today: Codex (via the beacon-codex-hook shim -> /codex/hook,
-// with a ~/.codex/auth.json usage source) and omp (via the managed beacon.ts extension -> /omp/hook, no
-// usage source). Session lifecycle:
+// LocalIngestServer route. Codex uses it via the beacon-codex-hook shim -> /codex/hook with a
+// ~/.codex/auth.json usage source. Session lifecycle:
 //   SessionStart      => register session (label = cwd basename + git branch)
 //   UserPromptSubmit  => working
 //   Stop              => attention
 //   SessionEnd        => remove
 //   PermissionRequest => held open until the device decides (mirrors ClaudeCodeProvider), fail-closed at
 //                        `capSeconds`. The cap MUST fire before the caller's own deadline so the deny
-//                        reaches the still-open socket. Two timing chains, per instance:
-//                          Codex: hub 575 < curl --max-time 585 < Codex hook timeout 590
-//                          omp:   device 25 < hub 26 < extension fetch abort 28 < omp handler ceiling 30
+//                        reaches the still-open socket: Codex hub 575 < curl --max-time 585 < hook timeout 590.
 // Byte-compatible with the Claude decision shape via HookResponse. State is confined to the ingest
 // server's `queue`; sink calls hop to the main actor (where the mux lives). Logs only id + decision + ts.
 final class HookBuddyProvider: AgentProvider {
 
     let descriptor: ProviderDescriptor
-    let usageSource: UsageProvider?      // nil => no usage capability (omp); Codex passes its poller
+    let usageSource: UsageProvider?      // Codex passes its poller
 
     // A prompt couldn't be shown (device offline) => the app raises a menubar alert: the buddy is not
-    // gating this agent until the link is back. Under omp's default `yolo` approvalMode a pass-through
-    // means the tool simply runs, so this alert is the only signal the gate is absent.
+    // gating this agent until the link is back.
     var onPromptUndeliverable: ((String) -> Void)?
 
     private let server: LocalIngestServer
@@ -52,8 +48,7 @@ final class HookBuddyProvider: AgentProvider {
     private var lastNativeId: String?
 
     // Tap-to-open host context (issue #136 follow-up). Populated from the hook body's host_app/
-    // focus_url/bundle_id on SessionStart (the omp extension reads process.env; Codex sends none, so
-    // its focus stays a no-op). Queue-confined like `pending`. focusRunner is injectable for tests.
+    // focus_url/bundle_id on SessionStart. Queue-confined like `pending`. focusRunner is injectable for tests.
     private let hosts = HostContextStore()
     private var focusRunner: (FocusTarget) -> Bool = { SessionFocus.focus($0) }
 
@@ -117,9 +112,6 @@ final class HookBuddyProvider: AgentProvider {
     }
     func setFocusRunnerForTest(_ f: @escaping (FocusTarget) -> Bool) { queue.sync { focusRunner = f } }
 
-    // No poll gate: neither Codex nor omp has a statusline-equivalent liveness source, so they always
-    // poll when enabled (omp has no usageSource at all).
-
     // Mirror the BLE link state: an arriving prompt passes through instead of being held invisibly, and
     // prompts already held when the link drops are released pass-through (they can no longer be
     // answered on the device). Safe to call from any thread.
@@ -175,10 +167,8 @@ final class HookBuddyProvider: AgentProvider {
     private func permissionCore(body: [String: Any],
                                 respond: @escaping (Data, (() -> Void)?) -> Void,
                                 registerClose: (@escaping () -> Void) -> Void) {
-        // Provider without the .prompts capability (omp since v4): it must never hold a tool call. A
-        // stale v3 extension still POSTing PermissionRequest reads {} as passthrough, so it stops
-        // gating immediately rather than at the next reinstall. Checked before `terminating`: a
-        // non-gating provider has nothing to fail closed.
+        // Provider without the .prompts capability must never hold a tool call. Checked before
+        // `terminating`: a non-gating provider has nothing to fail closed.
         if !descriptor.capabilities.contains(.prompts) {
             log(id: "-", decision: "no-prompt-capability-passthrough")
             respond(HookResponse.permissionAsk(event: "PermissionRequest"), nil)
@@ -198,7 +188,7 @@ final class HookBuddyProvider: AgentProvider {
         }
         // Device offline => the prompt can't be shown. Pass through (no verdict): "unreachable" is not a
         // decision, and a deny would fail a tool call the user never saw. Codex falls back to its own TUI
-        // prompt; omp (built-in approval already done) just runs -- hence the menubar alert.
+        // prompt.
         if !deviceConnected {
             log(id: "-", decision: "offline-passthrough")
             respond(HookResponse.permissionAsk(event: "PermissionRequest"), nil)
@@ -220,8 +210,8 @@ final class HookBuddyProvider: AgentProvider {
         lastNativeId = nativeID
         let cap = DispatchSource.makeTimerSource(queue: queue)
         // Fail-closed cap. STRICT ordering invariant: the hub cap MUST fire before the caller's own
-        // deadline so its deny reaches the still-open socket (Codex: 575 < curl 585 < hook 590; omp:
-        // 26 < fetch abort 28 < handler ceiling 30). If the cap equaled the caller's budget the socket
+        // deadline so its deny reaches the still-open socket (Codex: 575 < curl 585 < hook 590).
+        // If the cap equaled the caller's budget the socket
         // would already be dead at the cap and the caller would degrade to fail-open passthrough.
         cap.schedule(deadline: .now() + capSeconds)
         cap.setEventHandler { [weak self] in self?.finish(id: nativeID, approve: false, capped: true) }
@@ -274,12 +264,10 @@ final class HookBuddyProvider: AgentProvider {
     // exactly the events it recognizes, so a new event can never half-land (routed but unmapped, or
     // mapped but unrouted). Unknown events are acknowledged and ignored.
     enum SessionHookKind {
-        case activity, stop, needsInput, end
+        case activity, stop, end
         init?(hookEvent: String) {
             switch hookEvent {
             case "SessionStart", "UserPromptSubmit": self = .activity
-            case "ApprovalResolved":                 self = .activity   // omp: approval answered => working
-            case "Notification":                     self = .needsInput // omp: prompt on screen on the Mac
             case "Stop":                             self = .stop
             case "SessionEnd":                       self = .end
             default:                                 return nil
@@ -298,11 +286,9 @@ final class HookBuddyProvider: AgentProvider {
             branchCache.removeValue(forKey: cwd ?? "")
             hosts.remove(key: sid)
             emitSession(.end(nativeKey: sid))
-        case .needsInput:
-            emitSession(.needsInput(nativeKey: sid, cwd: cwd)); ensureBranch(sessionId: sid, cwd: cwd)
         case .activity:
-            // SessionStart carries tap-to-open host context (omp reads process.env; merge keeps prior
-            // non-empty values so a later UserPromptSubmit without env can't wipe them).
+            // SessionStart carries tap-to-open host context; merge keeps prior non-empty values so a
+            // later UserPromptSubmit without env can't wipe them.
             hosts.set(key: sid, app: body["host_app"] as? String, focusURL: body["focus_url"] as? String,
                       bundleId: body["bundle_id"] as? String, cwd: cwd)
             emitSession(.activity(nativeKey: sid, cwd: cwd)); ensureBranch(sessionId: sid, cwd: cwd)

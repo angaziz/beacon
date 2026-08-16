@@ -4,7 +4,7 @@ import ServiceManagement
 import BeaconHubKit
 
 // Wires the subsystems together (design 2026-07-19): a shared LocalIngestServer + registered
-// AgentProviders (Claude, Codex, omp) feed a ProviderMux, which merges per-provider usage/sessions/prompts
+// AgentProviders (Claude, Codex) feed a ProviderMux, which merges per-provider usage/sessions/prompts
 // into a single Usage + BuddyState + [Session]. We serialize those to StatusFrame/SessionsFrame and push
 // to the device over BLE, resending the full frame on (re)connect and on a 30 s heartbeat. The usage
 // poller iterates usage-enabled providers; per-provider toggles (ProviderSettings) drive live setEnabled.
@@ -18,7 +18,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var providers: [AgentProvider] = []
     private var claude: ClaudeCodeProvider?            // typed ref for drain + device-connected + statusline
     private var codex: HookBuddyProvider?              // typed ref for drain + device-connected
-    private var omp: HookBuddyProvider?                // typed ref for drain + device-connected
     private var poller: UsagePoller!                   // built once providers exist
     private let location = LocationProvider()
     private let tickerStore = TickerConfigStore()   // desired ticker list + monotonic rev (issue #92)
@@ -98,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let drainers = [claude?.drainHeldPrompts, codex?.drainHeldPrompts, omp?.drainHeldPrompts].compactMap { $0 }
+        let drainers = [claude?.drainHeldPrompts, codex?.drainHeldPrompts].compactMap { $0 }
         guard !drainers.isEmpty else { return .terminateNow }
         var replied = false
         let reply = { if !replied { replied = true; NSApp.reply(toApplicationShouldTerminate: true) } }
@@ -129,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // Re-read every provider's hooks state off the main thread (sync file IO + parse), then apply on main
-    // without stomping a provider mid-install.
+    // without replacing a provider mid-install.
     private func refreshProviderHooks() {
         let ids = providers.map { $0.descriptor.id }
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -273,18 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         codex.onPromptUndeliverable = undeliverable
         self.codex = codex
 
-        // omp: sessions plane only. No usage entry (omp quota reports duplicate Claude/Codex) and no
-        // .prompts -- omp resolves tool approval before an extension can answer it, so the buddy mirrors
-        // the wait as a `question` session instead of gating (CONTRACT.md §C.6). capSeconds is inert
-        // without .prompts: this provider never holds a request, so it never needs an undeliverable alert.
-        let omp = HookBuddyProvider(
-            descriptor: ProviderDescriptor(id: "omp", label: "OMP",
-                                           capabilities: [.sessions]),
-            routePath: OmpHooks.routePath,
-            capSeconds: 26,
-            server: ingest)
-        self.omp = omp
-        providers = [claude, codex, omp]
+        providers = [claude, codex]
 
         for p in providers {
             descriptors[p.descriptor.id] = p.descriptor
@@ -387,7 +375,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         claude?.setDeviceConnected(connected)
         codex?.setDeviceConnected(connected)
-        omp?.setDeviceConnected(connected)
         poller.setDeviceConnected(connected)   // #64: back off the usage poll cadence while disconnected.
 
         // Drive the Settings connection checks from the SAME phase stream (no second CBCentralManager):
