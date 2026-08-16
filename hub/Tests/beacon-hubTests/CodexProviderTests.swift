@@ -70,7 +70,7 @@ final class CodexProviderTests: XCTestCase {
     }
 
     // Device offline => pass-through (no verdict, "{}"), never a deny: the user never saw the prompt,
-    // so Codex/omp must ask locally instead of failing the tool call. No prompt raised.
+    // so Codex must ask locally instead of failing the tool call. No prompt raised.
     func testOfflinePassesThroughWithoutRaising() {
         let (p, sink) = makeProvider(deviceConnected: false)
         var body: Data?
