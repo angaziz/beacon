@@ -281,7 +281,7 @@ receives JSON with `session_id` (per-session TOK/CTX aggregation key), `cwd` (at
 statusline renderer** (forwards the JSON to `127.0.0.1:8765/statusline`, then delegates to the real
 command passed as args), so the user's status bar is unchanged. Bind port is the fixed **8765**.
 
-### C.5 Codex hooks (buddy) — VERIFIED (openai/codex codex-rs/hooks @ 0fb559f0; codex-cli 0.140.0)
+### C.5 Codex hooks (buddy) — VERIFIED (openai/codex codex-rs @ rust-v0.160.0 a956835d; codex-cli 0.160.0)
 
 Codex ships a Claude-compatible command-hook system (feature `hooks`, stable + default-on). The Codex
 buddy adapter bridges it with a shim, `~/.beacon/beacon-codex-hook` (installed alongside the Claude
@@ -312,7 +312,7 @@ hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook",
 
 **stdin (Codex -> shim, snake_case).** `{session_id, turn_id, cwd, hook_event_name, model,
 permission_mode, tool_name, tool_input, ...}`. `SessionStart` adds `source` (startup|resume|clear|
-compact); `SessionEnd` adds `reason`.
+compact|fork); `SessionEnd` adds `reason`.
 
 **stdout (shim -> Codex).** Byte-identical to the Claude `PermissionRequest` shape (§C.3):
 `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"|"deny",
@@ -337,7 +337,7 @@ held) returns `{}` (no verdict) so Codex prompts locally; the hub raises a menub
 agent ("Beacon offline - CODEX not gated"). Hub unreachable is handled in the shim: connection refused /
 timeout => print nothing, exit 0 (fail-open to the Codex TUI).
 
-**Trust (CRITICAL, source-verified + reproduced against codex-cli 0.140.0).** A user-config command hook
+**Trust (CRITICAL, source-verified + reproduced against codex-cli 0.160.0).** A user-config command hook
 only RUNS when Codex marks it `Trusted`, i.e. its `[hooks.state]` `trusted_hash` equals the hash Codex
 derives (`codex-rs/hooks/src/engine/discovery.rs`: `enabled && (bypass || Managed | Trusted)`; else the
 hook is discovered but never dispatched). Codex derives the hash (`config/src/fingerprint.rs
