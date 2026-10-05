@@ -71,10 +71,35 @@ final class PiHooksTests: XCTestCase {
     }
 
     func testPpsAuthorizerRejectsInvalidConfigs() {
-        XCTAssertNil(PiHooks.mergePpsAuthorizerChain("not json"))
-        XCTAssertNil(PiHooks.mergePpsAuthorizerChain("{\"unknown\":true}"))
-        XCTAssertNil(PiHooks.mergePpsAuthorizerChain("{\"authorizerChain\":[\"beacon\", 1]}"))
-        XCTAssertFalse(PiHooks.ppsAuthorizerChainContainsBeacon("{\"unknown\":true,\"authorizerChain\":[\"beacon\"]}"))
+        let cases: [(name: String, source: String)] = [
+            ("not json", "not json"),
+            ("top-level array", "[\"beacon\"]"),
+            ("non-string chain entry", "{\"authorizerChain\":[\"beacon\", 1]}"),
+            ("chain not an array", "{\"authorizerChain\":\"beacon\"}"),
+        ]
+        for entry in cases {
+            XCTAssertNil(PiHooks.mergePpsAuthorizerChain(entry.source), entry.name)
+            XCTAssertFalse(PiHooks.ppsAuthorizerChainContainsBeacon(entry.source), entry.name)
+        }
+    }
+
+    // Regression (#154): pps 39 added top-level keys; an allowlist made such configs unmergeable, so
+    // Settings showed "Set up" forever. Unknown keys must be preserved byte-for-byte.
+    func testPpsAuthorizerChainMergeToleratesUnknownKeys() {
+        let cases: [(name: String, source: String, expected: String)] = [
+            ("pps 39 keys with chain",
+             "{\"forwardingTimeoutMs\":30000,\"promptNotifications\":true,\"authorizerChain\":[\"first\"]}",
+             "{\"forwardingTimeoutMs\":30000,\"promptNotifications\":true,\"authorizerChain\":[\"first\", \"beacon\"]}"),
+            ("pps 39 keys without chain",
+             "{\"permissionDialogKeys\":{\"allow\":\"y\"},\"promptMaxRows\":8}",
+             "{\"authorizerChain\":[\"beacon\"],\"permissionDialogKeys\":{\"allow\":\"y\"},\"promptMaxRows\":8}"),
+            ("future key", "{\"someFutureKey\":[1,2]}", "{\"authorizerChain\":[\"beacon\"],\"someFutureKey\":[1,2]}"),
+        ]
+        for entry in cases {
+            guard let merged = PiHooks.mergePpsAuthorizerChain(entry.source) else { return XCTFail("\(entry.name): must merge") }
+            XCTAssertEqual(merged, entry.expected, entry.name)
+            XCTAssertTrue(PiHooks.ppsAuthorizerChainContainsBeacon(merged), entry.name)
+        }
     }
 
     func testIsCurrent() {

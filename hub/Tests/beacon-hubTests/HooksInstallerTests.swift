@@ -131,7 +131,7 @@ final class HooksInstallerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: absent.path))
 
         let invalid = tmp.appendingPathComponent("invalid.json")
-        let original = "{\"unknown\":true}"
+        let original = "{\"authorizerChain\":\"beacon\"}"
         try original.write(to: invalid, atomically: true, encoding: .utf8)
         try HooksInstaller.installPpsAuthorizerChain(configPath: invalid.path)
         XCTAssertEqual(try String(contentsOf: invalid, encoding: .utf8), original)
@@ -142,10 +142,16 @@ final class HooksInstallerTests: XCTestCase {
         let path = piPath()
         let config = tmp.appendingPathComponent("config.json")
         try HooksInstaller.installPi(extensionPath: path)
-        try "{\"authorizerChain\":[\"beacon\"]}".write(to: config, atomically: true, encoding: .utf8)
-        XCTAssertTrue(HooksInstaller.isPiInstalled(extensionPath: path, ppsConfigPath: config.path))
-        try "{\"unknown\":true,\"authorizerChain\":[\"beacon\"]}".write(to: config, atomically: true, encoding: .utf8)
-        XCTAssertFalse(HooksInstaller.isPiInstalled(extensionPath: path, ppsConfigPath: config.path))
+        let cases: [(name: String, config: String, ready: Bool)] = [
+            ("chain with beacon", "{\"authorizerChain\":[\"beacon\"]}", true),
+            ("pps 39 keys with beacon", "{\"promptMaxRows\":8,\"authorizerChain\":[\"beacon\"]}", true),
+            ("chain without beacon", "{\"authorizerChain\":[\"first\"]}", false),
+            ("invalid chain", "{\"authorizerChain\":[\"beacon\", 1]}", false),
+        ]
+        for entry in cases {
+            try entry.config.write(to: config, atomically: true, encoding: .utf8)
+            XCTAssertEqual(HooksInstaller.isPiInstalled(extensionPath: path, ppsConfigPath: config.path), entry.ready, entry.name)
+        }
     }
 
 }
