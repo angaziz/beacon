@@ -57,6 +57,20 @@ final class ClaudeCodeProviderTests: XCTestCase {
         XCTAssertEqual(usageCount, 1, "unchanged value must stay deduped (#59)")
     }
 
+    // #155: rate_limits without a 5h/7d window (e.g. gateway spend_limit only) is not a Claude usage
+    // source, so it must neither emit a value nor refresh the liveness that suppresses the oauth poll.
+    func testStatuslineWithoutSubscriberWindowsIsIgnored() {
+        let (p, _) = makeProvider()
+        var activityCount = 0, usageCount = 0
+        p.onStatuslineActivity = { activityCount += 1 }
+        p.onClaudeUsage = { _ in usageCount += 1 }
+        p.handleStatusline(["session_id": "s1",
+                            "rate_limits": ["spend_limit": ["used_percentage": 63, "resets_at": 1_740_787_200]]])
+        drainMain()
+        XCTAssertEqual(activityCount, 0)
+        XCTAssertEqual(usageCount, 0)
+    }
+
     // Device offline => pass-through (no verdict, "{}"), never a deny: the user never saw the prompt,
     // so the harness must ask on the Mac instead of failing the tool call. No prompt raised to the mux.
     func testOfflinePassesThroughWithoutRaising() {

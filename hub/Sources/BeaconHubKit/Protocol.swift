@@ -235,8 +235,9 @@ public enum HookResponse {
         switch event {
         case "PermissionRequest":
             // PermissionRequest's decision.behavior accepts only allow/deny (no "ask", unlike PreToolUse);
-            // an unsupported value fails to defer. Emit NO decision -- CC then falls through to its own
-            // interactive prompt on the Mac, which is exactly the passthrough we want.
+            // an unsupported value fails to defer. Emit NO decision -- in an interactive session CC then
+            // falls through to its own prompt on the Mac, which is exactly the passthrough we want. In a
+            // `-p`/non-interactive session (CC 2.1.268+) no decision means CC denies the call.
             return Data("{}".utf8)
         default:   // PreToolUse (and aliases): permissionDecision supports "ask" directly.
             let payload = ["hookSpecificOutput": ["hookEventName": event, "permissionDecision": "ask"]]
