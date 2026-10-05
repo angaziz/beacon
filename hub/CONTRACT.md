@@ -228,22 +228,24 @@ ECONNREFUSED`), which is noise on every event whenever the hub is not running. A
 through a `type:"command"` shim, `~/.beacon/beacon-claude-hook` (installed alongside the statusline
 shim), which curls the same endpoint and always exits 0 — an unreachable hub is silent. Same
 stdin/stdout contract as `beacon-codex-hook` (§C.5): CC spawns the shim with the event JSON on stdin and
-reads the decision from stdout; empty stdout = no verdict (fail-open to CC's own prompt). Timers are
+reads the decision from stdout; empty stdout = no verdict (interactive: fail-open to CC's own prompt;
+`-p`/non-interactive: CC denies, see below). Timers are
 ordered `hub 590 < curl 595 < CC hook timeout 600` so the hub's fail-closed deny always lands while the
 socket is open. Lifecycle events are fire-and-forget (`curl -m 1`). `PreToolUse` and
 `PermissionRequest` are **distinct** events, and **`PermissionRequest` is the one Beacon hooks**:
 `PreToolUse` fires on **every** tool call, so holding it open ~590 s would block routine `Read`/`Grep`
 (and a narrow matcher like `Bash` misses `Write`/`Edit`); `PermissionRequest` fires **only when a tool
 actually needs permission**, so `matcher:"*"` is safe and covers all tools. The bridge still accepts
-`PreToolUse` for back-compat. Request body (same fields both events):
+`PreToolUse` for back-compat. Request body (`PreToolUse` also carries `tool_use_id`;
+`PermissionRequest` does not):
 
 ```json
-{"session_id":"abc","tool_use_id":"toolu_01","hook_event_name":"PermissionRequest",
+{"session_id":"abc","hook_event_name":"PermissionRequest",
  "tool_name":"Write","tool_input":{"file_path":"/x","command":"...","description":"..."}}
 ```
 
-Hint = `tool_input.command` (Bash) | `file_path` | `description`. Correlation id = `tool_use_id`/
-`session_id` (the hub mints its own short BLE id and maps it).
+Hint = `tool_input.command` (Bash) | `file_path` | `description`. Correlation id = `session_id` (the hub
+mints its own short BLE id and maps it).
 
 **Response shape DIFFERS by event** (`HookResponse.permission`, `Protocol.swift`) — emitting the wrong
 one silently fails to gate the tool:
@@ -264,9 +266,16 @@ one silently fails to gate the tool:
 {}
 ```
 
+**No verdict = local prompt only in interactive sessions.** Since CC 2.1.268 `PermissionRequest` hooks
+also fire in `-p`/non-interactive sessions (e.g. background subagents), where no prompt can be shown: if
+no hook returns a decision, CC **denies** the tool call. Every "falls through to the local prompt" /
+pass-through `{}` in this contract (AskUserQuestion, device offline, hub down) therefore means *deny*
+in those sessions.
+
 HTTP 2xx + body, no outer envelope; the shim prints that body verbatim on stdout. Hook `timeout` is in
-**seconds** (config: 600 to cover the ~590 s hold). Non-2xx/timeout/hub down = **non-blocking (CC
-proceeds, fail-OPEN)** -- so the hub MUST return `deny` within the hold window; never let it hang.
+**seconds** (config: 600 (CC's default) to cover the ~590 s hold). Non-2xx/timeout/hub down = **non-blocking
+(CC proceeds, fail-OPEN; denies in `-p`, above)** -- so the hub MUST return `deny` within the hold window;
+never let it hang.
 
 ### C.4 Session / statusline — CONFIRMED (CC v2.1.x docs)
 
@@ -277,7 +286,10 @@ buddy idle. Stop body has `stop_reason`; Notification has `message`; SessionEnd 
 receives JSON with `session_id` (per-session TOK/CTX aggregation key), `cwd` (attribution basename),
 `context_window.{used_percentage,total_input_tokens,total_output_tokens}` (=> buddy
 `context_pct`/`tokens`) and `rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}` (=> **Claude
-`usage.h5`/`d7`** — now the PRIMARY Claude source, §C.1). The shim **wraps the user's existing
+`usage.h5`/`d7`** — now the PRIMARY Claude source, §C.1). Since CC 2.1.243 each window may be
+independently absent: CC drops it once its `resets_at` passes, so the hub maps an absent window to
+`{"pct":0,"reset":0}` (reset, next reset unknown) when the other window is present; `rate_limits` with
+neither window counts as absent (oauth fallback). The shim **wraps the user's existing
 statusline renderer** (forwards the JSON to `127.0.0.1:8765/statusline`, then delegates to the real
 command passed as args), so the user's status bar is unchanged. Bind port is the fixed **8765**.
 
