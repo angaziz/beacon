@@ -15,7 +15,7 @@ final class ClaudeCodeProvider: AgentProvider {
     // Claude-specific usage callbacks the app wires to the reliability reducer (#59/#93/#108). The merged
     // usage the mux renders comes from the reducer via sink.didUpdateUsage, not from here directly.
     var onClaudeUsage: ((ProviderUsage) -> Void)?      // 5h/7d from statusline rate_limits (deduped, #59)
-    var onStatuslineActivity: (() -> Void)?            // liveness: fires on EVERY rate_limits POST (#93)
+    var onStatuslineActivity: (() -> Void)?            // liveness: every POST with a 5h/7d window (#93/#155)
     var onPromptUndeliverable: ((String) -> Void)?     // a prompt couldn't be shown (device offline)
 
     private let server: LocalIngestServer

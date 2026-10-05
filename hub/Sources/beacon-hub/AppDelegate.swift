@@ -493,7 +493,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         (descriptors[id]?.supportsUsage ?? false) && settings.enabled(for: id).usage
     }
 
-    // Liveness from Claude Code's statusline: fires on EVERY rate_limits POST (#93). A fresh POST means
+    // Liveness from Claude Code's statusline: fires on every POST carrying a 5h/7d window (#93/#155). A fresh POST means
     // the statusline is the live source, so re-affirm the cached value as LIVE -- clearing a stale
     // flag/note a prior oauth transient left even when the value callback was deduped (#59/#108).
     private func onStatuslineActivity() {
