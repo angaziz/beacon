@@ -161,7 +161,7 @@ enum HooksInstaller {
     // Install the Codex buddy shim + a managed [hooks] block into ~/.codex/config.toml. The block is
     // idempotent (re-install rewrites only the marker-delimited section) and self-trusting: it writes
     // the [hooks.state] trusted_hash Codex requires so the freshly installed command hook RUNS with no
-    // interactive trust step (verified against codex-cli 0.140.0; see hub/CONTRACT.md C.5).
+    // interactive trust step (verified against codex-cli 0.160.0; see hub/CONTRACT.md C.5).
     static func installCodex() throws {
         let fm = FileManager.default
         let shimDir = (codexShimInstallPath as NSString).deletingLastPathComponent

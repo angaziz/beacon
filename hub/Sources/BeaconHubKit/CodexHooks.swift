@@ -5,7 +5,7 @@ import CryptoKit
 // generation, the trust-hash computation, and the idempotent merge are host-tested. The executable's
 // HooksInstaller only does file IO (copy the shim, read/write ~/.codex/config.toml) around this.
 //
-// TRUST (verified against openai/codex codex-rs/hooks discovery @ 0fb559f0 and codex-cli 0.140.0):
+// TRUST (verified against codex-cli 0.160.0, openai/codex codex-rs/hooks discovery @ a956835d):
 // a user-config command hook only RUNS when its persisted `[hooks.state]` trusted_hash equals the hash
 // Codex derives for it -- otherwise it is discovered but never dispatched (HookTrustStatus::Untrusted).
 // Codex derives the hash as sha256 over the CANONICAL compact JSON of a normalized identity
@@ -41,7 +41,7 @@ public enum CodexHooks {
     }
 
     // The five events the buddy adapter bridges. Order is the config write order (group indices are per
-    // event, so all are group 0). Timeouts verified byte-exact against codex 0.140.0 hooks/list.
+    // event, so all are group 0). Timeouts verified byte-exact against codex 0.160.0 hooks/list.
     public static let events: [Event] = [
         Event(toml: "SessionStart",      label: "session_start",      hashTimeout: 600, configTimeout: nil),
         Event(toml: "UserPromptSubmit",  label: "user_prompt_submit", hashTimeout: 600, configTimeout: nil),
