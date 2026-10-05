@@ -17,6 +17,18 @@ public enum UsageNormalizer {
         return ProviderUsage(h5: h5, d7: d7)
     }
 
+    // Claude Code statusline `rate_limits` (epoch resets_at). Since CC 2.1.243 a window is dropped
+    // once its resets_at passes, so an absent sibling means "reset" (0%, next reset unknown), not
+    // unavailable. No subscriber window at all (e.g. a gateway-only spend_limit) => nil, so the caller
+    // falls back to the oauth poll as when rate_limits is absent.
+    public static func claudeStatusline(_ rateLimits: [String: Any]) -> ProviderUsage? {
+        let h5 = window(rateLimits["five_hour"], pctKey: "used_percentage", resetKey: "resets_at")
+        let d7 = window(rateLimits["seven_day"], pctKey: "used_percentage", resetKey: "resets_at")
+        guard h5 != nil || d7 != nil else { return nil }
+        let reset = UsageWindow(pct: 0, reset: 0)
+        return ProviderUsage(h5: h5 ?? reset, d7: d7 ?? reset)
+    }
+
     // Codex: GET chatgpt.com/backend-api/wham/usage
     //   { rate_limit:{ primary_window:{used_percent,limit_window_seconds,reset_at(epoch)},
     //                  secondary_window:{...}|null } }

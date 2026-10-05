@@ -394,12 +394,10 @@ final class ClaudeCodeProvider: AgentProvider {
             emitMetrics()
         }
         // Claude usage is also in the statusline (rate_limits) -- authoritative, survives the oauth 429.
-        if let rl = body["rate_limits"] as? [String: Any] {
+        if let rl = body["rate_limits"] as? [String: Any], let claude = UsageNormalizer.claudeStatusline(rl) {
             gateLock.lock(); lastStatuslineAt = Date(); gateLock.unlock()   // #93: keep the poll gate fresh.
             let cbActivity = onStatuslineActivity
             DispatchQueue.main.async { cbActivity?() }
-            let claude = ProviderUsage(h5: Self.rlWindow(rl["five_hour"]),
-                                       d7: Self.rlWindow(rl["seven_day"]))
             if claude != lastClaudeUsage {   // #59: skip the per-tick byte-identical resend of the value.
                 lastClaudeUsage = claude
                 let cb = onClaudeUsage
@@ -523,13 +521,6 @@ final class ClaudeCodeProvider: AgentProvider {
             return "\(stamp) \(tag)notification"
         default: return nil
         }
-    }
-
-    private static func rlWindow(_ any: Any?) -> UsageWindow {
-        let w = any as? [String: Any]
-        let pct = double(w?["used_percentage"]).map { max(0, min(100, Int($0.rounded()))) }
-        let reset = int(w?["resets_at"]) ?? 0
-        return UsageWindow(pct: pct, reset: reset)
     }
 
     private static func int(_ any: Any?) -> Int? {

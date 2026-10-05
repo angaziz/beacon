@@ -137,6 +137,28 @@ final class UsageNormalizerEdgeCaseTests: XCTestCase {
         XCTAssertEqual(result?.d7.reset, 0)
     }
 
+    // MARK: - Claude statusline rate_limits (#155)
+
+    func testClaudeStatuslineWindows() {
+        let h5: [String: Any] = ["used_percentage": 12.4, "resets_at": 1_700_000_000]
+        let d7: [String: Any] = ["used_percentage": 34, "resets_at": 1_700_500_000]
+        let live5 = UsageWindow(pct: 12, reset: 1_700_000_000)
+        let live7 = UsageWindow(pct: 34, reset: 1_700_500_000)
+        let reset = UsageWindow(pct: 0, reset: 0)
+        let cases: [(name: String, rl: [String: Any], want: ProviderUsage?)] = [
+            ("both windows", ["five_hour": h5, "seven_day": d7], ProviderUsage(h5: live5, d7: live7)),
+            ("5h dropped after reset", ["seven_day": d7], ProviderUsage(h5: reset, d7: live7)),
+            ("7d dropped after reset", ["five_hour": h5], ProviderUsage(h5: live5, d7: reset)),
+            ("present window without pct stays unavailable", ["five_hour": ["resets_at": 1_700_000_000], "seven_day": d7],
+             ProviderUsage(h5: UsageWindow(pct: nil, reset: 1_700_000_000), d7: live7)),
+            ("no subscriber window", [:], nil),
+            ("spend_limit only (gateway)", ["spend_limit": ["used_percentage": 63, "resets_at": 1_740_787_200]], nil),
+        ]
+        for c in cases {
+            XCTAssertEqual(UsageNormalizer.claudeStatusline(c.rl), c.want, c.name)
+        }
+    }
+
     // MARK: - Codex
 
     func testCodexHappyPath() {
