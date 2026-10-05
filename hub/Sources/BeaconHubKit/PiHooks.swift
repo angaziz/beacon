@@ -18,15 +18,10 @@ public enum PiHooks {
             == extensionSource.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static let ppsConfigKeys: Set<String> = [
-        "$schema", "debugLog", "permissionReviewLog", "yoloMode", "doublePressToConfirm",
-        "toolInputPreviewMaxLength", "toolTextSummaryMaxLength", "piInfrastructureReadPaths",
-        "authorizerChain", "permission", "shellTools"
-    ]
-
+    // Only `authorizerChain` is validated: pps adds top-level keys across majors (39.x added six), and
+    // pps owns its own schema. The byte-level merge below leaves every other key untouched.
     private static func ppsConfig(_ content: String) -> [String: Any]? {
         guard let config = try? JSONSerialization.jsonObject(with: Data(content.utf8)) as? [String: Any],
-              Set(config.keys).isSubset(of: ppsConfigKeys),
               config["authorizerChain"].map({ $0 is [String] }) ?? true else { return nil }
         return config
     }
@@ -136,16 +131,19 @@ export default function beacon(pi: ExtensionAPI) {
   const delegableSurfaces = new Set(["bash", "read", "write", "edit", "find", "grep", "ls", "mcp", "skill"]);
   let authorizerCtx: { hasUI: boolean; cwd: string; signal?: AbortSignal;
     ui: { select: (title: string, options: string[], opts: { signal: AbortSignal }) => Promise<string | undefined> } } | undefined;
-  const ppsService = async (): Promise<PpsService | undefined> => {
-    const published = (globalThis as Record<symbol, PpsService | undefined>)[Symbol.for("@gotgenes/pi-permission-system:service")];
-    if (published) return published;
-    try {
-      const mod = await import("@gotgenes/pi-permission-system") as { getPermissionsService?: () => PpsService | undefined };
-      return mod.getPermissionsService?.();
-    } catch { return undefined; }
+  // pps keys its per-session service by sessionManager.getSessionId(), not the session-file basename above.
+  let ppsSessionId: string | undefined;
+  const sessionIdOf = (ctx: { sessionManager?: { getSessionId?(): string } }) => {
+    try { return ctx.sessionManager?.getSessionId?.() || undefined; } catch { return undefined; }
   };
+  // pps >= 27 publishes one service per session in a process-global map; pps 25 used a single slot.
+  // Read the slots directly: pps >= 27's getPermissionsService() warns when called without an id.
+  const ppsSessions = () => (globalThis as Record<symbol, unknown>)[Symbol.for("@gotgenes/pi-permission-system:session-services")] as Map<string, PpsService> | undefined;
+  const ppsService = (id = ppsSessionId): PpsService | undefined =>
+    (id ? ppsSessions()?.get(id) : undefined)
+      ?? (globalThis as Record<symbol, PpsService | undefined>)[Symbol.for("@gotgenes/pi-permission-system:service")];
   const ppsActive = async () => {
-    if (await ppsService()) return true;
+    if (ppsService() || ppsSessions()) return true;
     try { await import("@gotgenes/pi-permission-system"); return true; } catch { return false; }
   };
 
@@ -253,8 +251,10 @@ export default function beacon(pi: ExtensionAPI) {
     } finally { tui.controller.abort(); hub.controller.abort(); tui.dispose(); hub.dispose(); }
   };
 
-  const registerPps = async () => {
-    const service = await ppsService();
+  // permissions:ready may repeat per session (pps >= 27) and a second registerAuthorizer("beacon")
+  // throws, so registration is once per service identity.
+  const registerPps = (id?: string) => {
+    const service = ppsService(id);
     if (!service || registered.has(service as object)) return;
     try {
       service.registerAuthorizer("beacon", async details => {
@@ -270,16 +270,20 @@ export default function beacon(pi: ExtensionAPI) {
       registered.add(service as object);
     } catch {}
   };
-  pi.events?.on("permissions:ready", () => { void registerPps(); });
+  pi.events?.on("permissions:ready", data => {
+    const id = (data as { sessionId?: unknown } | undefined)?.sessionId;
+    registerPps(typeof id === "string" && id ? id : undefined);
+  });
   pi.on("tool_call", async (event, ctx) => {
     authorizerCtx = ctx;
+    ppsSessionId = sessionIdOf(ctx) ?? ppsSessionId;
     try {
-      if (await ppsActive()) { void registerPps(); return {}; }
+      if (await ppsActive()) { registerPps(); return {}; }
       const decision = await choose(event as { toolCallId: string; toolName: string; input: Record<string, unknown> }, ctx);
       return decision === false ? { block: true, reason: "Denied on Beacon" } : {};
     } catch { return {}; }
   });
-  pi.on("session_start", async (_event, ctx) => { authorizerCtx = ctx; beginSession(ctx); void registerPps(); });
+  pi.on("session_start", async (_event, ctx) => { authorizerCtx = ctx; ppsSessionId = sessionIdOf(ctx); beginSession(ctx); registerPps(); });
   pi.on("agent_start", async (_event, ctx) => {
     if (!ctx.hasUI) return;
     void lifecycle("UserPromptSubmit");

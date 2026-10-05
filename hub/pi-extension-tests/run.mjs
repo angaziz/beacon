@@ -11,10 +11,17 @@ const extension = join(sandbox, "beacon.ts");
 await writeFile(extension, source);
 
 let serial = 0;
-async function load(fetchImpl, ppsService) {
+// pps 25 publishes one process-wide slot; pps >= 27 a session-id-keyed map.
+const LEGACY_SLOT = Symbol.for("@gotgenes/pi-permission-system:service");
+const SESSION_SLOT = Symbol.for("@gotgenes/pi-permission-system:session-services");
+const PPS_SESSION = "pps-node-1";
+const publishLegacy = service => { globalThis[LEGACY_SLOT] = service; };
+const publishSession = (id = PPS_SESSION) => service => { globalThis[SESSION_SLOT] = new Map([[id, service]]); };
+function clearPps() { delete globalThis[LEGACY_SLOT]; delete globalThis[SESSION_SLOT]; }
+async function load(fetchImpl, ppsService, publish = publishSession()) {
   globalThis.fetch = fetchImpl;
-  delete globalThis[Symbol.for("@gotgenes/pi-permission-system:service")];
-  if (ppsService) globalThis[Symbol.for("@gotgenes/pi-permission-system:service")] = ppsService;
+  clearPps();
+  if (ppsService) publish(ppsService);
   const mod = await import(`file://${extension}?case=${serial++}`);
   const handlers = new Map();
   const events = new Map();
@@ -170,25 +177,38 @@ const failedCommit = await handlersFor(async (_url, options) => {
 });
 assert.deepEqual(await call(failedCommit, event("bash"), context(root, () => new Promise(() => {}))), {});
 console.log("commit POST failure: bounded without unhandled rejection");
-const ppsHandlers = await handlersFor(async () => { throw new Error("must not contact hub"); });
-globalThis[Symbol.for("@gotgenes/pi-permission-system:service")] = {};
-const ppsResult = await call(ppsHandlers, event("bash"), context(root, localDeny));
-assert.equal(ppsResult.block, undefined, "pps presence makes standalone gate inert");
-delete globalThis[Symbol.for("@gotgenes/pi-permission-system:service")];
-console.log("pps step-down: standalone gate inert when service is present");
+for (const [name, publish] of [["pps 25 slot", publishLegacy], ["pps 27+ session map", publishSession()], ["pps 27+ other session only", publishSession("other-node")]]) {
+  const ppsHandlers = await handlersFor(async () => { throw new Error("must not contact hub"); });
+  publish({ registerAuthorizer() { return () => {}; } });
+  const ppsResult = await call(ppsHandlers, event("bash"), context(root, localDeny));
+  assert.equal(ppsResult.block, undefined, `${name}: pps presence makes standalone gate inert`);
+  clearPps();
+  console.log(`pps step-down: standalone gate inert (${name})`);
+}
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
-async function ppsHarness(fetchImpl, select = localAllow) {
-  let authorizer;
-  let registrations = 0;
-  const service = { registerAuthorizer(name, fn) { assert.equal(name, "beacon"); registrations++; authorizer = fn; return () => {}; } };
-  const loaded = await load(fetchImpl, service);
-  const ctx = { ...context(root, select), sessionManager: { getSessionFile: () => "pps.jsonl" } };
+// Mirrors pps: a second registerAuthorizer for the same name throws.
+function ppsStub() {
+  const stub = { attempts: 0, authorizer: undefined, registerAuthorizer(name, fn) {
+    assert.equal(name, "beacon");
+    stub.attempts++;
+    if (stub.authorizer) throw new Error(`authorizer "${name}" is already registered`);
+    stub.authorizer = fn;
+    return () => {};
+  } };
+  return stub;
+}
+const ppsContext = (select = localAllow, sessionId = PPS_SESSION) =>
+  ({ ...context(root, select), sessionManager: { getSessionFile: () => "pps.jsonl", getSessionId: () => sessionId } });
+async function ppsHarness(fetchImpl, select = localAllow, publish = publishSession()) {
+  const service = ppsStub();
+  const loaded = await load(fetchImpl, service, publish);
+  const ctx = ppsContext(select);
   await loaded.handlers.get("session_start")({}, ctx);
   await loaded.handlers.get("tool_call")(event("bash"), ctx);
   await tick();
-  assert(authorizer, "pps authorizer registered after service publication");
-  return { authorizer, registrations, loaded, ctx };
+  assert(service.authorizer, "pps authorizer registered after service publication");
+  return { authorizer: service.authorizer, service, loaded, ctx };
 }
 const ppsDetails = (surface = "bash") => ({ requestId: `pps-${serial++}`, toolCallId: `pps-call-${serial}`, toolName: "bash", surface, accessIntent: { surface }, command: "git push" });
 
@@ -241,16 +261,41 @@ assert.deepEqual(unavailableResult, {}, "importable but unpublished pps keeps st
 assert.equal(unavailableCalls, 0, "unpublished pps must not contact hub");
 console.log("pps authorizer: present-unavailable => standalone inert, authorizer absent");
 
+for (const [name, publish] of [["pps 25 slot", publishLegacy], ["pps 27+ session map", publishSession()]]) {
+  const discovered = await ppsHarness(async () => json({ device: false }), localAllow, publish);
+  assert.equal(discovered.service.attempts, 1, `${name}: discovered at session_start`);
+  console.log(`pps authorizer: ${name} => registered at session_start`);
+}
+
+const foreign = await load(async () => json({ device: false }), ppsStub(), publishSession("other-node"));
+const foreignService = globalThis[SESSION_SLOT].get("other-node");
+await foreign.handlers.get("session_start")({}, ppsContext());
+await foreign.handlers.get("tool_call")(event("bash"), ppsContext());
+await foreign.events.get("permissions:ready")({ sessionId: PPS_SESSION, adjudicatesLocally: true });
+await tick();
+assert.equal(foreignService.attempts, 0, "another session's service is never registered into");
+console.log("pps authorizer: other session's service => not registered");
+
 const reload = await ppsHarness(async () => json({ device: false }));
 await reload.loaded.handlers.get("session_start")({}, reload.ctx);
+for (let i = 0; i < 3; i++) await reload.loaded.events.get("permissions:ready")({ sessionId: PPS_SESSION, adjudicatesLocally: true });
 await tick();
-assert.equal(reload.registrations, 1, "same live service registers exactly once across session reload");
-console.log("pps authorizer: reload => one active registration");
+assert.equal(reload.service.attempts, 1, "same live service registers exactly once across reload and repeated ready");
+console.log("pps authorizer: reload + repeated permissions:ready => one registration");
 
-const late = await load(async () => json({ device: false }));
+const keyed = await load(async () => json({ device: false }));
+await keyed.handlers.get("session_start")({}, { ...context(root, localAllow), sessionManager: { getSessionFile: () => "k.jsonl" } });
+const keyedService = ppsStub();
+publishSession("ready-node")(keyedService);
+for (let i = 0; i < 2; i++) await keyed.events.get("permissions:ready")({ sessionId: "ready-node", adjudicatesLocally: true });
+await tick();
+assert.equal(keyedService.attempts, 1, "ready payload sessionId resolves the service once");
+console.log("pps authorizer: permissions:ready sessionId => one registration");
+
+const late = await load(async () => json({ device: false }), undefined, publishLegacy);
 let lateRegistrations = 0;
 const lateService = { registerAuthorizer(name) { assert.equal(name, "beacon"); lateRegistrations++; } };
-globalThis[Symbol.for("@gotgenes/pi-permission-system:service")] = lateService;
+publishLegacy(lateService);
 await late.events.get("permissions:ready")();
 await tick();
 assert.equal(lateRegistrations, 1, "late publication registers after permissions:ready");
@@ -258,13 +303,13 @@ console.log("pps authorizer: late publish => one registration");
 
 let replacementRegistrations = 0;
 const replacement = { registerAuthorizer(name) { assert.equal(name, "beacon"); replacementRegistrations++; } };
-globalThis[Symbol.for("@gotgenes/pi-permission-system:service")] = replacement;
+publishLegacy(replacement);
 await late.events.get("permissions:ready")();
 await tick();
 assert.equal(replacementRegistrations, 1, "replacement service registers once");
 assert.equal(lateRegistrations, 1, "old service is not registered again");
 console.log("pps authorizer: service replacement => one registration per identity");
 
-delete globalThis[Symbol.for("@gotgenes/pi-permission-system:service")];
+clearPps();
 await rm(sandbox, { recursive: true, force: true });
 console.log("pi extension harness: all matrices passed");
