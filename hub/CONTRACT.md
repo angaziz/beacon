@@ -6,8 +6,10 @@
 > **Status:** the **device-facing frame + commands (§A/§B) are FROZEN** in `tech.md` §7.1 and final.
 > The **upstream shapes (§C) are RECORDED** — §C.1/§C.2 are real, token-redacted captures from the
 > owner's Mac (2026-06-11) and §C.3/§C.4 are confirmed against the Claude Code v2.1.x docs. The P2-0
-> draft guesses matched the live shapes on every field the normalizer reads. Nothing here may contain
-> a real token.
+> draft guesses matched the live shapes on every field the normalizer reads. The Claude sections
+> (§C.1/§C.3/§C.4) were re-verified against **Claude Code 2.1.318** on 2026-11-04 (issue #161): hooks
+> reference + statusline docs, the CHANGELOG 2.1.243 -> 2.1.318, and live `claude -p` hook captures.
+> Nothing here may contain a real token.
 
 ## A. Hub -> device status frame (FROZEN, `tech.md` §7.1)
 
@@ -198,6 +200,12 @@ ignored. Real redacted capture:
  "extra_usage":{"is_enabled":false,"utilization":null,"disabled_reason":"org_level_disabled_until"}}
 ```
 
+**Verified against CC 2.1.318 (2026-11-04):** no CHANGELOG entry 2.1.243 -> 2.1.318 touches the
+`oauth/usage` endpoint or the Keychain item (the endpoint was not re-hit; it is undocumented). The
+Keychain `Claude Code-credentials` blob still carries `claudeAiOauth.{accessToken, refreshToken,
+expiresAt, refreshTokenExpiresAt}` with the same types (key/type listing only; values never read out).
+New in 2.1.318: `claude auth status` reports `loginExpiresAt` -- unused here.
+
 ### C.2 Codex usage — `GET chatgpt.com/backend-api/wham/usage`
 
 Headers: `Authorization: Bearer <tok>`, `chatgpt-account-id: <id>`. Token: `~/.codex/auth.json`
@@ -220,7 +228,7 @@ Local fallback (D1, **unimplemented**): the `codex` CLI also records usage token
 from the endpoint's `*_window` (they are null until a window is hit), so a future wiring needs its own
 normalizer, not `UsageNormalizer.codex`.
 
-### C.3 Claude Code permission hook (`PermissionRequest`, primary; `PreToolUse`, back-compat) — CONFIRMED (CC v2.1.x docs)
+### C.3 Claude Code permission hook (`PermissionRequest`, primary; `PreToolUse`, back-compat) — VERIFIED (CC 2.1.318: hooks reference + live `claude -p` capture, 2026-11-04)
 
 Claude Code supports native **`"type":"http"`** hooks, but Beacon does **not** use them: CC reports an
 unreachable http hook as a per-event error line (`... hook [http://127.0.0.1:8765/hook] failed: connect
@@ -242,6 +250,20 @@ actually needs permission**, so `matcher:"*"` is safe and covers all tools. The 
 ```json
 {"session_id":"abc","hook_event_name":"PermissionRequest",
  "tool_name":"Write","tool_input":{"file_path":"/x","command":"...","description":"..."}}
+```
+
+Real redacted CC 2.1.318 capture (`claude -p`, default permission mode, a Bash write that needs
+permission; ids/paths redacted). CC writes the hook stdin as **compact** JSON, which the shim's
+`"hook_event_name":"PermissionRequest"` substring match relies on. The fields added since the draft
+(`prompt_id`, `permission_mode`, `effort`, `permission_suggestions`; `mcp_server` for MCP tools) are
+ignored:
+
+```json
+{"session_id":"<uuid>","transcript_path":"<~/.claude/projects/.../uuid.jsonl>","cwd":"<cwd>",
+ "prompt_id":"<uuid>","permission_mode":"default","effort":{"level":"medium"},
+ "hook_event_name":"PermissionRequest","tool_name":"Bash",
+ "tool_input":{"command":"echo beacon-probe-1 > probe1.txt","description":"Write beacon-probe-1 string into probe1.txt"},
+ "permission_suggestions":[{"type":"addDirectories","directories":["<cwd>"],"destination":"session"}]}
 ```
 
 Hint = `tool_input.command` (Bash) | `file_path` | `description`. Correlation id = `session_id` (the hub
@@ -277,20 +299,39 @@ HTTP 2xx + body, no outer envelope; the shim prints that body verbatim on stdout
 (CC proceeds, fail-OPEN; denies in `-p`, above)** -- so the hub MUST return `deny` within the hold window;
 never let it hang.
 
-### C.4 Session / statusline — CONFIRMED (CC v2.1.x docs)
+Live CC 2.1.318 `claude -p` outcomes for that capture: `decision.behavior:"allow"` => the tool ran;
+`"deny"` + `message` => denied, and the message reached the model verbatim; `{}` or empty stdout =>
+denied (the no-verdict rule above). The real `beacon-claude-hook` shim, fed the captured payloads
+against a stub hub, forwarded the decision body verbatim for `PermissionRequest`, printed nothing for
+`Stop`, and printed nothing with the hub down. CC's command-hook default timeout is still 600 s. Changes
+2.1.268 -> 2.1.318 that Beacon deliberately does not use: `onFailure:"block"` (2.1.295; the default
+`continue` keeps the hub-down fail-open), `updatedInput` validation (2.1.300; Beacon never rewrites
+input), and the Cowork-only auto-mode limits on hook approvals (2.1.299/2.1.300/2.1.314).
 
-`SessionStart`(matcher startup/resume/clear/compact)/`Stop`/`Notification`/`SessionEnd` hooks (through
-the `beacon-claude-hook` shim, §C.3) =>
-buddy idle. Stop body has `stop_reason`; Notification has `message`; SessionEnd carries `session_id`
-(clean per-session removal). **Statusline** (`statusLine` = `type:command`)
-receives JSON with `session_id` (per-session TOK/CTX aggregation key), `cwd` (attribution basename),
+### C.4 Session / statusline — VERIFIED (CC 2.1.318: hooks reference + live hook captures; statusline from docs, 2026-11-04)
+
+`SessionStart`(matcher startup/resume/fork; the `beacon-session` host-context hook also clear/compact)/
+`Stop`/`Notification`/`SessionEnd` hooks (through the `beacon-claude-hook` shim, §C.3) =>
+buddy idle. CC reports a forked session (`--fork-session`, `/branch`) as source `fork` (since 2.1.214;
+`resume` before), so the matchers name it. Every event carries `session_id` + `cwd` (the only fields
+the hub reads, plus Notification `message`); SessionEnd adds `reason` (clean per-session removal).
+Stop carries `stop_hook_active`/`last_assistant_message`/`background_tasks`/`session_crons` -- there
+is no `stop_reason`. Notification carries `notification_type`: every type marks the session
+`question` except the informational `auth_success`, `elicitation_complete`, `elicitation_response`,
+`agent_completed`, `quota_auto_resume_fired` and `plugin_notification` (entry line only); an absent
+or unknown type keeps `question`. `UserPromptSubmit` is not installed (the hub ignores it).
+**Statusline** (`statusLine` = `type:command`) receives JSON with `session_id` (per-session TOK/CTX aggregation key), `cwd` (attribution basename),
 `context_window.{used_percentage,total_input_tokens,total_output_tokens}` (=> buddy
 `context_pct`/`tokens`) and `rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}` (=> **Claude
 `usage.h5`/`d7`** — now the PRIMARY Claude source, §C.1). Since CC 2.1.243 each window may be
 independently absent: CC drops it once its `resets_at` passes, so the hub maps an absent window to
 `{"pct":0,"reset":0}` (reset, next reset unknown) when the other window is present; `rate_limits` with
-neither window counts as absent (oauth fallback). The shim **wraps the user's existing
-statusline renderer** (forwards the JSON to `127.0.0.1:8765/statusline`, then delegates to the real
+neither window counts as absent (oauth fallback). The CC 2.1.318 statusline docs keep every field the
+hub reads unchanged (`resets_at` epoch seconds; `rate_limits` only for Pro/Max/Ultra, after the first
+API response; `spend_limit` gained `used_usd`/`limit_usd`/`period` in 2.1.284 -- ignored);
+`context_window.used_percentage` may be `null` early in a session (read as 0). The statusline was not
+captured live: it does not render in `-p`, and a scripted PTY session did not reach a render.
+The shim **wraps the user's existing statusline renderer** (forwards the JSON to `127.0.0.1:8765/statusline`, then delegates to the real
 command passed as args), so the user's status bar is unchanged. Bind port is the fixed **8765**.
 
 ## D. Hub-side policies
