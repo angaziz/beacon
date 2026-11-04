@@ -68,6 +68,14 @@ final class ClaudeCodeProvider: AgentProvider {
 
     private var reaper: DispatchSourceTimer?
 
+    // Notification types (CC 2.1.318 hooks reference) that report something rather than wait on the
+    // user, so they must not flip the session to "question". Denylist, not allowlist: an absent type
+    // (older CC) or a future one keeps the original every-Notification-needs-input behavior.
+    private static let informationalNotifications: Set<String> = [
+        "auth_success", "elicitation_complete", "elicitation_response", "agent_completed",
+        "quota_auto_resume_fired", "plugin_notification",
+    ]
+
     private static let isoStamp = ISO8601DateFormatter()
     private static let hm: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
 
@@ -363,7 +371,10 @@ final class ClaudeCodeProvider: AgentProvider {
                 ensureBranch(sessionId: sid, cwd: cwd)
             }
         case "Notification":
-            if !sid.isEmpty { emitSession(.needsInput(nativeKey: sid, cwd: cwd)) }
+            let type = (body["notification_type"] as? String) ?? ""
+            if !sid.isEmpty && !Self.informationalNotifications.contains(type) {
+                emitSession(.needsInput(nativeKey: sid, cwd: cwd))
+            }
         case "SessionEnd":
             if !sid.isEmpty {
                 seen.removeValue(forKey: sid)
@@ -471,8 +482,9 @@ final class ClaudeCodeProvider: AgentProvider {
         }
     }
 
-    func applySessionHookForTest(event: String, sessionId: String, cwd: String) {
-        queue.sync { self.applySessionHook(event: event, body: ["session_id": sessionId, "cwd": cwd, "hook_event_name": event]) }
+    func applySessionHookForTest(event: String, sessionId: String, cwd: String, extra: [String: Any] = [:]) {
+        let body = extra.merging(["session_id": sessionId, "cwd": cwd, "hook_event_name": event]) { _, base in base }
+        queue.sync { self.applySessionHook(event: event, body: body) }
     }
 
     private static func gitBranch(_ cwd: String) -> String? {

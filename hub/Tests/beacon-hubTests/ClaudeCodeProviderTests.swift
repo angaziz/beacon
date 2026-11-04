@@ -157,6 +157,51 @@ final class ClaudeCodeProviderTests: XCTestCase {
         XCTAssertFalse(sink.entries.isEmpty, "a passive 'asking a question' entry is surfaced")
     }
 
+    // CC 2.1.318 sends notification_type on every Notification; only the ones that wait on the user may
+    // mark the session as asking a question. Absent (older CC) and unknown types keep needs-input.
+    func testNotificationTypeDecidesNeedsInput() {
+        let cases: [(type: String?, needsInput: Bool)] = [
+            (nil, true),
+            ("permission_prompt", true),
+            ("idle_prompt", true),
+            ("elicitation_dialog", true),
+            ("agent_needs_input", true),
+            ("some_future_type", true),
+            ("auth_success", false),
+            ("elicitation_complete", false),
+            ("elicitation_response", false),
+            ("agent_completed", false),
+            ("quota_auto_resume_fired", false),
+            ("plugin_notification", false),
+        ]
+        for c in cases {
+            let (p, sink) = makeProvider()
+            var extra: [String: Any] = ["message": "Claude needs your permission"]
+            if let type = c.type { extra["notification_type"] = type }
+            p.applySessionHookForTest(event: "Notification", sessionId: "n1", cwd: "/x/api", extra: extra)
+            drainMain()
+            let expected: [ProviderSessionEvent] = c.needsInput ? [.needsInput(nativeKey: "n1", cwd: "/x/api")] : []
+            XCTAssertEqual(sink.sessions, expected, "notification_type=\(c.type ?? "nil")")
+            XCTAssertEqual(sink.entries.count, 1, "every Notification still logs an activity entry")
+        }
+    }
+
+    // CC reports a forked session (`--fork-session`, `/branch`) as SessionStart source "fork" (since CC
+    // 2.1.214; it was "resume" before), so the installed matchers must name it or a fork never reaches
+    // the hub's SessionStart handlers (host context for tap-to-focus included).
+    func testSnippetSessionStartMatchersCoverForkedSessions() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("claude-code-settings.snippet.json")
+        let snippet = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let wrappers = try XCTUnwrap((snippet["hooks"] as? [String: Any])?["SessionStart"] as? [[String: Any]])
+        XCTAssertFalse(wrappers.isEmpty)
+        for w in wrappers {
+            let sources = Set(((w["matcher"] as? String) ?? "").split(separator: "|").map(String.init))
+            XCTAssertTrue(sources.isSuperset(of: ["startup", "resume", "fork"]), "matcher \(sources)")
+        }
+    }
+
     // Quit drain denies every held prompt and clears the queue.
     func testDrainDeniesEveryHeldPrompt() {
         let (p, _) = makeProvider()
