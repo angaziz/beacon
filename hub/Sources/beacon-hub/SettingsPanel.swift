@@ -221,7 +221,7 @@ struct StatusRow<Trailing: View>: View {
         ProviderToggle(id: "claude", label: "Claude", supportsUsage: true, supportsBuddy: true,
                        usageOn: true, buddyOn: true, hooks: .ok),
         ProviderToggle(id: "codex", label: "Codex", supportsUsage: true, supportsBuddy: false,
-                       usageOn: true, buddyOn: true, hooks: .bad),
+                       usageOn: true, buddyOn: true, hooks: .ok),
     ]
     return SettingsPanel(model: m)
 }

@@ -3,7 +3,7 @@
 The menubar app that feeds the Beacon device its private-plane data over Bluetooth LE:
 
 - **AI Usage** — reads Claude Code and Codex usage/limits on the Mac and streams the normalized numbers to the device (Claude via the Claude Code statusline `rate_limits`; Codex via `~/.codex`).
-- **Coding Buddy** — bridges Claude Code and Codex session state and tool-permission prompts to the device, and mirrors Pi live sessions for tap-to-focus. Claude/Codex decisions are enforced on the Mac.
+- **Coding Buddy** — bridges Claude Code session state and tool-permission prompts to the device. Decisions are enforced on the Mac.
 - **Secrets stay here.** Tokens and credentials never leave the Mac; the BLE frames carry only normalized usage values and prompt metadata. Protocol + policies: [`CONTRACT.md`](CONTRACT.md).
 
 <img src="../docs/assets/hub.png" alt="Beacon Hub menubar panel" width="380">
@@ -41,7 +41,14 @@ What the hooks actually do:
 - The hook entries run the hook shim ([`statusline-shim/beacon-claude-hook`](statusline-shim/beacon-claude-hook), installed to `~/.beacon/`), which POSTs Claude Code lifecycle events (session state, tool-permission prompts) to the hub at `127.0.0.1:8765` — see [`claude-code-settings.snippet.json`](claude-code-settings.snippet.json). When the hub is not running the shim exits silently, so Claude Code prints nothing (a plain `type: http` hook would report `connect ECONNREFUSED` on every event).
 - The statusline shim ([`statusline-shim/beacon-statusline`](statusline-shim/beacon-statusline), installed to `~/.beacon/`) forwards the `rate_limits` payload Claude Code already computes, which is where the usage numbers come from.
 
-For **Codex** and **Pi**, use the per-provider **Set up** chip in Settings instead of **Install hooks** (that button is Claude-only): Codex gets a managed block in `~/.codex/config.toml`; Pi gets a managed extension at `~/.pi/agent/extensions/beacon.ts`. Both stay quiet when the hub is not running. Pi mirrors sessions and supports device approve/deny: standalone policy when pi-permission-system is absent, or the appended `beacon` authorizer when it is installed. Pi Set up backs up and updates its `authorizerChain`; path and external-directory asks remain local to pi-permission-system.
+**Codex** is usage-only: the hub reads `~/.codex/auth.json` directly, so there is nothing to set up. Claude Code is the only Coding Buddy provider.
+
+### Upgrading from a hub with the Codex or Pi buddy
+
+Earlier hubs could also install a Codex hook and a Pi extension. The hub no longer serves their routes and does not remove them for you. Neither blocks its CLI: the Codex shim gets an empty (no-verdict) reply, so Codex asks in its own TUI; the Pi extension falls back to a local prompt (its own Allow/Deny for bash and out-of-project writes, or pi-permission-system's). They still run on every event, so remove them:
+
+- **Codex:** in `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`), delete the block from `# >>> beacon-codex-hooks (managed by Beacon Hub; do not edit) >>>` through `# <<< beacon-codex-hooks (managed by Beacon Hub; do not edit) <<<`, plus any `[hooks.state]` line ending in `# beacon:managed`. Then delete `~/.beacon/beacon-codex-hook`. Edit the config first: if the shim is gone while the block remains, Codex tries to run a missing command.
+- **Pi:** delete `~/.pi/agent/extensions/beacon.ts`. If you use pi-permission-system, also remove `"beacon"` from `authorizerChain` in `~/.pi/agent/extensions/pi-permission-system/config.json`.
 
 ## Day to day
 

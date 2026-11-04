@@ -4,7 +4,7 @@ import ServiceManagement
 import BeaconHubKit
 
 // Wires the subsystems together (design 2026-07-19): a shared LocalIngestServer + registered
-// AgentProviders (Claude, Codex, pi) feed a ProviderMux, which merges per-provider usage/sessions/prompts
+// AgentProviders (Claude, Codex) feed a ProviderMux, which merges per-provider usage/sessions/prompts
 // into a single Usage + BuddyState + [Session]. We serialize those to StatusFrame/SessionsFrame and push
 // to the device over BLE, resending the full frame on (re)connect and on a 30 s heartbeat. The usage
 // poller iterates usage-enabled providers; per-provider toggles (ProviderSettings) drive live setEnabled.
@@ -17,8 +17,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let ingest = LocalIngestServer()
     private var providers: [AgentProvider] = []
     private var claude: ClaudeCodeProvider?            // typed ref for drain + device-connected + statusline
-    private var codex: HookBuddyProvider?              // typed ref for drain + device-connected
-    private var pi: HookBuddyProvider?                 // typed ref for device-connected
     private var poller: UsagePoller!                   // built once providers exist
     private let location = LocationProvider()
     private let tickerStore = TickerConfigStore()   // desired ticker list + monotonic rev (issue #92)
@@ -98,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let drainers = [claude?.drainHeldPrompts, codex?.drainHeldPrompts, pi?.drainHeldPrompts].compactMap { $0 }
+        let drainers = [claude?.drainHeldPrompts].compactMap { $0 }
         guard !drainers.isEmpty else { return .terminateNow }
         var replied = false
         let reply = { if !replied { replied = true; NSApp.reply(toApplicationShouldTerminate: true) } }
@@ -249,49 +247,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             else { return .unknown }
             return p.resolvePrompt(nativeID: nid, approve: approve)
         }
-        mux.resolvePromptAsyncHandler = { [weak self] pid, nid, approve, completion in
-            guard let self, let p = self.providers.first(where: { $0.descriptor.id == pid }) else {
-                completion(.unknown)
-                return
-            }
-            p.resolvePrompt(nativeID: nid, approve: approve, completion: completion)
-        }
 
         ingest.onStatus = { [weak self] msg in Task { @MainActor in self?.menubar.setBridgeAlert(msg) } }
 
         let claude = ClaudeCodeProvider(server: ingest, usageSession: usageSession)
         claude.onClaudeUsage = { [weak self] c in Task { @MainActor in self?.onStatuslineClaude(c) } }
         claude.onStatuslineActivity = { [weak self] in Task { @MainActor in self?.onStatuslineActivity() } }
-        // Providers report a prompt they couldn't show (device offline); the message already names the
+        // Claude reports a prompt it couldn't show (device offline); the message already names the
         // agent. Cleared on reconnect in refreshLink.
-        let undeliverable: (String) -> Void = { [weak self] message in
+        claude.onPromptUndeliverable = { [weak self] message in
             Task { @MainActor in self?.menubar.setAlert(message) }
         }
-        claude.onPromptUndeliverable = undeliverable
         self.claude = claude
 
-        let codex = HookBuddyProvider(
-            descriptor: ProviderDescriptor(id: "codex", label: "CODEX",
-                                           capabilities: [.usage, .sessions, .prompts]),
-            routePath: CodexHooks.routePath,
-            capSeconds: 575,
-            server: ingest,
-            usageSource: CodexUsageProvider(session: usageSession))
-        codex.onPromptUndeliverable = undeliverable
-        self.codex = codex
-
-        // Pi mirrors interactive session state only. Its permission-system extension owns terminal
-        // approvals and offers no external resolver, so this provider has no usage or prompts plane.
-        let pi = HookBuddyProvider(
-            descriptor: ProviderDescriptor(id: "pi", label: "PI", capabilities: [.sessions, .prompts]),
-            routePath: PiHooks.routePath,
-            capSeconds: 26,
-            server: ingest,
-            permissionRoute: "/pi/permission",
-            passThroughOperationalFailures: true)
-        self.pi = pi
-
-        providers = [claude, codex, pi]
+        providers = [claude, CodexProvider(usageSession: usageSession)]
 
         for p in providers {
             descriptors[p.descriptor.id] = p.descriptor
@@ -393,8 +362,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menubar.setAlert(nil)   // device reachable again => clear any undeliverable-prompt alert.
         }
         claude?.setDeviceConnected(connected)
-        codex?.setDeviceConnected(connected)
-        pi?.setDeviceConnected(connected)
         poller.setDeviceConnected(connected)   // #64: back off the usage poll cadence while disconnected.
 
         // Drive the Settings connection checks from the SAME phase stream (no second CBCentralManager):
@@ -414,13 +381,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .permission(let id, let approve):
             // Ack the truth (issue #8): only ok:true when the decision actually applied. A late/
             // superseded decision => ok:false; an id we never minted => err.
-            mux.resolve(shortId: id, approve: approve) { [weak self] outcome in
-                guard let self else { return }
-                switch outcome {
-                case .applied: self.central.send(HubAck.ack(id: id, ok: true))
-                case .late:    self.central.send(HubAck.ack(id: id, ok: false))
-                case .unknown: self.central.send(HubAck.err(id: id, reason: "unknown_prompt_id"))
-                }
+            switch mux.resolve(shortId: id, approve: approve) {
+            case .applied: central.send(HubAck.ack(id: id, ok: true))
+            case .late:    central.send(HubAck.ack(id: id, ok: false))
+            case .unknown: central.send(HubAck.err(id: id, reason: "unknown_prompt_id"))
             }
         case .configAck(let rev, let ok, let count, let err):
             // Ignore stale acks: a later edit already bumped our rev, so an ack for an older push no

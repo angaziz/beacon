@@ -4,7 +4,7 @@ import Network
 // The shared localhost HTTP/1.1 ingest server (design 2026-07-19), generalized out of ClaudeCodeBridge.
 // One NWListener on 127.0.0.1:8765 (fixed, so hooks use a static URL) with the resolved port written to
 // ~/.beacon-hub/port. Providers register path-prefixed routes; Claude keeps /hook /statusline /session
-// for shim back-compat, Codex will use /codex/hook. All route handlers run on `queue`, so a provider can
+// for shim back-compat. All route handlers run on `queue`, so a provider can
 // use `queue` as its own state-confinement queue. Logs never carry hint/command strings (tech.md 9).
 final class LocalIngestServer {
     // A matched POST. Handlers respond immediately (respondJSON/respondData) or capture `conn` to hold

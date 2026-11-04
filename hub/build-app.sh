@@ -150,8 +150,6 @@ cp statusline-shim/beacon-statusline "$APP/Contents/Resources/"
 chmod +x "$APP/Contents/Resources/beacon-statusline"
 cp statusline-shim/beacon-session "$APP/Contents/Resources/"
 chmod +x "$APP/Contents/Resources/beacon-session"
-cp statusline-shim/beacon-codex-hook "$APP/Contents/Resources/"   # Codex buddy hook shim (HooksInstaller resolves via Bundle.main)
-chmod +x "$APP/Contents/Resources/beacon-codex-hook"
 cp statusline-shim/beacon-claude-hook "$APP/Contents/Resources/"  # Claude Code hook shim (replaces the type:http hooks)
 chmod +x "$APP/Contents/Resources/beacon-claude-hook"
 
