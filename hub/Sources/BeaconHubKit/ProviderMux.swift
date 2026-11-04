@@ -39,11 +39,6 @@ public final class ProviderMux: ProviderSink {
     // Device permission decisions dispatch into the concrete provider (app wires this; kit stays
     // networking-free). `open` uses sessionRoute below -- focus itself runs async in the app.
     public var resolvePromptHandler: ((_ providerID: String, _ nativeID: String, _ approve: Bool) -> ResolveOutcome)?
-    // Optional async form for providers that must confirm the agent accepted a decision before the
-    // device is acked. Keeping the synchronous handler preserves Claude/Codex behavior and tests.
-
-    public var resolvePromptAsyncHandler: ((_ providerID: String, _ nativeID: String, _ approve: Bool,
-                                            _ completion: @escaping (ResolveOutcome) -> Void) -> Void)?
 
     private let now: () -> Date
     private let registry: SessionRegistry
@@ -98,24 +93,14 @@ public final class ProviderMux: ProviderSink {
     // --- device command routing ---
 
     public func resolve(shortId: String, approve: Bool) -> ResolveOutcome {
-        var outcome: ResolveOutcome = .unknown
-        resolve(shortId: shortId, approve: approve) { outcome = $0 }
-        return outcome
-    }
-
-    // The callback may complete later for pi's commit-before-ack flow. Callers that need an immediate
-    // outcome keep using resolve(shortId:approve:), which remains byte-identical for sync providers.
-    public func resolve(shortId: String, approve: Bool, completion: @escaping (ResolveOutcome) -> Void) {
         switch broker.routeForResolve(shortId) {
         case .front(let providerID, let nativeID):
-            if let async = resolvePromptAsyncHandler {
-                async(providerID, nativeID, approve, completion)
-            } else {
-                completion(resolvePromptHandler?(providerID, nativeID, approve) ?? .unknown)
-            }
-        case .notFront: completion(.unknown)
-        case .late:     completion(.late)
-        case .unknown:  completion(.unknown)
+            // The provider fulfills its held connection and calls didEndPrompt, which removes the prompt
+            // from the broker and republishes; here we only relay its truthful outcome for the ack.
+            return resolvePromptHandler?(providerID, nativeID, approve) ?? .unknown
+        case .notFront: return .unknown   // device only shows the front; a queued-id decision is illegitimate
+        case .late:     return .late
+        case .unknown:  return .unknown
         }
     }
 
@@ -162,7 +147,7 @@ public final class ProviderMux: ProviderSink {
     public func provider(_ id: String, didRaisePrompt nativeID: String, tool: String, hint: String,
                          sessionNativeKey: String?) {
         // A held prompt is liveness + a blocked session; register it so it shows as .waiting even if this
-        // is the session's first signal (Codex B2 parity).
+        // is the session's first signal.
         if let key = sessionNativeKey, !key.isEmpty {
             registry.touchActivity(providerID: id, sessionId: key, cwd: nil, now: now())
         }

@@ -7,7 +7,7 @@
 # Wired into ~/.claude/settings.json by the installer (PermissionRequest + SessionStart/Stop/Notification/
 # SessionEnd). PermissionRequest is synchronous -- the hub HOLDS the connection until the device decides --
 # so it gets a long curl budget; lifecycle events are fire-and-forget with a 1s cap so a stopped hub never
-# stalls Claude Code. Mirrors beacon-codex-hook; the stdin/stdout contract is the same on both sides.
+# stalls Claude Code.
 #
 # FAIL-OPEN: if the hub is unreachable (not running / connection refused / timeout), print NOTHING and
 # exit 0. Empty stdout is "no verdict" to Claude Code, so it falls through to its own interactive prompt.

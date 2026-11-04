@@ -88,7 +88,7 @@ final class ProviderMuxTests: XCTestCase {
         mux.register(ProviderDescriptor(id: "b", label: "B", capabilities: [.sessions, .prompts]))
         mux.provider("claude", didRaisePrompt: "c1", tool: "Bash", hint: "x", sessionNativeKey: "s")
         mux.provider("b", didRaisePrompt: "b1", tool: "Write", hint: "y", sessionNativeKey: "t")
-        XCTAssertEqual(box.prompts, 2, "each buddy-enabled provider's raise cues the user (Codex parity, #121)")
+        XCTAssertEqual(box.prompts, 2, "each buddy-enabled provider's raise cues the user (#121)")
 
         mux.setEnabled("claude", EnabledCapabilities(usage: true, buddy: false))
         mux.provider("claude", didRaisePrompt: "c2", tool: "Bash", hint: "z", sessionNativeKey: "s")

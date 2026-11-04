@@ -226,8 +226,8 @@ Claude Code supports native **`"type":"http"`** hooks, but Beacon does **not** u
 unreachable http hook as a per-event error line (`... hook [http://127.0.0.1:8765/hook] failed: connect
 ECONNREFUSED`), which is noise on every event whenever the hub is not running. All Beacon events go
 through a `type:"command"` shim, `~/.beacon/beacon-claude-hook` (installed alongside the statusline
-shim), which curls the same endpoint and always exits 0 — an unreachable hub is silent. Same
-stdin/stdout contract as `beacon-codex-hook` (§C.5): CC spawns the shim with the event JSON on stdin and
+shim), which curls the same endpoint and always exits 0 — an unreachable hub is silent.
+CC spawns the shim with the event JSON on stdin and
 reads the decision from stdout; empty stdout = no verdict (interactive: fail-open to CC's own prompt;
 `-p`/non-interactive: CC denies, see below). Timers are
 ordered `hub 590 < curl 595 < CC hook timeout 600` so the hub's fail-closed deny always lands while the
@@ -293,87 +293,6 @@ neither window counts as absent (oauth fallback). The shim **wraps the user's ex
 statusline renderer** (forwards the JSON to `127.0.0.1:8765/statusline`, then delegates to the real
 command passed as args), so the user's status bar is unchanged. Bind port is the fixed **8765**.
 
-### C.5 Codex hooks (buddy) — VERIFIED (openai/codex codex-rs @ rust-v0.160.0 a956835d; codex-cli 0.160.0)
-
-Codex ships a Claude-compatible command-hook system (feature `hooks`, stable + default-on). The Codex
-buddy adapter bridges it with a shim, `~/.beacon/beacon-codex-hook` (installed alongside the Claude
-statusline shim). Codex spawns the shim per event with the event JSON on stdin and reads the decision
-from stdout.
-
-**Install (managed block in `~/.codex/config.toml`, honors `CODEX_HOME`).** Idempotent, marker-delimited
-(`# >>> beacon-codex-hooks (managed by Beacon Hub; do not edit) >>>` ... `<<<`); everything outside the
-markers is preserved and a timestamped `.bak.<ts>` is written before any change. The block wires five
-events, one matcher group + one command each:
-
-```toml
-[[hooks.SessionStart]]
-hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook" }]
-[[hooks.UserPromptSubmit]]
-hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook" }]
-[[hooks.Stop]]
-hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook" }]
-[[hooks.SessionEnd]]
-hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook" }]
-[[hooks.PermissionRequest]]
-hooks = [{ type = "command", command = "/Users/<you>/.beacon/beacon-codex-hook", timeout = 590 }]
-
-[hooks.state]
-"<canonical config.toml path>:permission_request:0:0" = { enabled = true, trusted_hash = "sha256:..." }
-# ... one trusted_hash entry per event ...
-```
-
-**stdin (Codex -> shim, snake_case).** `{session_id, turn_id, cwd, hook_event_name, model,
-permission_mode, tool_name, tool_input, ...}`. `SessionStart` adds `source` (startup|resume|clear|
-compact|fork); `SessionEnd` adds `reason`.
-
-**stdout (shim -> Codex).** Byte-identical to the Claude `PermissionRequest` shape (§C.3):
-`{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"|"deny",
-"message":"..."}}}`. Empty stdout or `{}` = **no verdict** (Codex falls through to its own interactive
-TUI prompt). Any deny wins the fold; exit 2 + stderr also denies.
-
-**Lifecycle -> session state.** `SessionStart` => register (label = cwd basename + git branch),
-`UserPromptSubmit` => working, `Stop` => attention, `SessionEnd` => remove. These POST fire-and-forget
-(shim `curl -m 1`); the hub replies `{"ok":true}`.
-
-**PermissionRequest hold / timeout.** The shim POSTs synchronously (`curl --max-time 585`) and the hub
-HOLDS the connection until the device decides, then returns the allow/deny decision. The hub arms a
-fail-closed 575 s cap; the timers are strictly ordered `hub 575 < curl 585 < Codex hook 590` so the hub
-always fires first while the socket is still open (its deny reaches Codex). A cap equal to the curl
-budget would fire only after curl had already closed the socket, degrading to fail-OPEN passthrough --
-curl's clock starts before the hub even receives the request. If the held connection drops first, the
-user answered in the Codex TUI => the hub withdraws that prompt silently.
-
-**Pass-through (never auto-deny what the user never saw).** Coding-Buddy OFF, a still-held prompt at
-toggle-off, **or an unreachable device** (offline on arrival, or the link dropping while the prompt is
-held) returns `{}` (no verdict) so Codex prompts locally; the hub raises a menubar alert naming the
-agent ("Beacon offline - CODEX not gated"). Hub unreachable is handled in the shim: connection refused /
-timeout => print nothing, exit 0 (fail-open to the Codex TUI).
-
-**Trust (CRITICAL, source-verified + reproduced against codex-cli 0.160.0).** A user-config command hook
-only RUNS when Codex marks it `Trusted`, i.e. its `[hooks.state]` `trusted_hash` equals the hash Codex
-derives (`codex-rs/hooks/src/engine/discovery.rs`: `enabled && (bypass || Managed | Trusted)`; else the
-hook is discovered but never dispatched). Codex derives the hash (`config/src/fingerprint.rs
-version_for_toml`) as `sha256:` + hex(sha256(canonical compact JSON of the normalized identity
-`{"event_name":"<label>","hooks":[{"async":false,"command":"<cmd>","timeout":<normalized>,"type":"command"}]}`,
-object keys sorted). Normalized timeouts: 600 for SessionStart/UserPromptSubmit/Stop, 1 for SessionEnd,
-590 for PermissionRequest. The state key is `<fs::canonicalize(config.toml)>:<event label>:<group>:<handler>`
-(group/handler are 0 for our single-group-per-event block). The installer computes and writes these
-hashes, so a fresh install is immediately trusted with **no interactive trust step** (verified end to end:
-`hooks/list` reports every Beacon hook `trusted`). One-time recovery, only if Codex ever reports the
-hooks as untrusted (e.g. a Codex build whose hashing changed, or a pre-existing `[[hooks.<Event>]]`
-group shifting our group index): re-run install, or trust the Beacon hooks once from the Codex TUI
-`/hooks` menu.
-
-### C.6 Pi extension (session mirror)
-
-Pi auto-discovers the Beacon-managed `~/.pi/agent/extensions/beacon.ts` extension. The installer writes a timestamped backup before replacing an unrecognized file; a content-equality check (modulo surrounding whitespace) identifies the current managed source and offers reinstall for edited, truncated, or version-mismatched files.
-
-**Lifecycle -> session state.** Interactive (`ctx.hasUI`) events POST JSON to `http://127.0.0.1:8765/pi/hook`: `session_start` sends `SessionStart` with `session_id`, `cwd`, `host_app`, `focus_url`, and `bundle_id`; `agent_start` sends `UserPromptSubmit`; `agent_settled` sends `Stop`; and `session_shutdown` awaits a bounded `SessionEnd` POST. The native session id is the session-file basename (stable across resume), with a `pi-<timestamp>` fallback. On a new session id the extension ends the prior session first. Pi's `agent_settled`, rather than `agent_end`, means no retry, compaction retry, or queued continuation remains.
-
-**Permission gate.** Without pi-permission-system, `beacon.ts` asks for bash calls and writes/edits outside the project, racing the local Allow/Deny selector with `/pi/permission`; infrastructure failures silently pass through to the selector. With pi-permission-system, Beacon registers the `beacon` authorizer and the installer appends it to `authorizerChain` with a timestamped backup. Service discovery reads the process-global slots directly: pps >= 27 keys one service per session under `Symbol.for("@gotgenes/pi-permission-system:session-services")` (looked up by the `permissions:ready` payload's `sessionId`, else `ctx.sessionManager.getSessionId()`), with the pps 25 single `…:service` slot as fallback. `permissions:ready` may repeat per session, so the authorizer is registered once per service identity. The installer validates only `authorizerChain` (an array of strings) and preserves every other config key, so keys added by newer pps releases do not block setup. `path` and `external_directory` defer immediately so pps keeps their local prompt; all other Beacon failures defer to pps. Pi still has no usage entry or question card. The extension harness is `node --experimental-strip-types hub/pi-extension-tests/run.mjs` (see [`pi-extension-tests/README.md`](pi-extension-tests/README.md)).
-
-**Truthful device ack.** Before a tool-call hold, the extension POSTs `{"probe":true}` to `/pi/permission`; the hub responds immediately with `{"device":true}` when gating is available, `{"device":false}` when the device is offline, or `{"unavailable":true}` when Pi gating is disabled or draining. A successful probe is only reachability, not a decision. The subsequent tool-call request is held without a 400 ms timer. After a device choice, the hub returns `{"id":"<native-id>","approve":true|false}` to the extension but holds the BLE command ack for a commit POST `{"id":"<native-id>","applied":true|false}`. `applied:true` yields the unchanged device `{"ack":"<short-id>","ok":true}`; `applied:false`, a duplicate/late commit, an undeliverable held request, or no commit within 2 s yields `ok:false`. Pi asks that cannot be held return `{"device":false}` for an offline device and `{"unavailable":true}` for disabled, cap, drain, or quit states. Codex retains its existing `{}` pass-through wire shape. This prevents a device success state when its decision lost the local-TUI race.
-
 ## D. Hub-side policies
 
 - **Short id mapping (`records.h` `BUDDY_ID_LEN`=24 => <=23 chars):** the hub mints a short id per
@@ -387,14 +306,14 @@ Pi auto-discovers the Beacon-managed `~/.pi/agent/extensions/beacon.ts` extensio
   answered the permission in the Mac terminal instead of on the device -- the hub clears the device
   prompt and advances the queue with NO deny and NO "too late" (`watchForClose`/`withdraw`,
   `ClaudeCodeBridge`). The answer applied on the Mac; the device must not claim otherwise.
-- **Timing (per provider):** design target < 5 s round-trip. Hold caps differ by caller deadline — Claude/Codex
-  ~590 s hold (below CC's/Codex's ~600 s hook timeout; Codex chain `hub 575 < curl 585 < hook 590`).
+- **Timing:** design target < 5 s round-trip. Claude ~590 s hold (below CC's ~600 s hook timeout;
+  chain `hub 590 < curl 595 < hook 600`, §C.3).
   Only a queued prompt's own cap expiry denies it (silently);
   `deny` + label on cap (`tech.md` §8, FR-BUDDY-3).
 - **Undeliverable prompt (device offline) => pass-through, never deny.** A prompt that arrives while the
   link is down, or is still held when the link drops, is answered `{}` (no verdict) and the hub raises a
-  menubar alert "Beacon offline - <AGENT> not gated" (cleared on reconnect), for the gating providers
-  (claude, codex). Denying a prompt the user never saw fails the tool call with nothing to act on;
+  menubar alert "Beacon offline - <AGENT> not gated" (cleared on reconnect), for the gating provider
+  (claude). Denying a prompt the user never saw fails the tool call with nothing to act on;
   fail-closed applies to prompts the device DID show (cap expiry) and to the quit drain, which still deny.
 - **Logging:** id + decision + timestamp only. NEVER the command `hint` or any token (`tech.md` §9).
 
@@ -409,8 +328,8 @@ Pi auto-discovers the Beacon-managed `~/.pi/agent/extensions/beacon.ts` extensio
   hooks are detected (a green **Ready** once installed); it runs only
   that provider's install (`HooksInstaller.install(providerID:)` — Claude shells out to
   `build-app.sh install-hooks` and installs the statusline shim to the no-space path
-  `~/.beacon/beacon-statusline` + the hook shim to `~/.beacon/beacon-claude-hook`; Codex writes its
-  managed `~/.codex/config.toml` block; Pi writes its managed `~/.pi/agent/extensions/beacon.ts` extension).
+  `~/.beacon/beacon-statusline` + the hook shim to `~/.beacon/beacon-claude-hook`; Codex is usage-only
+  and has nothing to set up, so it always reads **Ready**).
   Claude detection requires BOTH the `PermissionRequest` hook (`command` == the installed
   `~/.beacon/beacon-claude-hook`, exact match) AND a `statusLine.command` containing the statusline
   shim — not any beacon hook anywhere. A legacy `url=http://127.0.0.1:8765/hook` hook reads as NOT
