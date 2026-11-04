@@ -12,13 +12,13 @@
     ],
     "SessionStart": [
       {
-        "matcher": "startup|resume",
+        "matcher": "startup|resume|fork",
         "hooks": [
           { "type": "command", "command": "__BEACON_HOOK__", "timeout": 5 }
         ]
       },
       {
-        "matcher": "startup|resume|clear|compact",
+        "matcher": "startup|resume|clear|compact|fork",
         "hooks": [
           { "type": "command", "command": "__BEACON_SESSION__", "timeout": 5 }
         ]
