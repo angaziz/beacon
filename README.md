@@ -81,7 +81,7 @@ Just validating a fresh board? Flash the bring-up spike first — [`docs/spikes/
 
 ## The macOS hub
 
-Beacon Hub is a small macOS menubar app — the device's private-data plane. It reads your Claude Code + Codex usage, bridges Claude Code and Codex tool-permission prompts to the device over a bonded Bluetooth link, and tracks live sessions across all three agents. Your Claude/Codex credentials stay on the Mac; only normalized percentages, reset times, and prompt text ever cross BLE.
+Beacon Hub is a small macOS menubar app — the device's private-data plane. It reads your Claude Code + Codex usage, bridges Claude Code tool-permission prompts to the device over a bonded Bluetooth link, and tracks live Claude Code sessions. Your Claude/Codex credentials stay on the Mac; only normalized percentages, reset times, and prompt text ever cross BLE.
 
 It's also where you **curate the Finance screen**: search Binance + Yahoo from the menubar, pick the tickers you care about, and they sync to the device over BLE and apply on the spot — no firmware edit, no re-flash, no reboot.
 
